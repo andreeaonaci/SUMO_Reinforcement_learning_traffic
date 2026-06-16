@@ -17,7 +17,8 @@ dependencies = [
     'pandas',
     'pillow',
     'sumolib>=1.14.0',
-    'traci>=1.14.0'
+    'traci>=1.14.0',
+    'torch>=1.13.1'
 ]
 dynamic = ["version"]
 

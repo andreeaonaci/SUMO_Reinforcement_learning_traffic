@@ -289,47 +289,45 @@ class SumoEnvironment(gym.Env):
         return self.sumo.simulation.getTime()
     
     def step(self, action):
-        if self.truncations[self.agent_selection] or self.terminations[self.agent_selection]:
-            return self._was_dead_step(action)
-
-        agent = self.agent_selection
-
-        # FORCE scalar int
-        if isinstance(action, torch.Tensor):
-            if action.numel() != 1:
-                raise ValueError("Action must be a scalar.")
-            action = int(action.item())
-        else:
-            action = int(action)
-
-        if not self.action_spaces[agent].contains(action):
-            raise Exception(
-                f"Action for agent {agent} must be in Discrete({self.action_spaces[agent].n}). "
-                f"It is currently {action}"
-            )
-
-        if not self.env.fixed_ts:
-            self.env._apply_actions({agent: action})
-
-        if self._agent_selector.is_last():
-            if not self.env.fixed_ts:
-                self.env._run_steps()
+        if self.single_agent:
+            if isinstance(action, torch.Tensor):
+                if action.numel() != 1:
+                    raise ValueError("Action must be a scalar.")
+                action = int(action.item())
             else:
-                for _ in range(self.env.delta_time):
-                    self.env._sumo_step()
+                action = int(action)
 
-            self.env._compute_observations()
-            self.rewards = self.env._compute_rewards()
-            self.compute_info()
+            if not self.action_space.contains(action):
+                raise Exception(
+                    f"Action must be in Discrete({self.action_space.n}). It is currently {action}"
+                )
+
+            if not self.fixed_ts:
+                self._apply_actions(action)
         else:
-            self._clear_rewards()
+            if not isinstance(action, dict):
+                raise ValueError("Action must be a dict for multi-agent SUMO environment.")
+            for ts, act in action.items():
+                if ts not in self.ts_ids:
+                    raise KeyError(f"Unknown traffic signal id: {ts}")
+                if self.traffic_signals[ts].time_to_act:
+                    self._apply_actions({ts: act})
 
-        done = self.env._compute_dones()["__all__"]
-        self.truncations = {a: done for a in self.agents}
+        if not self.fixed_ts:
+            self._run_steps()
+        else:
+            for _ in range(self.delta_time):
+                self._sumo_step()
 
-        self.agent_selection = self._agent_selector.next()
-        self._cumulative_rewards[agent] = 0
-        self._accumulate_rewards()
+        observations = self._compute_observations()
+        rewards = self._compute_rewards()
+        info = self._compute_info()
+        dones = self._compute_dones()
+
+        if self.single_agent:
+            return observations[self.ts_ids[0]], rewards[self.ts_ids[0]], dones["__all__"], info
+
+        return observations, rewards, dones, info
 
 
     def _run_steps(self):

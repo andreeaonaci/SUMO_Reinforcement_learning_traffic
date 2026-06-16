@@ -1,0 +1,5 @@
+name: city_2
+mode: mock
+obs_dim: 6
+action_dim: 3
+seed: 2
