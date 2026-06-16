@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple, Union
 import numpy as np
+import time
 
 try:
     import torch

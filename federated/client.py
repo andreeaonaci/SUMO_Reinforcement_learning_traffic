@@ -3,33 +3,35 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
 class FederatedClient:
-    """Client that performs local RL training and returns model updates.
-
-    The client expects an `agent_factory` that given a model_state_dict returns
-    an object with `load_state_dict`, `train_on_env(state_dict, episodes)`
-    or a `train` method. For simplicity, `train_on_env` returns (state_dict, n_steps).
-    """
-
     def __init__(self, name: str, env_builder, agent_builder, local_episodes: int = 5):
         self.name = name
-        self.env_builder = env_builder
         self.agent_builder = agent_builder
         self.local_episodes = local_episodes
+        # construieste env O SINGURA DATA, nu la fiecare local_train
+        self._env = env_builder()
 
-    def local_train(self, global_state: Dict) -> Tuple[Dict, int]:
+    def local_train(self, global_state):
         logger.info("Client %s starting local training for %d episodes", self.name, self.local_episodes)
         agent = self.agent_builder()
         agent.load_state_dict(global_state)
-        env = self.env_builder()
-        # agent.train should return number of samples/steps used for weighting
+        # refoloseste acelasi env intre runde
         try:
-            state_dict, n_samples = agent.train(env, episodes=self.local_episodes)
-        finally:
-            # allow env cleanup
-            if hasattr(env, "close"):
-                env.close()
+            state_dict, n_samples = agent.train(self._env, episodes=self.local_episodes)
+        except Exception:
+            # daca env-ul s-a stricat, incearca sa-l inchida si ridica eroarea
+            try:
+                self._env.close()
+            except Exception:
+                pass
+            raise
 
         logger.info("Client %s finished local training: samples=%d", self.name, n_samples)
         return state_dict, n_samples
+
+    def close(self):
+        if hasattr(self, '_env'):
+            try:
+                self._env.close()
+            except Exception:
+                pass

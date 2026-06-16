@@ -20,25 +20,30 @@ class FederatedServer:
         self.evaluator = evaluator
 
     def run(self, rounds: int, eval_every: int = 1, device: str = "cpu") -> Dict[str, Any]:
-        history = {"round": [], "eval_reward": []}
+        history = {"round": [], "eval_reward": [], "client_samples": []}
         for r in range(1, rounds + 1):
             logger.info("Starting round %d/%d", r, rounds)
-            # broadcast
             global_state = self.global_model.state_dict()
             updates = []
+            total_samples = 0
             for c in self.clients:
                 state_dict, n_samples = c.local_train(global_state)
                 updates.append((state_dict, n_samples))
+                total_samples += n_samples
 
-            # aggregate
             agg_state = fed_avg(updates)
             self.global_model.load_state_dict(agg_state)
 
-            # evaluate
-            if self.evaluator and (r % eval_every == 0):
-                reward = self.evaluator.evaluate(self.global_model)
+            if r % eval_every == 0:
                 history["round"].append(r)
-                history["eval_reward"].append(reward)
-                logger.info("Round %d evaluation reward: %.4f", r, reward)
+                history["client_samples"].append(total_samples)
+                # evaluator optional
+                if self.evaluator:
+                    reward = self.evaluator.evaluate(self.global_model)
+                    history["eval_reward"].append(reward)
+                    logger.info("Round %d eval reward: %.4f", r, reward)
+                else:
+                    history["eval_reward"].append(None)
+                    logger.info("Round %d done. Total samples: %d", r, total_samples)
 
         return history

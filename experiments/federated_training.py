@@ -59,6 +59,8 @@ def load_clients(base_dir: str, local_episodes: int):
             action_n = 2
         action_sizes.append(action_n)
         env.close()
+        import time
+        time.sleep(2)  # WSL are nevoie de timp sa elibereze portul
 
     target_obs = max(obs_sizes) if obs_sizes else 4
     target_action = max(action_sizes) if action_sizes else 2
@@ -84,17 +86,23 @@ def load_clients(base_dir: str, local_episodes: int):
 
 def main(args):
     base = os.path.join("environments")
+    
+    # load_clients apelat O SINGURA DATA
     clients = load_clients(base, args.local_episodes)
-    # initialize global model from first client's agent
-    # initialize global model with target dims inferred from clients
-    # reuse load_clients to compute target dims
-    tmp_clients = load_clients(base, args.local_episodes)
-    if not tmp_clients:
+    
+    if not clients:
         raise RuntimeError("No clients found for federated training")
-    # create a global model from first client's agent_builder
-    global_model = tmp_clients[0].agent_builder()
+    
+    # global model construit direct din primul client, fara al doilea load_clients
+    global_model = clients[0].agent_builder()
+    
     server = FederatedServer(global_model=global_model, clients=clients)
     history = server.run(rounds=args.rounds, eval_every=args.eval_every)
+        # cleanup clienti
+    for c in clients:
+        if hasattr(c, 'close'):
+            c.close()
+    
     os.makedirs("results", exist_ok=True)
     global_model.save(os.path.join("results", "global_fed.pth"))
     logger.info("Federated training finished. History: %s", history)

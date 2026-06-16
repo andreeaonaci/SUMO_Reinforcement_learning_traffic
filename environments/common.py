@@ -75,23 +75,27 @@ def build_env_from_config(cfg: Dict[str, Any]):
 
     return MockEnv(obs_dim=cfg.get("obs_dim", 4), action_dim=cfg.get("action_dim", 2), seed=cfg.get("seed", None))
 
+import time
 
 class PaddingWrapper:
-    """Wrap an environment to pad observations to a fixed size and unify action space.
-
-    When the wrapped env has a smaller action space, actions larger than the
-    environment's `action_space.n - 1` are mapped to the maximum valid action.
-    """
-
     def __init__(self, env, target_obs_dim: int, target_action_n: int):
         self.env = env
         self.target_obs_dim = target_obs_dim
         self.target_action_n = target_action_n
-        # store original spaces if present
-        self.orig_action_n = getattr(env, "action_space", None)
+        self._orig_action_n = None
 
     def reset(self):
+        # pe WSL, SUMO are nevoie de timp sa elibereze portul intre episoade
+        if hasattr(self.env, 'episode') and self.env.episode > 0:
+            time.sleep(3)
+
         reset_ret = self.env.reset()
+
+        try:
+            self._orig_action_n = self.env.action_space.n
+        except Exception:
+            self._orig_action_n = self.target_action_n
+
         if isinstance(reset_ret, tuple) and len(reset_ret) >= 1:
             obs = reset_ret[0]
         else:
@@ -99,11 +103,7 @@ class PaddingWrapper:
         return self._pad_obs(obs)
 
     def step(self, action):
-        # map action to original action space
-        try:
-            orig_n = self.env.action_space.n
-        except Exception:
-            orig_n = None
+        orig_n = self._orig_action_n
         if orig_n is not None and action >= orig_n:
             mapped = int(orig_n - 1)
         else:
@@ -115,7 +115,6 @@ class PaddingWrapper:
         return self.env.close()
 
     def _pad_obs(self, obs):
-        # flatten nested or ragged observations into a 1D float array
         try:
             arr = np.array(obs, dtype=float)
             if arr.ndim == 1 and arr.dtype != object:
@@ -123,22 +122,17 @@ class PaddingWrapper:
             else:
                 raise Exception()
         except Exception:
-            # attempt to concatenate sequence elements
             pieces = []
             for el in obs:
                 try:
                     if isinstance(el, dict):
-                        # concatenate dict values
                         sub = []
                         for v in el.values():
                             try:
                                 sub.append(np.asarray(v, dtype=float).ravel())
                             except Exception:
                                 sub.append(np.asarray([float(v)]))
-                        if sub:
-                            a = np.concatenate(sub)
-                        else:
-                            a = np.zeros(0, dtype=float)
+                        a = np.concatenate(sub) if sub else np.zeros(0, dtype=float)
                     else:
                         try:
                             a = np.asarray(el, dtype=float).ravel()
@@ -147,13 +141,9 @@ class PaddingWrapper:
                 except Exception:
                     a = np.zeros(0, dtype=float)
                 pieces.append(a)
-            if pieces:
-                flat = np.concatenate(pieces)
-            else:
-                flat = np.zeros(0, dtype=float)
+            flat = np.concatenate(pieces) if pieces else np.zeros(0, dtype=float)
 
         if flat.shape[0] >= self.target_obs_dim:
             return flat[: self.target_obs_dim]
         pad = np.zeros(self.target_obs_dim - flat.shape[0], dtype=float)
         return np.concatenate([flat, pad])
-
