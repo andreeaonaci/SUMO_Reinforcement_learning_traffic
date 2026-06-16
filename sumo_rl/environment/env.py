@@ -4,7 +4,12 @@ import os
 import sys
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple, Union
-import torch
+import numpy as np
+
+try:
+    import torch
+except ImportError:
+    torch = None
 
 
 if "SUMO_HOME" in os.environ:
@@ -13,23 +18,93 @@ if "SUMO_HOME" in os.environ:
 else:
     raise ImportError("Please declare the environment variable 'SUMO_HOME'")
 import gymnasium as gym
-import numpy as np
-import pandas as pd
 import sumolib
 import traci
-from gymnasium.utils import EzPickle, seeding
-from pettingzoo import AECEnv
-from pettingzoo.utils import wrappers
 
+try:
+    from pettingzoo.utils.env import AECEnv
+    from pettingzoo.utils import wrappers
+    from pettingzoo.utils import seeding
+except ImportError:
+    class AECEnv:
+        def __init__(self):
+            self.agents = []
+            self.possible_agents = []
+            self.agent_selection = None
+            self.rewards = {}
+            self.terminations = {}
+            self.truncations = {}
+            self.infos = {}
+            self._cumulative_rewards = {}
+
+        def _was_dead_step(self, action):
+            return None
+
+        def _clear_rewards(self):
+            pass
+
+        def _accumulate_rewards(self):
+            pass
+
+    class _PassthroughWrapper:
+        def __init__(self, env):
+            self.env = env
+
+        def __getattr__(self, name):
+            return getattr(self.env, name)
+
+    class _WrappersModule:
+        AssertOutOfBoundsWrapper = _PassthroughWrapper
+        OrderEnforcingWrapper = _PassthroughWrapper
+
+    wrappers = _WrappersModule()
+
+    class _SeedingModule:
+        @staticmethod
+        def np_random(seed=None):
+            import random
+
+            rng = random.Random(seed)
+            return rng, seed
+
+    seeding = _SeedingModule()
+
+# Minimal stubs for gymnasium.utils compatibility
+class EzPickle:
+    def __init__(self, *args, **kwargs):
+        pass
 
 try:
     # pettingzoo 1.25+
     from pettingzoo.utils import AgentSelector
 except ImportError:
     # pettingzoo 1.24 or earlier
-    from pettingzoo.utils import agent_selector as AgentSelector
+    try:
+        from pettingzoo.utils import agent_selector as AgentSelector
+    except ImportError:
+        # fallback: simple round-robin selector
+        class AgentSelector:
+            def __init__(self, agents):
+                self.agents = list(agents)
+                self._idx = 0
+            def reset(self):
+                self._idx = 0
+                return self.agents[self._idx] if self.agents else None
+            def next(self):
+                if not self.agents:
+                    return None
+                self._idx = (self._idx + 1) % len(self.agents)
+                return self.agents[self._idx]
+            def is_last(self):
+                return self._idx == len(self.agents) - 1
 
-from pettingzoo.utils.conversions import parallel_wrapper_fn
+# Import or fallback for parallel_wrapper_fn
+try:
+    from pettingzoo.utils.conversions import parallel_wrapper_fn
+except ImportError:
+    # Simple fallback: identity wrapper
+    def parallel_wrapper_fn(fn):
+        return fn
 
 from .observations import DefaultObservationFunction, ObservationFunction
 from .traffic_signal import TrafficSignal
@@ -290,7 +365,7 @@ class SumoEnvironment(gym.Env):
     
     def step(self, action):
         if self.single_agent:
-            if isinstance(action, torch.Tensor):
+            if torch is not None and isinstance(action, torch.Tensor):
                 if action.numel() != 1:
                     raise ValueError("Action must be a scalar.")
                 action = int(action.item())
@@ -349,7 +424,7 @@ class SumoEnvironment(gym.Env):
         """
 
         def _to_int(a):
-            if isinstance(a, torch.Tensor):
+            if torch is not None and isinstance(a, torch.Tensor):
                 if a.numel() != 1:
                     raise ValueError("Action must be a scalar.")
                 return int(a.item())
@@ -526,6 +601,8 @@ class SumoEnvironment(gym.Env):
             episode (int): Episode number to be appended to the output file name.
         """
         if out_csv_name is not None:
+            import pandas as pd
+
             df = pd.DataFrame(self.metrics)
             Path(Path(out_csv_name).parent).mkdir(parents=True, exist_ok=True)
             df.to_csv(out_csv_name + f"_conn{self.label}_ep{episode}" + ".csv", index=False)

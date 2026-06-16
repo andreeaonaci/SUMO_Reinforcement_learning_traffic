@@ -1,5 +1,8 @@
 name: city_3
-mode: mock
-obs_dim: 8
-action_dim: 4
-seed: 3
+mode: sumo
+net_file: sumo_rl/nets/4x4-Lucas/4x4.net.xml
+route_file: sumo_rl/nets/4x4-Lucas/4x4c1.rou.xml
+single_agent: True
+delta_time: 5
+num_seconds: 60
+sumo_seed: 3

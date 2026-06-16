@@ -2,24 +2,20 @@
 import argparse
 import logging
 import os
-import sys
-# ensure repo root is on sys.path for local package imports
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from configs.loader import load_cfg
+import yaml
+import gymnasium as gym
 
 from federated.server import FederatedServer
 from federated.client import FederatedClient
-from environments.common import build_env_from_config
+from environments.common import build_env_from_config, PaddingWrapper
 from agents.dqn import DQNAgent
 
 logger = logging.getLogger(__name__)
 
 
 def make_agent_builder(cfg):
-    def builder():
-        return DQNAgent(obs_dim=cfg.get("obs_dim", 4), action_dim=cfg.get("action_dim", 2))
-
-    return builder
+    # agent builder will be created later with unified dims
+    return None
 
 
 def make_env_builder(cfg):
@@ -27,15 +23,62 @@ def make_env_builder(cfg):
 
 
 def load_clients(base_dir: str, local_episodes: int):
+    # load client configs
     clients = []
-    for name in os.listdir(base_dir):
+    cfgs = []
+    names = []
+    for name in sorted(os.listdir(base_dir)):
         if name == "city_5_holdout":
             continue
         cfg_path = os.path.join(base_dir, name, "config.yaml")
         if not os.path.exists(cfg_path):
             continue
-        cfg = load_cfg(cfg_path)
-        clients.append(FederatedClient(name=name, env_builder=make_env_builder(cfg), agent_builder=make_agent_builder(cfg), local_episodes=local_episodes))
+        with open(cfg_path) as f:
+            cfg = yaml.safe_load(f)
+        cfgs.append(cfg)
+        names.append(name)
+
+    # compute target obs/action by instantiating each env once
+    obs_sizes = []
+    action_sizes = []
+    for cfg in cfgs:
+        env = build_env_from_config(cfg)
+        reset_ret = env.reset()
+        if isinstance(reset_ret, tuple):
+            obs = reset_ret[0]
+        else:
+            obs = reset_ret
+        import numpy as _np
+
+        obs_arr = _np.array(obs, dtype=object)
+        obs_len = int(_np.concatenate([_np.atleast_1d(x).ravel() for x in obs_arr]).shape[0]) if obs_arr.size > 0 else 0
+        obs_sizes.append(obs_len)
+        try:
+            action_n = env.action_space.n
+        except Exception:
+            action_n = 2
+        action_sizes.append(action_n)
+        env.close()
+
+    target_obs = max(obs_sizes) if obs_sizes else 4
+    target_action = max(action_sizes) if action_sizes else 2
+
+    # build clients with wrapped env builders and agent builders
+    for name, cfg in zip(names, cfgs):
+        def make_env(name_cfg=cfg):
+            def _build():
+                e = build_env_from_config(name_cfg)
+                e = PaddingWrapper(e, target_obs, target_action)
+                e.action_space = gym.spaces.Discrete(target_action)
+                return e
+
+            return _build
+
+        def make_agent():
+            return DQNAgent(obs_dim=target_obs, action_dim=target_action)
+
+        clients.append(FederatedClient(name=name, env_builder=make_env(), agent_builder=make_agent, local_episodes=local_episodes))
+
     return clients
 
 
@@ -43,8 +86,13 @@ def main(args):
     base = os.path.join("environments")
     clients = load_clients(base, args.local_episodes)
     # initialize global model from first client's agent
-    cfg0 = load_cfg(os.path.join(base, "city_1", "config.yaml"))
-    global_model = DQNAgent(obs_dim=cfg0.get("obs_dim", 4), action_dim=cfg0.get("action_dim", 2))
+    # initialize global model with target dims inferred from clients
+    # reuse load_clients to compute target dims
+    tmp_clients = load_clients(base, args.local_episodes)
+    if not tmp_clients:
+        raise RuntimeError("No clients found for federated training")
+    # create a global model from first client's agent_builder
+    global_model = tmp_clients[0].agent_builder()
     server = FederatedServer(global_model=global_model, clients=clients)
     history = server.run(rounds=args.rounds, eval_every=args.eval_every)
     os.makedirs("results", exist_ok=True)

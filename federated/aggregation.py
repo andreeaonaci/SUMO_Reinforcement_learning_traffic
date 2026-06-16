@@ -1,20 +1,10 @@
 from typing import Dict, List, Tuple
 import copy
-from numbers import Number
-import numpy as np
+import torch
 
 
-def _is_torch_tensor(x):
-    try:
-        import torch
-
-        return isinstance(x, torch.Tensor)
-    except Exception:
-        return False
-
-
-def fed_avg(updates: List[Tuple[Dict, int]]) -> Dict:
-    """Perform Federated Averaging on a list of (state_dict, sample_count).
+def fed_avg(updates: List[Tuple[Dict[str, torch.Tensor], int]]) -> Dict[str, torch.Tensor]:
+    """Perform Federated Averaging (FedAvg) on torch state_dicts.
 
     Args:
         updates: list of tuples (state_dict, n_samples)
@@ -25,44 +15,22 @@ def fed_avg(updates: List[Tuple[Dict, int]]) -> Dict:
     if not updates:
         raise ValueError("No updates to aggregate")
 
-    # per-key aggregation only among matching shapes/types
+    total_samples = sum(n for _, n in updates)
+    if total_samples <= 0:
+        raise ValueError("Total samples must be positive")
+
+    # start from zeros of first state
     base_state = copy.deepcopy(updates[0][0])
-    for k in list(base_state.keys()):
-        # collect compatible tensors/arrays
-        compatible = []
-        for state, n in updates:
-            if k not in state:
-                continue
-            v = state[k]
-            # compare shapes/types with base
-            v0 = base_state[k]
-            try:
-                if _is_torch_tensor(v0) and _is_torch_tensor(v):
-                    compatible.append((v, n))
-                else:
-                    a0 = np.array(v0)
-                    a = np.array(v)
-                    if a.shape == a0.shape:
-                        compatible.append((a, n))
-            except Exception:
-                continue
+    for k in base_state.keys():
+        base_state[k] = torch.zeros_like(base_state[k])
 
-        if not compatible:
-            # nothing compatible; keep original
-            continue
-        # weighted average among compatibles
-        total = sum(n for _, n in compatible)
-        if _is_torch_tensor(compatible[0][0]):
-            import torch
-
-            acc = torch.zeros_like(compatible[0][0])
-            for v, n in compatible:
-                acc += v * (n / total)
-            base_state[k] = acc
-        else:
-            acc = np.zeros_like(np.array(compatible[0][0]))
-            for v, n in compatible:
-                acc = acc + (np.array(v) * (n / total))
-            base_state[k] = acc
+    for state, n in updates:
+        weight = float(n) / float(total_samples)
+        for k, v in state.items():
+            if k not in base_state:
+                raise KeyError(f"State key mismatch during aggregation: {k}")
+            if base_state[k].shape != v.shape:
+                raise ValueError(f"Shape mismatch for key {k}: {base_state[k].shape} vs {v.shape}")
+            base_state[k] += v.to(base_state[k].dtype) * weight
 
     return base_state

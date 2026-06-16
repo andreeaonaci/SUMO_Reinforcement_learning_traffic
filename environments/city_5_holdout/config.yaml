@@ -1,5 +1,8 @@
 name: city_5_holdout
-mode: mock
-obs_dim: 6
-action_dim: 3
-seed: 5
+mode: sumo
+net_file: sumo_rl/nets/4x4loop/4x4loop.net.xml
+route_file: sumo_rl/nets/4x4loop/4x4loop.rou.xml
+single_agent: True
+delta_time: 5
+num_seconds: 60
+sumo_seed: 5
