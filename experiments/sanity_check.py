@@ -56,9 +56,9 @@ def check_env_consistency():
 
     try:
         from environments.common import build_env_from_config
-        from configs.config import load_config
+        from configs.loader import load_cfg
 
-        cfg = load_config()
+        cfg = load_cfg(os.path.join(os.path.dirname(__file__), "..", "environments", "city_1", "config.yaml"))
 
         envs = ["city_1", "city_2", "city_3", "city_4"]
 
@@ -88,9 +88,9 @@ def check_dqn_instantiation():
 
     try:
         from agents.dqn import DQNAgent
-        from configs.config import load_config
+        from configs.loader import load_cfg
 
-        cfg = load_config()
+        cfg = load_cfg(os.path.join(os.path.dirname(__file__), "..", "environments", "city_1", "config.yaml"))
 
         agent = DQNAgent(cfg["state_dim"], cfg["action_dim"])
         print("[OK] DQNAgent initializes correctly")

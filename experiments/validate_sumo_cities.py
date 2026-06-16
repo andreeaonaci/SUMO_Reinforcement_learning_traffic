@@ -26,7 +26,8 @@ def main():
             continue
 
         try:
-            obs = env.reset()
+            reset_ret = env.reset()
+            obs = reset_ret[0] if isinstance(reset_ret, tuple) else reset_ret
             # determine observation shape
             import numpy as np
 

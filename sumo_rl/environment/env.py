@@ -239,22 +239,33 @@ class SumoEnvironment(gym.Env):
         SumoEnvironment.CONNECTION_LABEL += 1
         self.sumo = None
 
+        init_label = "init_connection" + self.label
         if LIBSUMO:
-            traci.start([sumolib.checkBinary("sumo"), "-n", self._net])  # Start only to retrieve traffic light information
+            try:
+                self._close_traci(label=None)
+            except Exception:
+                pass
+            traci.start([sumolib.checkBinary("sumo"), "-n", self._net, "-r", self._route])
             conn = traci
         else:
-            traci.start([sumolib.checkBinary("sumo"), "-n", self._net], label="init_connection" + self.label)
-            conn = traci.getConnection("init_connection" + self.label)
+            try:
+                self._close_traci(label=init_label)
+            except Exception:
+                pass
+            traci.start([sumolib.checkBinary("sumo"), "-n", self._net, "-r", self._route], label=init_label)
+            conn = traci.getConnection(init_label)
 
         if ts_ids is None:
             self.ts_ids = list(conn.trafficlight.getIDList())
         else:
             self.ts_ids = ts_ids
         self.observation_class = observation_class
+        self.traffic_signals = {}
 
-        self._build_traffic_signals(conn)
-
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
 
         self.vehicles = dict()
         self.reward_range = (-float("inf"), float("inf"))
@@ -320,11 +331,29 @@ class SumoEnvironment(gym.Env):
                 self.disp.start()
                 print("Virtual display started.")
 
+        def _start_traci_connection():
+            attempts = 3
+            for attempt in range(1, attempts + 1):
+                try:
+                    if LIBSUMO:
+                        traci.start(sumo_cmd)
+                    else:
+                        traci.start(sumo_cmd, label=self.label)
+                    return
+                except Exception:
+                    self._close_traci(label=None if LIBSUMO else self.label)
+                    if attempt < attempts:
+                        time.sleep(1)
+                    else:
+                        raise
+
+        if self.sumo is not None:
+            self.close()
+
+        _start_traci_connection()
         if LIBSUMO:
-            traci.start(sumo_cmd)
             self.sumo = traci
         else:
-            traci.start(sumo_cmd, label=self.label)
             self.sumo = traci.getConnection(self.label)
 
         if self.use_gui or self.render_mode is not None:
@@ -337,7 +366,10 @@ class SumoEnvironment(gym.Env):
         super().reset(seed=seed, **kwargs)
 
         if self.episode != 0:
-            self.close()
+            try:
+                self.close()
+            except Exception:
+                pass
             self.save_csv(self.out_csv_name, self.episode)
         self.episode += 1
         self.metrics = []
@@ -559,17 +591,35 @@ class SumoEnvironment(gym.Env):
         info["agents_total_accumulated_waiting_time"] = sum(accumulated_waiting_time)
         return info
 
+    def _close_traci(self, label: Optional[str] = None):
+        try:
+            if LIBSUMO:
+                traci.close()
+            else:
+                if label is not None:
+                    try:
+                        traci.switch(label)
+                    except Exception:
+                        pass
+                traci.close()
+        except Exception:
+            pass
+
     def close(self):
         """Close the environment and stop the SUMO simulation."""
-        if self.sumo is None:
-            return
-
-        if not LIBSUMO:
-            traci.switch(self.label)
-        traci.close()
+        try:
+            if LIBSUMO:
+                traci.close()
+            else:
+                self._close_traci(label=self.label)
+        except Exception:
+            pass
 
         if self.disp is not None:
-            self.disp.stop()
+            try:
+                self.disp.stop()
+            except Exception:
+                pass
             self.disp = None
 
         self.sumo = None
