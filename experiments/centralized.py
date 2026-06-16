@@ -22,30 +22,46 @@ def _unwrap_reset(reset_ret):
 
 
 def _infer_target_dims(cfgs):
+    """Infer obs/action dims from configs without starting SUMO."""
+    from sumo_rl.environment.env import SumoEnvironment
+    import sumolib
+    import traci
+
     obs_sizes = []
     action_sizes = []
+
     for cfg in cfgs:
-        env = build_env_from_config(cfg)
+        net_file = cfg.get("net_file")
+        if net_file is None:
+            obs_sizes.append(cfg.get("obs_dim", 4))
+            action_sizes.append(cfg.get("action_dim", 2))
+            continue
+
+        # citeste ts_ids si fazele direct din fisierul .net.xml, fara SUMO
         try:
-            reset_ret = env.reset()
-            obs = _unwrap_reset(reset_ret)
-            obs_arr = np.array(obs, dtype=object)
-            obs_len = int(np.concatenate([np.atleast_1d(x).ravel() for x in obs_arr]).shape[0]) if obs_arr.size > 0 else 0
-            obs_sizes.append(obs_len)
-            try:
-                action_sizes.append(env.action_space.n)
-            except Exception:
-                action_sizes.append(2)
-        finally:
-            try:
-                env.close()
-            except Exception:
-                pass
+            net = sumolib.net.readNet(net_file, withInternal=False)
+            tls_list = net.getTrafficLights()
+            
+            # numara fazele verzi per intersectie
+            max_green_phases = 0
+            for tls in tls_list:
+                programs = tls.getPrograms()
+                for prog in programs.values():
+                    phases = prog.getPhases()
+                    green = sum(1 for p in phases if 'G' in p.state or 'g' in p.state)
+                    max_green_phases = max(max_green_phases, green)
+            
+            n_tls = len(tls_list)
+            # obs default: (num_green_phases + 1 + num_lanes) per ts
+            # folosim o aproximare conservatoare
+            obs_sizes.append(cfg.get("obs_dim", max(4, n_tls * 10)))
+            action_sizes.append(cfg.get("action_dim", max(2, max_green_phases)))
+        except Exception as e:
+            logger.warning("Could not read net file %s: %s", net_file, e)
+            obs_sizes.append(cfg.get("obs_dim", 4))
+            action_sizes.append(cfg.get("action_dim", 2))
 
-    target_obs = max(obs_sizes) if obs_sizes else 4
-    target_action = max(action_sizes) if action_sizes else 2
-    return target_obs, target_action
-
+    return max(obs_sizes) if obs_sizes else 4, max(action_sizes) if action_sizes else 2
 
 def load_city_cfgs(base_dir="environments"):
     cfgs = []

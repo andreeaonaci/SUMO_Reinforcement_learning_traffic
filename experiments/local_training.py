@@ -22,9 +22,12 @@ def _unwrap_reset(reset_ret):
 
 
 def _infer_target_dims(cfgs):
+    import time
     obs_sizes = []
     action_sizes = []
-    for cfg in cfgs:
+    for i, cfg in enumerate(cfgs):
+        if i > 0:
+            time.sleep(5)
         env = build_env_from_config(cfg)
         try:
             reset_ret = env.reset()
@@ -41,11 +44,9 @@ def _infer_target_dims(cfgs):
                 env.close()
             except Exception:
                 pass
+            time.sleep(5)
 
-    target_obs = max(obs_sizes) if obs_sizes else 4
-    target_action = max(action_sizes) if action_sizes else 2
-    return target_obs, target_action
-
+    return max(obs_sizes) if obs_sizes else 4, max(action_sizes) if action_sizes else 2
 
 def main(args):
     base = os.path.join("environments")
