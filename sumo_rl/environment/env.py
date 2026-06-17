@@ -599,6 +599,13 @@ class SumoEnvironment(gym.Env):
             else:
                 if label is not None:
                     try:
+                        conn = traci.getConnection(label)
+                        try:
+                            if hasattr(conn, '_process') and conn._process is not None:
+                                conn._process.kill()
+                                conn._process.wait(timeout=2)
+                        except Exception:
+                            pass
                         traci.switch(label)
                     except Exception:
                         pass
@@ -607,7 +614,6 @@ class SumoEnvironment(gym.Env):
             pass
 
     def close(self):
-        """Close the environment and stop the SUMO simulation."""
         try:
             if LIBSUMO:
                 traci.close()
