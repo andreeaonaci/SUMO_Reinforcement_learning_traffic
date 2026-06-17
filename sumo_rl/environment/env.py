@@ -336,15 +336,21 @@ class SumoEnvironment(gym.Env):
             attempts = 5
             for attempt in range(1, attempts + 1):
                 try:
-                    port = sumolib.miscutils.getFreeSocketPort()
+                    # asigura-te ca labelul nu e deja activ inainte de a porni
+                    if not LIBSUMO:
+                        try:
+                            existing = traci.getConnection(self.label)
+                            existing.close()
+                        except Exception:
+                            pass
+
                     if LIBSUMO:
-                        traci.start(sumo_cmd, port=port)
+                        traci.start(sumo_cmd)
                     else:
-                        traci.start(sumo_cmd, port=port, label=self.label)
+                        traci.start(sumo_cmd, label=self.label)
                     return
                 except Exception as e:
-                    logger_msg = f"traci.start failed (attempt {attempt}/{attempts}): {e}"
-                    print(logger_msg)
+                    print(f"traci.start failed (attempt {attempt}/{attempts}): {e}")
                     self._close_traci(label=None if LIBSUMO else self.label)
                     if attempt < attempts:
                         time.sleep(2)
@@ -598,23 +604,37 @@ class SumoEnvironment(gym.Env):
         return info
 
     def _close_traci(self, label: Optional[str] = None):
+        if LIBSUMO:
+            try:
+                traci.close()
+            except Exception:
+                pass
+            return
+
+        if label is None:
+            try:
+                traci.close()
+            except Exception:
+                pass
+            return
+
         try:
-            if LIBSUMO:
-                traci.close()
-            else:
-                if label is not None:
-                    try:
-                        conn = traci.getConnection(label)
-                        try:
-                            if hasattr(conn, '_process') and conn._process is not None:
-                                conn._process.kill()
-                                conn._process.wait(timeout=2)
-                        except Exception:
-                            pass
-                        traci.switch(label)
-                    except Exception:
-                        pass
-                traci.close()
+            conn = traci.getConnection(label)
+        except Exception:
+            # nu exista conexiune cu acest label, nimic de facut
+            return
+
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+        try:
+            if hasattr(conn, '_process') and conn._process is not None:
+                conn._process.poll()
+                if conn._process.returncode is None:
+                    conn._process.kill()
+                    conn._process.wait(timeout=5)
         except Exception:
             pass
 
