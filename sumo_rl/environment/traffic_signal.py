@@ -163,8 +163,7 @@ class TrafficSignal:
 
     @property
     def time_to_act(self):
-        """Returns True if the traffic signal should act in the current step."""
-        return self.next_action_time == self.env.sim_step
+        return self.next_action_time <= self.env.sim_step
 
     def update(self):
         """Updates the traffic signal state.

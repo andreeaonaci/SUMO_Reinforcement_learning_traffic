@@ -15,8 +15,16 @@ from agents.dqn import DQNAgent
 logger = logging.getLogger(__name__)
 
 
-def load_clients(base_dir: str, local_episodes: int, target_obs: int, target_action: int):
-    clients = []
+def load_clients(base_dir: str, local_episodes: int):
+    """Construiește clienții și deduce dimensiunile obs/action din ei.
+
+    Returnează (clients, target_obs, target_action). Fiecare environment e
+    construit o singură dată aici — nu mai există o trecere separată de
+    probing pentru deducerea dimensiunilor.
+    """
+    import numpy as np
+
+    raw_envs = {}  # name -> (env, cfg)
     for name in sorted(os.listdir(base_dir)):
         if name == "city_5_holdout":
             continue
@@ -26,25 +34,47 @@ def load_clients(base_dir: str, local_episodes: int, target_obs: int, target_act
         with open(cfg_path) as f:
             cfg = yaml.safe_load(f)
 
-        def make_env(c=cfg):
-            def _build():
-                e = build_env_from_config(c)
-                e = PaddingWrapper(e, target_obs, target_action)
-                e.action_space = gym.spaces.Discrete(target_action)
-                return e
-            return _build
+        env = build_env_from_config(cfg)
+        raw_envs[name] = (env, cfg)
+
+    # Deduce dimensiunile facand reset pe fiecare env deja construit
+    obs_sizes = []
+    action_sizes = []
+    obs_cache = {}
+    for name, (env, cfg) in raw_envs.items():
+        reset_ret = env.reset()
+        obs = reset_ret[0] if isinstance(reset_ret, tuple) else reset_ret
+        obs_arr = np.array(obs, dtype=object)
+        obs_len = int(np.concatenate([np.atleast_1d(x).ravel() for x in obs_arr]).shape[0]) if obs_arr.size > 0 else 0
+        obs_sizes.append(obs_len)
+        try:
+            action_sizes.append(env.action_space.n)
+        except Exception:
+            action_sizes.append(2)
+        obs_cache[name] = obs
+
+    target_obs = max(obs_sizes) if obs_sizes else 4
+    target_action = max(action_sizes) if action_sizes else 2
+
+    clients = []
+    for name, (env, cfg) in raw_envs.items():
+        wrapped = PaddingWrapper(env, target_obs, target_action)
+        wrapped.action_space = gym.spaces.Discrete(target_action)
+        # primul reset deja s-a facut mai sus pe env-ul "gol";
+        # PaddingWrapper.reset() va re-apela reset() la prima rundă de training,
+        # ceea ce e ok (SumoEnvironment suportă reset multiplu).
 
         def make_agent():
             return DQNAgent(obs_dim=target_obs, action_dim=target_action)
 
         clients.append(FederatedClient(
             name=name,
-            env_builder=make_env(),
+            env_builder=(lambda w=wrapped: w),
             agent_builder=make_agent,
             local_episodes=local_episodes,
         ))
 
-    return clients
+    return clients, target_obs, target_action
 
 
 def infer_dims(base_dir: str):
@@ -106,13 +136,10 @@ def make_holdout_evaluator(base_dir: str, target_obs: int, target_action: int, e
 def main(args):
     base = "environments"
 
-    logger.info("Inferring obs/action dims from training cities...")
-    target_obs, target_action = infer_dims(base)
-    logger.info("target_obs=%d, target_action=%d", target_obs, target_action)
-
-    clients = load_clients(base, args.local_episodes, target_obs, target_action)
+    clients, target_obs, target_action = load_clients(base, args.local_episodes)
     if not clients:
         raise RuntimeError("No clients found for federated training")
+    logger.info("target_obs=%d, target_action=%d", target_obs, target_action)
 
     global_model = DQNAgent(obs_dim=target_obs, action_dim=target_action)
 

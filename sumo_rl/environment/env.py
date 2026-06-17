@@ -333,18 +333,21 @@ class SumoEnvironment(gym.Env):
                 print("Virtual display started.")
 
         def _start_traci_connection():
-            attempts = 3
+            attempts = 5
             for attempt in range(1, attempts + 1):
                 try:
+                    port = sumolib.miscutils.getFreeSocketPort()
                     if LIBSUMO:
-                        traci.start(sumo_cmd)
+                        traci.start(sumo_cmd, port=port)
                     else:
-                        traci.start(sumo_cmd, label=self.label)
+                        traci.start(sumo_cmd, port=port, label=self.label)
                     return
-                except Exception:
+                except Exception as e:
+                    logger_msg = f"traci.start failed (attempt {attempt}/{attempts}): {e}"
+                    print(logger_msg)
                     self._close_traci(label=None if LIBSUMO else self.label)
                     if attempt < attempts:
-                        time.sleep(1)
+                        time.sleep(2)
                     else:
                         raise
 
@@ -446,6 +449,8 @@ class SumoEnvironment(gym.Env):
                 self.traffic_signals[ts].update()
                 if self.traffic_signals[ts].time_to_act:
                     time_to_act = True
+            if self.sim_step >= self.sim_max_time:
+                break
                     
     def _apply_actions(self, actions):
         """Set the next green phase for the traffic signals.
