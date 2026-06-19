@@ -148,7 +148,7 @@ if TORCH_AVAILABLE:
                 done = False
                 while not done:
                     action = self.act(state, explore=True)
-                    next_state, reward, done, info = env.step(action)
+                    next_state, reward, done, _ = env.step(action)
                     self.remember(state, action, reward, next_state, done)
                     self.train_step()
                     state = next_state

@@ -37,6 +37,10 @@ class FederatedServer:
             self.global_model.load_state_dict(agg_state)
 
             if r % eval_every == 0:
+                import torch
+                total = sum(p.sum().item() for p in self.global_model.q.parameters())
+                logger.info("DEBUG round %d: sum of global model weights = %.6f", r, total)
+
                 history["round"].append(r)
                 history["client_samples"].append(total_samples)
 

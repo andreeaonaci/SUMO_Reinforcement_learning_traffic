@@ -1,6 +1,9 @@
 """Evaluator for federated learning - runs global model on holdout city."""
 import logging
+from xml.parsers.expat import model
 import numpy as np
+
+from sumo_rl.environment import env
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +34,18 @@ class HoldoutEvaluator:
                 last_info = {}
                 while not done:
                     action = model.act(state, explore=False)
-                    next_state, reward, done, info = env.step(action)
+                    print(f"  [eval] action={action}", flush=True)
+                    next_state, reward, done, info =    env.step(action)
                     ep_r += float(reward)
                     state = next_state
                     last_info = info
+                print("\n===== EVAL DEBUG =====", flush=True)
+                print("system_total_arrived:", last_info.get("system_total_arrived"), flush=True)
+                print("system_total_running:", last_info.get("system_total_running"), flush=True)
+                print("system_total_waiting_time:", last_info.get("system_total_waiting_time"), flush=True)
+                print("system_mean_waiting_time:", last_info.get("system_mean_waiting_time"), flush=True)
+                print("agents_total_stopped:", last_info.get("agents_total_stopped"), flush=True)
+                print("======================\n", flush=True)
                 ep_rewards.append(ep_r)
                 ep_waiting_times.append(last_info.get("system_mean_waiting_time", 0.0))
                 ep_stopped.append(last_info.get("agents_total_stopped", 0))

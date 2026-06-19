@@ -12,6 +12,19 @@ import gymnasium as gym
 import numpy as np
 import csv
 
+from pyfiglet import Figlet
+
+# Creează bannerul
+f = Figlet(font="slant", width=250)
+text = f.renderText("CentralizedTraining")
+
+# Afișează cu culoare cyan
+print("\033[96m")
+print("=" * 100)
+print(text)
+print("=" * 100)
+print("\033[0m")
+
 logger = logging.getLogger(__name__)
 
 

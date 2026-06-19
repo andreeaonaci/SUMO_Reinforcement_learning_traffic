@@ -211,7 +211,7 @@ class TrafficSignal:
             self.is_yellow = True
             self.time_since_last_phase_change = 0
 
-        print(f"set_next_phase called with new_phase: {new_phase}, type: {type(new_phase)}")
+        # print(f"set_next_phase called with new_phase: {new_phase}, type: {type(new_phase)}")
 
     def compute_observation(self):
         """Computes the observation of the traffic signal and ensures it returns a fixed-size numeric vector."""

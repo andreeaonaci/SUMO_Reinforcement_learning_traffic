@@ -12,6 +12,19 @@ from federated.evaluator import HoldoutEvaluator
 from environments.common import build_env_from_config, PaddingWrapper
 from agents.dqn import DQNAgent
 
+from pyfiglet import Figlet
+
+# Creează bannerul
+f = Figlet(font="slant", width=200)
+text = f.renderText("FederatedTraining")
+
+# Afișează cu culoare cyan
+print("\033[96m")
+print("=" * 100)
+print(text)
+print("=" * 100)
+print("\033[0m")
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,6 +39,8 @@ def load_clients(base_dir: str, local_episodes: int):
 
     raw_envs = {}  # name -> (env, cfg)
     for name in sorted(os.listdir(base_dir)):
+        if name != "city_1":
+            continue
         if name == "city_5_holdout":
             continue
         cfg_path = os.path.join(base_dir, name, "config.yaml")
@@ -75,45 +90,6 @@ def load_clients(base_dir: str, local_episodes: int):
         ))
 
     return clients, target_obs, target_action
-
-
-def infer_dims(base_dir: str):
-    """Infer target obs/action dims by instantiating each city env once."""
-    import time
-    import numpy as np
-
-    obs_sizes = []
-    action_sizes = []
-
-    for name in sorted(os.listdir(base_dir)):
-        if name == "city_5_holdout":
-            continue
-        cfg_path = os.path.join(base_dir, name, "config.yaml")
-        if not os.path.exists(cfg_path):
-            continue
-        with open(cfg_path) as f:
-            cfg = yaml.safe_load(f)
-
-        env = build_env_from_config(cfg)
-        try:
-            reset_ret = env.reset()
-            obs = reset_ret[0] if isinstance(reset_ret, tuple) else reset_ret
-            obs_arr = np.array(obs, dtype=object)
-            obs_len = int(np.concatenate([np.atleast_1d(x).ravel() for x in obs_arr]).shape[0]) if obs_arr.size > 0 else 0
-            obs_sizes.append(obs_len)
-            try:
-                action_sizes.append(env.action_space.n)
-            except Exception:
-                action_sizes.append(2)
-        finally:
-            try:
-                env.close()
-            except Exception:
-                pass
-            time.sleep(2)
-
-    return max(obs_sizes) if obs_sizes else 4, max(action_sizes) if action_sizes else 2
-
 
 def make_holdout_evaluator(base_dir: str, target_obs: int, target_action: int, episodes: int = 1):
     cfg_path = os.path.join(base_dir, "city_5_holdout", "config.yaml")
