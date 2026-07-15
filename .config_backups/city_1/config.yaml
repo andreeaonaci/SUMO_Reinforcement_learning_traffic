@@ -1,0 +1,9 @@
+name: city_1
+mode: sumo
+net_file: sumo_rl/nets/single-intersection/single-intersection.net.xml
+route_file: sumo_rl/nets/single-intersection/single-intersection.rou.xml
+single_agent: True
+delta_time: 5
+num_seconds: 600
+sumo_seed: 1
+use_libsumo: true

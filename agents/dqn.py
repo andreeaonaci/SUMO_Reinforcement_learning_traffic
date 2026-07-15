@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 import random
 import logging
 import math
@@ -13,246 +13,371 @@ try:
     import torch
     import torch.nn as nn
     import torch.optim as optim
-    from agents.networks import MLP
+    from agents.networks import NeighborAttentionQNetwork
 
     TORCH_AVAILABLE = True
 except Exception:
     TORCH_AVAILABLE = False
 
 
+Observation = Dict[str, np.ndarray]
+# Expected keys: "own", "neighbors", "neighbor_mask", "hop_dist", "action_mask"
+
+
 class ReplayBuffer:
+    """Stores structured (dict) observations from ALL intersections of a
+    city, pooled together. Pooling across intersections -- rather than one
+    buffer per intersection -- is what forces the shared network to learn a
+    genuinely topology-agnostic policy instead of overfitting to one
+    intersection's quirks.
+    """
+
     def __init__(self, capacity: int = 10000):
         self.buffer = deque(maxlen=capacity)
 
-    def add(self, state, action, reward, next_state, done):
-        self.buffer.append((state, action, reward, next_state, done))
+    def add(self, obs: Observation, action: int, reward: float, next_obs: Observation, done: bool):
+        self.buffer.append((obs, int(action), float(reward), next_obs, float(done)))
 
     def sample(self, batch_size: int):
         batch = random.sample(self.buffer, min(batch_size, len(self.buffer)))
-        states, actions, rewards, next_states, dones = zip(*batch)
-        return states, actions, rewards, next_states, dones
+        obs, actions, rewards, next_obs, dones = zip(*batch)
+        return obs, actions, rewards, next_obs, dones
 
     def __len__(self):
         return len(self.buffer)
 
 
-if TORCH_AVAILABLE:
+def _collate(obs_list, device):
+    """Batch a list of observation dicts into tensors."""
+    own = torch.tensor(
+        np.array([o["own"] for o in obs_list]), dtype=torch.float32, device=device
+    )
+    neighbors = torch.tensor(
+        np.array([o["neighbors"] for o in obs_list]), dtype=torch.float32, device=device
+    )
+    neighbor_mask = torch.tensor(
+        np.array([o["neighbor_mask"] for o in obs_list]), dtype=torch.float32, device=device
+    )
+    hop_dist = torch.tensor(
+        np.array([
+            o.get("hop_dist", np.zeros(o["neighbors"].shape[0], dtype=np.int64))
+            for o in obs_list
+        ]),
+        dtype=torch.long,
+        device=device,
+    )
+    action_mask = torch.tensor(
+        np.array([o["action_mask"] for o in obs_list]), dtype=torch.float32, device=device
+    )
+    return own, neighbors, neighbor_mask, hop_dist, action_mask
 
-    class DQNAgent:
-        """Torch-based DQN agent."""
 
-        def __init__(
-            self,
-            obs_dim: int = 4,
-            action_dim: int = 2,
-            lr: float = 1e-3,
-            device: str = "cpu",
-            buffer_size: int = 10000,
-            batch_size: int = 64,
-            gamma: float = 0.99,
-            target_update: int = 100,
-        ):
-            self.obs_dim = obs_dim
-            self.action_dim = action_dim
-            self.device = torch.device(device)
-            self.q = MLP(obs_dim, action_dim).to(self.device)
-            self.q_target = MLP(obs_dim, action_dim).to(self.device)
+def _mask_q(q: "torch.Tensor", action_mask: "torch.Tensor") -> "torch.Tensor":
+    """Set Q-values of invalid actions to -inf so argmax / target
+    computation never picks or bootstraps off an action that doesn't
+    exist for this intersection's topology."""
+    neg_inf = torch.finfo(q.dtype).min
+    return q.masked_fill(action_mask < 0.5, neg_inf)
+
+
+class DQNAgent:
+    """Torch-based DQN agent with a shared, topology-agnostic Q-network.
+
+    One instance of this agent is trained against every intersection in a
+    city simultaneously (see ``train``): the same weights are used to act
+    for every ``ts_id`` each tick, and every intersection's transitions are
+    stored in the same replay buffer. This is what makes it a "foundation
+    model" for intersections rather than N separate per-intersection
+    models.
+    """
+
+    def __init__(
+        self,
+        own_dim: int = 4,
+        neighbor_dim: int = 3,
+        action_dim: int = 2,
+        k_max: int = 8,
+        lr: float = 1e-3,
+        device: str = "cpu",
+        buffer_size: int = 50000,
+        batch_size: int = 64,
+        gamma: float = 0.99,
+        target_update: int = 1000,
+        d_model: int = 128,
+        n_heads: int = 4,
+        n_hops: int = 4,
+        reward_clip: Optional[float] = 10.0,
+        eps_decay: float = 20000.0,
+    ):
+        self.own_dim = own_dim
+        self.neighbor_dim = neighbor_dim
+        self.action_dim = action_dim
+        self.k_max = k_max
+        self.device = torch.device(device)
+
+        net_kwargs = dict(
+            own_dim=own_dim,
+            neighbor_dim=neighbor_dim,
+            action_dim=action_dim,
+            k_max=k_max,
+            d_model=d_model,
+            n_heads=n_heads,
+            n_hops=n_hops,
+        )
+        self.q = NeighborAttentionQNetwork(**net_kwargs).to(self.device)
+        self.q_target = NeighborAttentionQNetwork(**net_kwargs).to(self.device)
+        self.q_target.load_state_dict(self.q.state_dict())
+
+        self.optimizer = optim.Adam(self.q.parameters(), lr=lr, weight_decay=1e-5, eps=1e-6)
+        self.replay = ReplayBuffer(buffer_size)
+        self.batch_size = batch_size
+        self.gamma = gamma
+        self.eps_start = 1.0
+        self.eps_end = 0.05
+        self.eps_decay = eps_decay
+        self.steps_done = 0
+        self.target_update = target_update
+        self.learn_steps = 0
+        # Reward clipping: applied when a transition is stored, not just
+        # at optimize() time -- this is what actually stopped city_2's
+        # loss blow-up (a few large-magnitude congestion rewards were
+        # dominating the squared-error gradient). Set to None to disable.
+        self.reward_clip = reward_clip
+        logger.info(
+            "own_dim=%d neighbor_dim=%d action_dim=%d k_max=%d eps_decay=%.0f",
+            self.own_dim, self.neighbor_dim, self.action_dim, self.k_max, self.eps_decay,
+        )
+
+    # ------------------------------------------------------------------
+    # Action selection
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _valid_actions(action_mask: np.ndarray) -> np.ndarray:
+        valid = np.nonzero(action_mask > 0.5)[0]
+        return valid
+
+    def _current_epsilon(self) -> float:
+        return self.eps_end + (self.eps_start - self.eps_end) * math.exp(
+            -1.0 * self.steps_done / self.eps_decay
+        )
+
+    def _greedy_action(self, obs: Observation) -> int:
+        with torch.no_grad():
+            own, neighbors, neighbor_mask, hop_dist, action_mask = _collate([obs], self.device)
+            q = self.q(own, neighbors, neighbor_mask, hop_dist)
+            q = _mask_q(q, action_mask)
+            q_np = q.squeeze(0).cpu().numpy()
+            # Break ties randomly instead of always taking the lowest
+            # index. Early in training (or on a symmetric network where
+            # two actions are genuinely equivalent) Q-values for different
+            # actions can be numerically indistinguishable; torch.argmax
+            # always resolves that to the lowest index, which silently
+            # produces a "the model always picks action 0" pattern that
+            # looks like a learned policy but is actually just tie-break
+            # bias. Ties within a small tolerance are resolved uniformly
+            # at random instead.
+            max_q = np.max(q_np)
+            tied = np.flatnonzero(np.isclose(q_np, max_q, atol=1e-4))
+            return int(np.random.choice(tied))
+
+    def q_values(self, obs: Observation) -> np.ndarray:
+        """Masked Q-values for a single observation (invalid actions are
+        NaN, not -inf, so callers can distinguish 'invalid' from 'valid
+        but low' when inspecting/logging)."""
+        with torch.no_grad():
+            own, neighbors, neighbor_mask, hop_dist, action_mask = _collate([obs], self.device)
+            q = self.q(own, neighbors, neighbor_mask, hop_dist).squeeze(0).cpu().numpy()
+        mask = obs["action_mask"] > 0.5
+        out = np.full_like(q, np.nan)
+        out[mask] = q[mask]
+        return out
+
+    def _epsilon_action(self, obs: Observation, eps: float) -> int:
+        # NOTE: steps_done is advanced once per environment TICK (see
+        # `train()`), not once per intersection per tick. Incrementing it
+        # here (per-intersection) would make epsilon decay N times faster
+        # in a city with N intersections than in a single-intersection
+        # city, which desyncs the exploration schedule across the very
+        # cities that get FedAvg'd together every round.
+        if random.random() < eps:
+            valid = self._valid_actions(obs["action_mask"])
+            if len(valid) == 0:
+                valid = np.arange(self.action_dim)
+            return int(random.choice(valid))
+        return self._greedy_action(obs)
+
+    def act(self, obs: Observation, explore: bool = True, eps: Optional[float] = None) -> int:
+        if explore:
+            eps = self._current_epsilon() if eps is None else eps
+            return self._epsilon_action(obs, eps)
+        return self._greedy_action(obs)
+
+    def select_action(self, obs: Observation) -> int:
+        return self.act(obs, explore=True)
+
+    # ------------------------------------------------------------------
+    # Replay + optimization
+    # ------------------------------------------------------------------
+
+    def remember(self, obs: Observation, action: int, reward: float, next_obs: Observation, done: bool) -> None:
+        if self.reward_clip is not None:
+            reward = float(np.clip(reward, -self.reward_clip, self.reward_clip))
+        self.replay.add(obs, action, reward, next_obs, done)
+
+    def train_step(self) -> Optional[float]:
+        return self.optimize()
+
+    def optimize(self) -> Optional[float]:
+        if len(self.replay) < max(4, self.batch_size):
+            return None
+
+        obs, actions, rewards, next_obs, dones = self.replay.sample(self.batch_size)
+
+        own, neighbors, neighbor_mask, hop_dist, action_mask = _collate(obs, self.device)
+        n_own, n_neighbors, n_neighbor_mask, n_hop_dist, n_action_mask = _collate(next_obs, self.device)
+
+        actions_t = torch.tensor(actions, dtype=torch.int64, device=self.device).unsqueeze(1)
+        rewards_t = torch.tensor(rewards, dtype=torch.float32, device=self.device).unsqueeze(1)
+        dones_t = torch.tensor(dones, dtype=torch.float32, device=self.device).unsqueeze(1)
+
+        q_values = self.q(own, neighbors, neighbor_mask, hop_dist)
+        q_taken = q_values.gather(1, actions_t)
+
+        with torch.no_grad():
+            # Double DQN: select next action with the online net, but only
+            # among actions valid for that next observation's topology.
+            next_q_online = _mask_q(
+                self.q(n_own, n_neighbors, n_neighbor_mask, n_hop_dist), n_action_mask
+            )
+            next_actions = next_q_online.argmax(dim=1, keepdim=True)
+            next_q_target = self.q_target(n_own, n_neighbors, n_neighbor_mask, n_hop_dist).gather(
+                1, next_actions
+            )
+            expected = rewards_t + (1.0 - dones_t) * self.gamma * next_q_target
+
+        # Huber loss instead of MSE: MSE squares the TD-error, so a single
+        # large-magnitude transition (e.g. a congestion spike) can
+        # dominate the whole gradient step -- that's what was driving
+        # city_2's loss climbing into the double digits. Huber is linear
+        # past `delta`, so outliers contribute a bounded gradient instead
+        # of an exploding one.
+        loss = nn.functional.smooth_l1_loss(q_taken, expected, beta=1.0)
+        self.optimizer.zero_grad()
+        loss.backward()
+        nn.utils.clip_grad_norm_(self.q.parameters(), 10.0)
+        self.optimizer.step()
+        self.learn_steps += 1
+        if self.learn_steps % self.target_update == 0:
             self.q_target.load_state_dict(self.q.state_dict())
-            self.optimizer = optim.Adam(self.q.parameters(), lr=lr)
-            self.replay = ReplayBuffer(buffer_size)
-            self.batch_size = batch_size
-            self.gamma = gamma
-            self.eps_start = 1.0
-            self.eps_end = 0.05
-            self.eps_decay = 50000.0
-            self.steps_done = 0
-            self.target_update = target_update
-            self.learn_steps = 0
 
-        def _greedy_action(self, state: np.ndarray) -> int:
-            with torch.no_grad():
-                s = torch.tensor(np.array(state), dtype=torch.float32, device=self.device).unsqueeze(0)
-                q_values = self.q(s)
-                return int(q_values.argmax(dim=1).item())
+        return float(loss.item())
 
-        def _epsilon_action(self, state: np.ndarray) -> int:
-            eps_threshold = self.eps_end + (self.eps_start - self.eps_end) * math.exp(
-                -1.0 * self.steps_done / self.eps_decay
-            )
-            self.steps_done += 1
-            if random.random() < eps_threshold:
-                return random.randrange(self.action_dim)
-            return self._greedy_action(state)
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
 
-        def act(self, state: np.ndarray, explore: bool = True) -> int:
-            if explore:
-                return self._epsilon_action(state)
-            return self._greedy_action(state)
+    def save(self, path: str) -> None:
+        torch.save(self.q.state_dict(), path)
 
-        def remember(self, state: np.ndarray, action: int, reward: float, next_state: np.ndarray, done: bool) -> None:
-            self.replay.add(state, int(action), float(reward), next_state, float(done))
+    def load(self, path: str) -> None:
+        state = torch.load(path, map_location=self.device)
+        self.q.load_state_dict(state)
+        self.q_target.load_state_dict(state)
 
-        def train_step(self) -> None:
-            self.optimize()
+    def state_dict(self) -> Dict[str, "torch.Tensor"]:
+        return {k: v.cpu() for k, v in self.q.state_dict().items()}
 
-        def select_action(self, state: np.ndarray) -> int:
-            return self.act(state, explore=True)
+    def load_state_dict(self, state: Dict[str, "torch.Tensor"]) -> None:
+        self.q.load_state_dict(state)
+        self.q_target.load_state_dict(state)
 
-        def optimize(self) -> None:
-            if len(self.replay) < max(4, self.batch_size):
-                return
-            states, actions, rewards, next_states, dones = self.replay.sample(self.batch_size)
-            states = torch.tensor(np.array(states), dtype=torch.float32, device=self.device)
-            actions = torch.tensor(actions, dtype=torch.int64, device=self.device).unsqueeze(1)
-            rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device).unsqueeze(1)
-            next_states = torch.tensor(np.array(next_states), dtype=torch.float32, device=self.device)
-            dones = torch.tensor(dones, dtype=torch.float32, device=self.device).unsqueeze(1)
+    # ------------------------------------------------------------------
+    # Training loop -- multi-agent aware
+    # ------------------------------------------------------------------
 
-            q_values = self.q(states).gather(1, actions)
-            with torch.no_grad():
-                next_q = self.q_target(next_states).max(1)[0].unsqueeze(1)
-                expected = rewards + (1.0 - dones) * self.gamma * next_q
+    def train(
+        self,
+        env,
+        episodes: int = 5,
+        log_loss_every_steps: int = 50,
+    ) -> Tuple[Dict[str, "torch.Tensor"], int]:
+        """Train against a multi-agent city environment.
 
-            loss = nn.functional.mse_loss(q_values, expected)
-            self.optimizer.zero_grad()
-            loss.backward()
-            nn.utils.clip_grad_norm_(self.q.parameters(), 10.0)
-            self.optimizer.step()
-            self.learn_steps += 1
-            if self.learn_steps % self.target_update == 0:
-                self.q_target.load_state_dict(self.q.state_dict())
+        Contract expected of ``env``:
+            env.reset()            -> Dict[ts_id, obs_dict]
+            env.step(actions)      -> (Dict[ts_id, obs_dict],
+                                        Dict[ts_id, float] rewards,
+                                        Dict[ts_id, bool] dones (may
+                                            include "__all__"),
+                                        info dict)
 
-        def save(self, path: str) -> None:
-            torch.save(self.q.state_dict(), path)
+        Every intersection in the city is stepped simultaneously each
+        tick, using the SAME shared network to pick each intersection's
+        action; every intersection's transition is stored in the same
+        replay buffer.
+        """
+        total_steps = 0
 
-        def load(self, path: str) -> None:
-            state = torch.load(path, map_location=self.device)
-            self.q.load_state_dict(state)
-            self.q_target.load_state_dict(state)
+        for ep in range(1, episodes + 1):
+            obs_dict = env.reset()
+            if not isinstance(obs_dict, dict):
+                # Backward-compat: single-agent env returning a flat obs.
+                obs_dict = {"__single__": obs_dict}
 
-        def state_dict(self) -> Dict[str, torch.Tensor]:
-            return {k: v.cpu() for k, v in self.q.state_dict().items()}
+            done = False
+            ep_steps = 0
+            ep_losses: List[float] = []
 
-        def load_state_dict(self, state: Dict[str, torch.Tensor]) -> None:
-            self.q.load_state_dict(state)
-            self.q_target.load_state_dict(state)
+            while not done:
+                # One shared epsilon for this tick, used by every
+                # intersection -- see _current_epsilon's docstring for
+                # why this must NOT be per-intersection.
+                eps = self._current_epsilon()
+                actions = {ts_id: self.act(o, explore=True, eps=eps) for ts_id, o in obs_dict.items()}
+                self.steps_done += 1
 
-        def train(self, env, episodes: int = 5) -> Tuple[Dict[str, torch.Tensor], int]:
-            total_steps = 0
-            for ep in range(episodes):
-                reset_ret = env.reset()
-                if isinstance(reset_ret, tuple) and len(reset_ret) >= 1:
-                    state = reset_ret[0]
+                if len(actions) == 1 and "__single__" in actions:
+                    next_obs, reward, done, _ = env.step(actions["__single__"])
+                    next_obs_dict = {"__single__": next_obs}
+                    rewards = {"__single__": reward}
+                    dones = {"__single__": done, "__all__": done}
                 else:
-                    state = reset_ret
-                done = False
-                while not done:
-                    action = self.act(state, explore=True)
-                    next_state, reward, done, _ = env.step(action)
-                    self.remember(state, action, reward, next_state, done)
-                    self.train_step()
-                    state = next_state
-                    total_steps += 1
-            return self.state_dict(), total_steps
+                    next_obs_dict, rewards, dones, _ = env.step(actions)
 
-else:
+                for ts_id, o in obs_dict.items():
+                    r = rewards.get(ts_id, 0.0)
+                    no = next_obs_dict.get(ts_id, o)
+                    d = dones.get(ts_id, dones.get("__all__", False))
+                    self.remember(o, actions[ts_id], r, no, d)
 
-    class DQNAgent:
-        """Fallback numpy-based DQN agent."""
+                loss = self.optimize()
+                if loss is not None:
+                    ep_losses.append(loss)
 
-        def __init__(
-            self,
-            obs_dim: int = 4,
-            action_dim: int = 2,
-            lr: float = 1e-3,
-            device: str = "cpu",
-            buffer_size: int = 10000,
-            batch_size: int = 64,
-            gamma: float = 0.99,
-        ):
-            self.obs_dim = obs_dim
-            self.action_dim = action_dim
-            self.lr = lr
-            self.replay = ReplayBuffer(buffer_size)
-            self.batch_size = batch_size
-            self.gamma = gamma
-            self.eps_start = 1.0
-            self.eps_end = 0.05
-            self.eps_decay = 50000.0
-            self.steps_done = 0
-            self.w = np.zeros((obs_dim, action_dim), dtype=np.float32)
-            self.b = np.zeros((action_dim,), dtype=np.float32)
+                obs_dict = next_obs_dict
+                done = dones.get("__all__", all(dones.values()) if dones else True)
+                ep_steps += 1
+                total_steps += 1
 
-        def _greedy_action(self, state: np.ndarray) -> int:
-            q_values = np.dot(np.array(state, dtype=np.float32), self.w) + self.b
-            return int(np.argmax(q_values))
+                if log_loss_every_steps > 0 and ep_losses and ep_steps % log_loss_every_steps == 0:
+                    window = ep_losses[-log_loss_every_steps:]
+                    msg = (
+                        f"  [train] ep={ep}/{episodes}  step={ep_steps}"
+                        f"  loss(last {len(window)})={np.mean(window):.6f}"
+                    )
+                    logger.info(msg)
 
-        def _epsilon_action(self, state: np.ndarray) -> int:
-            eps_threshold = self.eps_end + (self.eps_start - self.eps_end) * math.exp(
-                -1.0 * self.steps_done / self.eps_decay
-            )
-            self.steps_done += 1
-            if random.random() < eps_threshold:
-                return random.randrange(self.action_dim)
-            return self._greedy_action(state)
+            if ep_losses:
+                msg = (
+                    f"[train] ep={ep}/{episodes}  steps={ep_steps}"
+                    f"  loss  mean={np.mean(ep_losses):.6f}"
+                    f"  min={np.min(ep_losses):.6f}"
+                    f"  max={np.max(ep_losses):.6f}"
+                    f"  updates={len(ep_losses)}"
+                )
+            else:
+                msg = f"[train] ep={ep}/{episodes}  steps={ep_steps}  loss=n/a (buffer not yet full)"
+            logger.info(msg)
 
-        def act(self, state: np.ndarray, explore: bool = True) -> int:
-            if explore:
-                return self._epsilon_action(state)
-            return self._greedy_action(state)
-
-        def remember(self, state: np.ndarray, action: int, reward: float, next_state: np.ndarray, done: bool) -> None:
-            self.replay.add(state, int(action), float(reward), next_state, float(done))
-
-        def train_step(self) -> None:
-            if len(self.replay) < 4:
-                return
-            states, actions, rewards, next_states, dones = self.replay.sample(self.batch_size)
-            states = np.array(states, dtype=np.float32)
-            actions = np.array(actions, dtype=np.int64)
-            rewards = np.array(rewards, dtype=np.float32)
-            next_states = np.array(next_states, dtype=np.float32)
-            dones = np.array(dones, dtype=np.float32)
-            # Simple gradient-like weight update for fallback
-            for s, a, r, ns, d in zip(states, actions, rewards, next_states, dones):
-                td_target = r + self.gamma * np.max(np.dot(ns, self.w) + self.b) * (1.0 - d)
-                td_error = td_target - (np.dot(s, self.w[:, a]) + self.b[a])
-                self.w[:, a] += self.lr * td_error * s
-                self.b[a] += self.lr * td_error
-
-        def save(self, path: str) -> None:
-            np.savez(path, w=self.w, b=self.b)
-
-        def load(self, path: str) -> None:
-            data = np.load(path)
-            self.w = data["w"]
-            self.b = data["b"]
-
-        def state_dict(self):
-            return {"w": self.w.copy(), "b": self.b.copy()}
-
-        def load_state_dict(self, state):
-            self.w = np.array(state["w"], dtype=np.float32)
-            self.b = np.array(state["b"], dtype=np.float32)
-
-        def select_action(self, state: np.ndarray) -> int:
-            return self.act(state, explore=True)
-
-        def train(self, env, episodes: int = 5) -> Tuple[Dict[str, np.ndarray], int]:
-            total_steps = 0
-            for ep in range(episodes):
-                reset_ret = env.reset()
-                if isinstance(reset_ret, tuple) and len(reset_ret) >= 1:
-                    state = reset_ret[0]
-                else:
-                    state = reset_ret
-                done = False
-                while not done:
-                    action = self.act(state, explore=True)
-                    next_state, reward, done, info = env.step(action)
-                    self.remember(state, action, reward, next_state, done)
-                    self.train_step()
-                    state = next_state
-                    total_steps += 1
-            return self.state_dict(), total_steps
-
+        return self.state_dict(), total_steps

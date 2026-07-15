@@ -1,14 +1,12 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 import logging
 import random
 import os
 import sys
 import time
-
 import numpy as np
 
 logger = logging.getLogger(__name__)
-
 
 class MockEnv:
     """A tiny deterministic mock environment for quick testing.
@@ -173,8 +171,14 @@ def build_env_from_config(cfg: Dict[str, Any], validate: bool = True, probe_step
             net = cfg["net_file"]
             route = cfg["route_file"]
             params = {}
-            # pass through commonly used SUMO env parameters
-            for k in ["use_gui", "delta_time", "min_green", "yellow_time", "num_seconds", "sumo_seed", "single_agent", "reward_fn", "ts_ids"]:
+            allowed_keys = {"out_csv_name", "use_gui", "virtual_display", "begin_time", 
+                            "num_seconds", "max_depart_delay", "waiting_time_memory", 
+                            "time_to_teleport", "delta_time", "yellow_time", "min_green", 
+                            "max_green", "enforce_max_green", "single_agent", "reward_fn", 
+                            "reward_weights", "observation_class", "add_system_info", "add_per_agent_info", 
+                            "sumo_seed", "ts_ids", "fixed_ts", "sumo_warnings", "additional_sumo_cmd", "render_mode"}
+
+            for k in allowed_keys:
                 if k in cfg:
                     params[k] = cfg[k]
 
@@ -187,75 +191,134 @@ def build_env_from_config(cfg: Dict[str, Any], validate: bool = True, probe_step
     return MockEnv(obs_dim=cfg.get("obs_dim", 4), action_dim=cfg.get("action_dim", 2), seed=cfg.get("seed", None))
 
 
-class PaddingWrapper:
-    """Wrap an environment to pad observations to a fixed size and unify action space."""
+class LaneEncoder:
+    """Canonical lane feature schema shared by every city."""
 
-    def __init__(self, env, target_obs_dim: int, target_action_n: int):
+    FEATURES = [
+        ("queue", lambda l, n: l.queue / n.max_queue),
+        ("waiting_time", lambda l, n: l.waiting_time / n.max_wait),
+        ("occupancy", lambda l, n: l.occupancy),
+        ("speed", lambda l, n: l.speed / n.max_speed),
+        ("is_left", lambda l, n: float(l.is_left)),
+        ("is_straight", lambda l, n: float(l.is_straight)),
+        ("is_right", lambda l, n: float(l.is_right)),
+    ]
+
+    GLOBAL_FEATURES = [
+        ("current_phase", lambda phase, elapsed, yellow: phase / 16.0),
+        ("elapsed_green", lambda phase, elapsed, yellow: elapsed / 120.0),
+        ("yellow_time", lambda phase, elapsed, yellow: yellow / 10.0),
+    ]
+
+
+class LaneExtractor:
+    """Override extract() for each city/environment."""
+
+    def __init__(self, env):
         self.env = env
-        self.target_obs_dim = target_obs_dim
-        self.target_action_n = target_action_n
-        self._orig_action_n = None
+
+    def extract(self):
+        raise NotImplementedError
+
+
+class LaneNormalizer:
+    def __init__(self, max_queue=50, max_wait=300,
+                 max_speed=20.0, encoder=LaneEncoder):
+        self.max_queue = max_queue
+        self.max_wait = max_wait
+        self.max_speed = max_speed
+        self.encoder = encoder
+
+    def normalize(self, lane):
+        return np.asarray(
+            [fn(lane, self) for _, fn in self.encoder.FEATURES],
+            dtype=np.float32
+        )
+
+
+class LaneSorter:
+    def __init__(self, key=None):
+        self.key = key or (
+            lambda l: (l.queue, l.waiting_time, l.occupancy)
+        )
+
+    def sort(self, lanes):
+        return sorted(lanes, key=self.key, reverse=True)
+
+
+class TopKEncoder:
+    def __init__(self, normalizer, max_lanes=16):
+        self.normalizer = normalizer
+        self.max_lanes = max_lanes
+        self.features_per_lane = len(
+            self.normalizer.encoder.FEATURES
+        )
+        self.output_dim = (
+            self.max_lanes * self.features_per_lane +
+            len(self.normalizer.encoder.GLOBAL_FEATURES)
+        )
+
+    def encode(self, lanes, current_phase,
+               elapsed_green, yellow_time=0):
+
+        lanes = lanes[:self.max_lanes]
+        features = []
+
+        for lane in lanes:
+            features.extend(self.normalizer.normalize(lane))
+
+        while len(lanes) < self.max_lanes:
+            features.extend(
+                np.zeros(
+                    self.features_per_lane,
+                    dtype=np.float32
+                )
+            )
+            lanes.append(None)
+
+        for _, fn in self.normalizer.encoder.GLOBAL_FEATURES:
+            features.append(
+                fn(current_phase, elapsed_green, yellow_time)
+            )
+
+        return np.asarray(features, dtype=np.float32)
+
+
+class ActionMapper:
+    def __init__(self, mapping):
+        self.mapping = mapping
+
+    def map(self, action):
+        return self.mapping.get(int(action), 0)
+
+
+class FederatedWrapper:
+    def __init__(self, env, extractor,
+                 sorter, encoder, mapper):
+        self.env = env
+        self.extractor = extractor
+        self.sorter = sorter
+        self.encoder = encoder
+        self.mapper = mapper
+
+    def _state(self):
+        lanes, phase, elapsed = self.extractor.extract()
+        lanes = self.sorter.sort(lanes)
+        return self.encoder.encode(lanes, phase, elapsed)
 
     def reset(self):
-        # pe WSL, SUMO are nevoie de timp sa elibereze portul intre episoade
-        if hasattr(self.env, 'episode') and self.env.episode > 0:
-            time.sleep(3)
-
-        reset_ret = self.env.reset()
-
-        try:
-            self._orig_action_n = self.env.action_space.n
-        except Exception:
-            self._orig_action_n = self.target_action_n
-
-        if isinstance(reset_ret, tuple) and len(reset_ret) >= 1:
-            obs = reset_ret[0]
-        else:
-            obs = reset_ret
-        return self._pad_obs(obs)
+        if hasattr(self.env, "episode") and self.env.episode > 0:
+            time.sleep(2)
+        ret = self.env.reset()
+        if isinstance(ret, tuple):
+            ret = ret[0]
+        return self._state()
 
     def step(self, action):
-        orig_n = self._orig_action_n
-        if orig_n is not None and action >= orig_n:
-            mapped = int(orig_n - 1)
-        else:
-            mapped = int(action)
-        next_obs, reward, done, info = self.env.step(mapped)
-        return self._pad_obs(next_obs), reward, done, info
+        local_action = self.mapper.map(action)
+        _, reward, done, info = self.env.step(local_action)
+        return self._state(), reward, done, info
 
     def close(self):
-        return self.env.close()
+        self.env.close()
 
-    def _pad_obs(self, obs):
-        try:
-            arr = np.array(obs, dtype=float)
-            if arr.ndim == 1 and arr.dtype != object:
-                flat = arr
-            else:
-                raise Exception()
-        except Exception:
-            pieces = []
-            for el in obs:
-                try:
-                    if isinstance(el, dict):
-                        sub = []
-                        for v in el.values():
-                            try:
-                                sub.append(np.asarray(v, dtype=float).ravel())
-                            except Exception:
-                                sub.append(np.asarray([float(v)]))
-                        a = np.concatenate(sub) if sub else np.zeros(0, dtype=float)
-                    else:
-                        try:
-                            a = np.asarray(el, dtype=float).ravel()
-                        except Exception:
-                            a = np.asarray([float(el)])
-                except Exception:
-                    a = np.zeros(0, dtype=float)
-                pieces.append(a)
-            flat = np.concatenate(pieces) if pieces else np.zeros(0, dtype=float)
-
-        if flat.shape[0] >= self.target_obs_dim:
-            return flat[: self.target_obs_dim]
-        pad = np.zeros(self.target_obs_dim - flat.shape[0], dtype=float)
-        return np.concatenate([flat, pad])

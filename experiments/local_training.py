@@ -1,5 +1,6 @@
 """Train local models independently per city (Scenario A)."""
 import argparse
+import datetime
 import logging
 import os
 import sys
@@ -12,6 +13,10 @@ import gymnasium as gym
 import csv
 import numpy as np
 
+timestamp = datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
+
+run_dir = os.path.join("results", f"run_{timestamp}")
+os.makedirs(run_dir, exist_ok=True)
 logger = logging.getLogger(__name__)
 
 
@@ -98,7 +103,7 @@ def main(args):
                     env.close()
                 except Exception:
                     pass
-        out = os.path.join("results", f"local_{name}.pth")
+        out = os.path.join(run_dir, f"local_{name}.pth")
         agent.save(out)
         logger.info("Saved local model for %s -> %s", name, out)
 
