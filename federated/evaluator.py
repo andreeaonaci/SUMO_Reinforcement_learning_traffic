@@ -69,7 +69,7 @@ class HoldoutEvaluator:
 
         return int(valid[0])
 
-    def _evaluate_policy(self, policy_name: str, model=None, seed_offset: int = 0) -> dict:
+    def _evaluate_policy(self, policy_name: str, model=None, seed_offset: int = 0, episode_count: int | None = None) -> dict:
         env = self._get_env()
         ep_rewards = []
         ep_waiting_times = []
@@ -80,7 +80,8 @@ class HoldoutEvaluator:
         ep_action_logs = []
         ep_q_gaps = []
 
-        for ep in range(self.episodes):
+        episode_count = self.episodes if episode_count is None else max(1, episode_count)
+        for ep in range(episode_count):
             try:
                 seed = seed_offset + ep
                 self._set_seed(seed)
@@ -210,12 +211,18 @@ class HoldoutEvaluator:
 
     def evaluate(self, model) -> dict:
         summary = {}
-        trained_result = self._evaluate_policy("trained", model=model, seed_offset=0)
+        trained_result = self._evaluate_policy("trained", model=model, seed_offset=0, episode_count=self.episodes)
         summary["trained"] = trained_result
 
         if self.include_baselines:
+            baseline_count = max(1, self.eval_seeds)
             for policy_name in ["always_zero", "random"]:
-                summary[policy_name] = self._evaluate_policy(policy_name, model=None, seed_offset=self.eval_seeds)
+                summary[policy_name] = self._evaluate_policy(
+                    policy_name,
+                    model=None,
+                    seed_offset=self.eval_seeds,
+                    episode_count=baseline_count,
+                )
 
         self.last_summary = summary
         self._persist_summary(summary)

@@ -845,40 +845,44 @@ def build_federated_env(cfg: Dict[str, Any]) -> MultiAgentFederatedWrapper:
 # ---------------------------------------------------------------------------
 
 class RewardShapingWrapper:
-    """Apply a simple, configurable reward shaping term on top of the raw env reward."""
+    """Apply reward shaping only when it is safe for per-intersection credit assignment.
+
+    This wrapper intentionally avoids using city-wide aggregates such as global waiting time,
+    stopped vehicles, or queue length because those are not attributable to a single intersection.
+    For multi-agent traffic control, only per-intersection-local signals should be used.
+    """
 
     def __init__(
         self,
         env: Any,
-        wait_weight: float = 0.01,
-        stopped_weight: float = 0.05,
-        queue_weight: float = 0.01,
+        queue_weight: float = 0.0,
+        wait_weight: float = 0.0,
+        stopped_weight: float = 0.0,
         raw_weight: float = 1.0,
     ):
         self.env = env
+        self.queue_weight = float(queue_weight)
         self.wait_weight = float(wait_weight)
         self.stopped_weight = float(stopped_weight)
-        self.queue_weight = float(queue_weight)
         self.raw_weight = float(raw_weight)
 
-    @staticmethod
-    def _extract_metric(info: Dict[str, Any], candidates: Tuple[str, ...], default: float = 0.0) -> float:
-        for key in candidates:
-            if key in info and info[key] is not None:
-                return float(info[key])
+    def _extract_local_metric(self, info: Dict[str, Any], ts_id: str, default: float = 0.0) -> float:
+        if not isinstance(info, dict):
+            return float(default)
+        if ts_id in info:
+            return float(info[ts_id])
         return float(default)
 
-    def _shape_reward(self, reward: float, info: Dict[str, Any]) -> float:
+    def _shape_reward(self, reward: float, info: Dict[str, Any], ts_id: str | None = None) -> float:
         shaped = self.raw_weight * float(reward)
-        wait_time = self._extract_metric(info, ("system_mean_waiting_time", "mean_waiting_time", "waiting_time"))
-        stopped = self._extract_metric(info, ("agents_total_stopped", "stopped"))
-        queue_length = self._extract_metric(info, ("system_mean_queue_length", "mean_queue_length", "queue_length"))
+        if ts_id is None:
+            return float(shaped)
         if self.wait_weight != 0.0:
-            shaped -= self.wait_weight * wait_time
+            shaped -= self.wait_weight * self._extract_local_metric(info, f"{ts_id}_waiting_time", 0.0)
         if self.stopped_weight != 0.0:
-            shaped -= self.stopped_weight * stopped
+            shaped -= self.stopped_weight * self._extract_local_metric(info, f"{ts_id}_stopped", 0.0)
         if self.queue_weight != 0.0:
-            shaped -= self.queue_weight * queue_length
+            shaped -= self.queue_weight * self._extract_local_metric(info, f"{ts_id}_queue_length", 0.0)
         return float(shaped)
 
     def reset(self, *a, **kw):
@@ -887,7 +891,10 @@ class RewardShapingWrapper:
     def step(self, actions):
         obs, rewards, dones, info = self.env.step(actions)
         if isinstance(rewards, dict):
-            shaped_rewards = {ts_id: self._shape_reward(float(r), info) for ts_id, r in rewards.items()}
+            shaped_rewards = {
+                ts_id: self._shape_reward(float(r), info, ts_id=ts_id)
+                for ts_id, r in rewards.items()
+            }
         else:
             shaped_rewards = self._shape_reward(float(rewards), info)
         return obs, shaped_rewards, dones, info

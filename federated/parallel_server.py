@@ -26,7 +26,11 @@ until told to stop.
 import logging
 import multiprocessing as mp
 import os
+import random
 from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+import torch
 
 import torch
 
@@ -36,6 +40,17 @@ from environments.federated_env import build_federated_env, ActionMaskPadder
 from agents.dqn import DQNAgent
 
 logger = logging.getLogger(__name__)
+
+
+def seed_everything(seed: int | None = None) -> None:
+    if seed is None:
+        return
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    os.environ.setdefault("PYTHONHASHSEED", str(seed))
 
 
 def _client_worker(
@@ -63,6 +78,10 @@ def _client_worker(
         level=logging.INFO,
         format=f"%(asctime)s | %(levelname)s | [{name}] %(name)s | %(message)s",
     )
+    worker_seed = None
+    if cfg.get("seed") is not None:
+        worker_seed = int(cfg["seed"]) + sum(ord(ch) for ch in name)
+    seed_everything(worker_seed)
     try:
         env = build_federated_env(cfg)
         env = CommDropoutWrapper(ActionMaskPadder(env, action_dim), **comm_dropout_cfg)

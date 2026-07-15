@@ -79,6 +79,7 @@ def load_city_configs(base_dir: str, seed: int | None = None) -> list:
         cfg = copy.deepcopy(cfg)
         if seed is not None:
             cfg["seed"] = seed
+            cfg["sumo_seed"] = seed
         city_configs.append((name, cfg))
 
     if not city_configs:
@@ -424,7 +425,7 @@ if __name__ == "__main__":
     parser.add_argument("--eval_every",      type=int, default=1)
     parser.add_argument("--eval_episodes",        type=int, default=1)
     parser.add_argument("--eval_seeds", type=int, default=3,
-                        help="Number of evaluation episodes / seeds to aggregate per policy.")
+                        help="Number of distinct evaluation seeds to use for the baseline policies; the trained policy always uses the first seed.")
     parser.add_argument("--include_baselines", action="store_true",
                         help="Compare the trained policy against simple baselines during evaluation.")
     parser.add_argument("--log_loss_every_steps", type=int, default=50,
