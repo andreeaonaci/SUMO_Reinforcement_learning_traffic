@@ -1,40 +1,59 @@
-"""Federated server — orchestrates rounds of FedAvg."""
+"""Federated server -- orchestrates rounds of pluggable-strategy aggregation.
+
+No aggregation-specific logic lives here beyond: build a ClientRoundInfo per
+client, hand the batch to the configured strategy, weighted_average the
+result. Swapping strategies is a config change (`aggregation_strategy: ...`),
+never a code change in this file.
+"""
 import logging
 import os
 from typing import Any, Dict, List, Optional
 
 import torch
 
-from federated.aggregation import fed_avg
+from federated.aggregation import masked_head_weighted_average, weighted_average
+from federated.aggregation_strategies import (
+    BaseAggregationStrategy,
+    ClientRoundInfo,
+    GradientSurvivalStrategy,
+    build_aggregation_strategy,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class FederatedServer:
-    """Coordinate clients through multiple rounds of Federated Averaging.
+    """Coordinate clients through multiple rounds of pluggable-strategy FedAvg.
 
     Each round:
       1. Broadcast the current global weights to every client.
-      2. Each client trains locally; its weights are checkpointed to disk
-         IMMEDIATELY (see ``client_checkpoint_every``) rather than only
-         after every client in the round has finished -- useful when a
-         city with many intersections (e.g. 16) takes far longer per
-         round than a 1-intersection city, and you don't want to wait on
-         the slowest client just to see the fastest one's progress.
-      3. Aggregate via FedAvg (weighted by step count).
-      4. Optionally evaluate on the holdout city and checkpoint the
-         aggregated global model to disk.
+      2. Each client trains locally, returning (state_dict, n_samples, mean_loss).
+      3. Build a ClientRoundInfo per client -- includes pseudo-gradients
+         (client_state - global_state_before_this_round) and the
+         federation's own last pseudo-gradient, so gradient-aware
+         strategies (alignment, novelty, survival) have real signal without
+         clients ever exposing raw autograd gradients to the server.
+      4. Ask the configured strategy for weights, then weighted_average.
+      5. Optionally evaluate on the holdout city and checkpoint to disk.
 
     Args:
-        global_model:     A ``DQNAgent`` instance that acts as the global model.
-        clients:          List of ``FederatedClient`` instances.
-        evaluator:        Optional ``HoldoutEvaluator``.  When None, evaluation
-                          metrics are recorded as ``None`` in the history.
-        checkpoint_dir:   Directory where per-round / per-client ``.pth``
-                          files are saved.
-        client_checkpoint_every: Save a client's local weights every this
-                          many ROUNDS (1 = every round, the default). Set
-                          to 0 to disable per-client checkpointing.
+        global_model:        A DQNAgent-like object exposing state_dict() /
+                             load_state_dict() and a ``.q`` submodule to
+                             checkpoint.
+        clients:             List of client objects. ``local_train`` must
+                             return ``(state_dict, n_samples)`` or
+                             ``(state_dict, n_samples, mean_loss)`` --
+                             both are accepted (see ``_call_local_train``).
+        evaluator:            Optional HoldoutEvaluator.
+        checkpoint_dir:       Directory for per-round ``.pth`` files.
+        aggregation_strategy: Name registered in
+                             ``aggregation_strategies.STRATEGY_REGISTRY``
+                             (default "fedavg" -- classic sample-weighted
+                             averaging, identical behavior to before this
+                             refactor).
+        aggregation_config:   Passed straight through to the strategy's
+                             constructor (e.g. {"ema_beta": 0.9,
+                             "survival_window": 3}).
     """
 
     def __init__(
@@ -43,67 +62,129 @@ class FederatedServer:
         clients: List[Any],
         evaluator: Optional[Any] = None,
         checkpoint_dir: str = "checkpoints",
-        client_checkpoint_every: int = 1,
+        aggregation_strategy: str = "fedavg",
+        aggregation_config: Optional[Dict[str, Any]] = None,
     ):
-        self.global_model   = global_model
-        self.clients        = clients
-        self.evaluator      = evaluator
+        self.global_model = global_model
+        self.clients = clients
+        self.evaluator = evaluator
         self.checkpoint_dir = checkpoint_dir
-        self.client_checkpoint_every = client_checkpoint_every
-        os.makedirs(os.path.join(checkpoint_dir, "clients"), exist_ok=True)
+
+        self.strategy: BaseAggregationStrategy = build_aggregation_strategy(
+            aggregation_strategy, aggregation_config
+        )
+        logger.info(
+            "Aggregation strategy: %s  config=%s",
+            type(self.strategy).__name__, aggregation_config or {},
+        )
+
+        # Per-client history needed to compute deltas each round.
+        self._previous_client_state: Dict[str, Dict[str, torch.Tensor]] = {}
+        self._previous_loss: Dict[str, float] = {}
+        self._previous_global_state: Optional[Dict[str, torch.Tensor]] = None
+        self._global_gradient: Optional[Dict[str, torch.Tensor]] = None
+
+    # ------------------------------------------------------------------
+    # Client call compatibility
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _call_local_train(client: Any, global_state: Dict[str, torch.Tensor]):
+        """Accept clients whose local_train returns either a 2- or 3-tuple.
+
+        Older clients return (state_dict, n_samples). Strategy-aware
+        clients additionally return mean_loss as a third element. Both
+        work without touching client code that hasn't been updated yet.
+        """
+        result = client.local_train(global_state)
+        if len(result) == 4:
+            state_dict, n_samples, mean_loss, action_counts = result
+        elif len(result) == 3:
+            state_dict, n_samples, mean_loss = result
+            action_counts = None
+        else:
+            state_dict, n_samples = result
+            mean_loss = None
+            action_counts = None
+        return state_dict, n_samples, mean_loss, action_counts
+
+    # ------------------------------------------------------------------
+    # Main loop
+    # ------------------------------------------------------------------
 
     def run(self, rounds: int, eval_every: int = 1) -> Dict[str, Any]:
-        """Execute ``rounds`` rounds of FedAvg.
-
-        Args:
-            rounds:     Total number of federated rounds.
-            eval_every: Evaluate and checkpoint every this many rounds.
-
-        Returns:
-            history dict with keys:
-              round, client_samples, eval_reward,
-              eval_waiting_time, eval_stopped, eval_action_counts
-        """
         history: Dict[str, list] = {
-            "round":              [],
-            "client_samples":     [],
-            "eval_reward":        [],
-            "eval_waiting_time":  [],
-            "eval_stopped":       [],
-            "eval_action_counts": [],
-            "eval_q_gaps":        [],
+            "round": [],
+            "client_samples": [],
+            "eval_reward": [],
+            "eval_waiting_time": [],
+            "eval_stopped": [],
         }
 
         for r in range(1, rounds + 1):
             logger.info("=== Federated round %d / %d ===", r, rounds)
 
-            global_state  = self.global_model.state_dict()
-            updates       = []
+            global_state_before = self.global_model.state_dict()
+            client_states: Dict[str, Dict[str, torch.Tensor]] = {}
+            infos: List[ClientRoundInfo] = []
             total_samples = 0
 
+            client_action_counts: Dict[str, Optional[Dict[int, int]]] = {}
+
             for client in self.clients:
-                state_dict, n_samples = client.local_train(global_state)
-                updates.append((state_dict, n_samples))
+                cid = getattr(client, "name", repr(client))
+                state_dict, n_samples, mean_loss, action_counts = self._call_local_train(
+                    client, global_state_before
+                )
+                client_states[cid] = state_dict
+                client_action_counts[cid] = action_counts
                 total_samples += n_samples
 
-                # Save THIS client's local weights right away -- don't
-                # wait for every other client in the round to finish.
-                # This is what fixes "we're training city_6 but still
-                # don't have city_1's weights": city_1's checkpoint is
-                # written the moment city_1 finishes, every round.
-                if self.client_checkpoint_every and (r % self.client_checkpoint_every == 0):
-                    client_ckpt_path = os.path.join(
-                        self.checkpoint_dir, "clients", f"{client.name}_round_{r:03d}.pth"
-                    )
-                    torch.save(state_dict, client_ckpt_path)
-                    logger.info(
-                        "Client '%s' local checkpoint saved: %s (samples=%d)",
-                        client.name, client_ckpt_path, n_samples,
-                    )
+                client_gradient = self.strategy.compute_pseudo_gradient(
+                    state_dict, global_state_before
+                )
 
-            # Weighted aggregation
-            agg_state = fed_avg(updates)
+                infos.append(ClientRoundInfo(
+                    client_id=cid,
+                    num_samples=n_samples,
+                    client_state=state_dict,
+                    previous_client_state=self._previous_client_state.get(cid),
+                    global_state=global_state_before,
+                    previous_global_state=self._previous_global_state,
+                    client_gradient=client_gradient,
+                    previous_gradient=self.strategy.get_state(cid).get("_last_client_gradient"),
+                    global_gradient=self._global_gradient,
+                    local_loss=mean_loss,
+                    previous_loss=self._previous_loss.get(cid),
+                    round_num=r,
+                ))
+
+                # Persist this round's values as "previous" for next round.
+                self._previous_client_state[cid] = state_dict
+                if mean_loss is not None:
+                    self._previous_loss[cid] = mean_loss
+                if client_gradient is not None:
+                    self.strategy.get_state(cid)["_last_client_gradient"] = client_gradient
+
+            # ---- weight + aggregate ---------------------------------------
+            weights = self.strategy.compute_weights(infos)
+            ordered_ids = [info.client_id for info in infos]
+            agg_state = masked_head_weighted_average(
+                [client_states[cid] for cid in ordered_ids],
+                [weights[cid] for cid in ordered_ids],
+                [client_action_counts.get(cid) for cid in ordered_ids],
+            )
             self.global_model.load_state_dict(agg_state)
+
+            # Update the federation's own trajectory for next round's
+            # alignment/novelty/survival scoring.
+            new_global_gradient = self.strategy.compute_pseudo_gradient(
+                agg_state, global_state_before
+            )
+            self._global_gradient = new_global_gradient
+            self._previous_global_state = global_state_before
+            if isinstance(self.strategy, GradientSurvivalStrategy):
+                self.strategy.record_global_gradient(new_global_gradient)
 
             if r % eval_every == 0:
                 total_norm = sum(
@@ -123,26 +204,16 @@ class FederatedServer:
                     history["eval_reward"].append(metrics["mean_reward"])
                     history["eval_waiting_time"].append(metrics["mean_waiting_time"])
                     history["eval_stopped"].append(metrics["mean_stopped"])
-                    history["eval_action_counts"].append(metrics.get("action_counts"))
-                    history["eval_q_gaps"].append(metrics.get("q_gaps"))
                     logger.info(
                         "Round %d | reward=%.4f | waiting_time=%.2fs | stopped=%.1f",
-                        r,
-                        metrics["mean_reward"],
-                        metrics["mean_waiting_time"],
-                        metrics["mean_stopped"],
+                        r, metrics["mean_reward"], metrics["mean_waiting_time"], metrics["mean_stopped"],
                     )
                 else:
                     history["eval_reward"].append(None)
                     history["eval_waiting_time"].append(None)
                     history["eval_stopped"].append(None)
-                    history["eval_action_counts"].append(None)
-                    history["eval_q_gaps"].append(None)
 
-                # Aggregated global model checkpoint
-                ckpt_path = os.path.join(
-                    self.checkpoint_dir, f"global_round_{r:03d}.pth"
-                )
+                ckpt_path = os.path.join(self.checkpoint_dir, f"global_round_{r:03d}.pth")
                 torch.save(self.global_model.q.state_dict(), ckpt_path)
                 logger.info("Checkpoint saved: %s", ckpt_path)
 

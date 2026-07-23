@@ -20,37 +20,37 @@ round would throw that away and pay SUMO startup cost every round too.
 Instead, each worker process is started ONCE at the beginning of training,
 loops receiving the current global weights over a Queue, trains locally
 (keeping its own persistent env + agent + replay buffer across the whole
-run), and sends back the updated weights + sample count -- repeating
-until told to stop.
+run), and sends back the updated weights + sample count + mean loss --
+repeating until told to stop.
+
+Aggregation
+-----------
+Uses the same pluggable ``BaseAggregationStrategy`` as the sequential
+``FederatedServer`` (see ``federated/aggregation_strategies.py``). No
+aggregation-specific logic lives in this file beyond building a
+``ClientRoundInfo`` per worker result and handing the batch to the
+configured strategy -- identical pattern to the sequential server, just
+fed by queue messages instead of direct method calls.
 """
 import logging
 import multiprocessing as mp
 import os
-import random
 from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
 import torch
 
-import torch
-
-from federated.aggregation import fed_avg
+from federated.aggregation import masked_head_weighted_average, weighted_average
+from federated.aggregation_strategies import (
+    BaseAggregationStrategy,
+    ClientRoundInfo,
+    GradientSurvivalStrategy,
+    build_aggregation_strategy,
+)
 from federated.comm_dropout import CommDropoutWrapper
 from environments.federated_env import build_federated_env, ActionMaskPadder
 from agents.dqn import DQNAgent
 
 logger = logging.getLogger(__name__)
-
-
-def seed_everything(seed: int | None = None) -> None:
-    if seed is None:
-        return
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-    os.environ.setdefault("PYTHONHASHSEED", str(seed))
 
 
 def _client_worker(
@@ -64,6 +64,9 @@ def _client_worker(
     local_episodes: int,
     log_loss_every_steps: int,
     eps_decay: float,
+    lr: float,
+    lr_decay: float,
+    min_lr: float,
     in_queue: "mp.Queue",
     out_queue: "mp.Queue",
 ):
@@ -73,24 +76,22 @@ def _client_worker(
     buffer/epsilon schedule persist across rounds -- same warm-start
     behavior as the single-process ``FederatedClient``), then loops on
     ``in_queue`` for work until it receives a stop sentinel.
+
+    ``agent.train()`` returns ``(state_dict, n_samples, mean_loss)`` --
+    all three are sent back so the server can build a ``ClientRoundInfo``
+    for strategies that need a loss signal (ema_loss, ema_alignment, ...).
     """
     logging.basicConfig(
         level=logging.INFO,
         format=f"%(asctime)s | %(levelname)s | [{name}] %(name)s | %(message)s",
     )
-    worker_seed = None
-    if cfg.get("seed") is not None:
-        worker_seed = int(cfg["seed"]) + sum(ord(ch) for ch in name)
-    seed_everything(worker_seed)
     try:
         env = build_federated_env(cfg)
         env = CommDropoutWrapper(ActionMaskPadder(env, action_dim), **comm_dropout_cfg)
         agent = DQNAgent(
-            own_dim=own_dim,
-            neighbor_dim=neighbor_dim,
-            k_max=k_max,
-            action_dim=action_dim,
-            eps_decay=eps_decay,
+            own_dim=own_dim, neighbor_dim=neighbor_dim, k_max=k_max,
+            action_dim=action_dim, eps_decay=eps_decay,
+            lr=lr, lr_decay=lr_decay, min_lr=min_lr,
         )
 
         while True:
@@ -101,13 +102,19 @@ def _client_worker(
             _, global_state = msg
             agent.load_state_dict(global_state)
             try:
-                state_dict, n_samples = agent.train(
+                state_dict, n_samples, mean_loss, action_counts = agent.train(
                     env, episodes=local_episodes, log_loss_every_steps=log_loss_every_steps
                 )
-                out_queue.put(("ok", name, state_dict, n_samples))
+                new_lr = agent.decay_lr()
+                logger.info(
+                    "Worker '%s' round done: mean_loss=%s  lr=%.2e  action_counts=%s",
+                    name, f"{mean_loss:.6f}" if mean_loss is not None else "n/a",
+                    new_lr, action_counts,
+                )
+                out_queue.put(("ok", name, state_dict, n_samples, mean_loss, action_counts))
             except Exception as e:
                 logger.exception("Worker '%s' local training failed.", name)
-                out_queue.put(("error", name, str(e), 0))
+                out_queue.put(("error", name, str(e), 0, None, None))
     finally:
         try:
             env.close()
@@ -117,8 +124,10 @@ def _client_worker(
 
 class ParallelFederatedServer:
     """Drop-in alternative to ``FederatedServer`` that trains every city
-    concurrently instead of one-after-another. Same round/eval/checkpoint
-    semantics; the only difference is HOW local_train gets called.
+    concurrently instead of one-after-another. Same round/eval/checkpoint/
+    aggregation semantics; the only difference is HOW local_train gets
+    called (queue round-trip to a persistent worker process instead of a
+    direct method call).
 
     Args:
         city_configs: list of (name, cfg) tuples -- the raw config dicts,
@@ -129,6 +138,13 @@ class ParallelFederatedServer:
         own_dim, neighbor_dim, k_max, action_dim: shared network dims,
                       already resolved across all cities (see
                       ``federated_training.load_clients``).
+        eps_decay:    Computed once by the caller from the training
+                      schedule (see ``federated/utils.compute_eps_decay``)
+                      and forwarded to every worker so all cities share the
+                      same exploration schedule.
+        aggregation_strategy / aggregation_config: same meaning as on
+                      ``FederatedServer`` -- see
+                      ``federated/aggregation_strategies.py``.
     """
 
     def __init__(
@@ -141,11 +157,17 @@ class ParallelFederatedServer:
         action_dim: int,
         comm_dropout_cfg: Dict[str, float],
         local_episodes: int,
+        eps_decay: float,
         log_loss_every_steps: int = 50,
-        eps_decay: float = 20000.0,
         evaluator: Optional[Any] = None,
         checkpoint_dir: str = "checkpoints",
         client_checkpoint_every: int = 1,
+        aggregation_strategy: str = "fedavg",
+        aggregation_config: Optional[Dict[str, Any]] = None,
+        default_lr: float = 3e-4,
+        lr_decay: float = 1.0,
+        min_lr: float = 1e-6,
+        per_city_lr: Optional[Dict[str, float]] = None,
     ):
         self.global_model = global_model
         self.evaluator = evaluator
@@ -153,26 +175,44 @@ class ParallelFederatedServer:
         self.client_checkpoint_every = client_checkpoint_every
         os.makedirs(os.path.join(checkpoint_dir, "clients"), exist_ok=True)
 
+        self.strategy: BaseAggregationStrategy = build_aggregation_strategy(
+            aggregation_strategy, aggregation_config
+        )
+        logger.info(
+            "[parallel] Aggregation strategy: %s  config=%s",
+            type(self.strategy).__name__, aggregation_config or {},
+        )
+
+        # Per-client history for computing deltas each round (same fields
+        # as the sequential FederatedServer).
+        self._previous_client_state: Dict[str, Dict[str, torch.Tensor]] = {}
+        self._previous_loss: Dict[str, float] = {}
+        self._previous_global_state: Optional[Dict[str, torch.Tensor]] = None
+        self._global_gradient: Optional[Dict[str, torch.Tensor]] = None
+
         ctx = mp.get_context("spawn")  # 'spawn' is safer than 'fork' across platforms
         # for processes that will themselves launch subprocesses (SUMO).
         self.names = [name for name, _ in city_configs]
         self.in_queues = {name: ctx.Queue() for name in self.names}
         self.out_queue = ctx.Queue()  # shared: workers tag their own name on results
 
+        per_city_lr = per_city_lr or {}
         self.processes = []
         for name, cfg in city_configs:
+            city_lr = per_city_lr.get(name, default_lr)
             p = ctx.Process(
                 target=_client_worker,
                 args=(
                     name, cfg, own_dim, neighbor_dim, k_max, action_dim,
-                    comm_dropout_cfg, local_episodes, log_loss_every_steps,
-                    eps_decay,
+                    comm_dropout_cfg, local_episodes, log_loss_every_steps, eps_decay,
+                    city_lr, lr_decay, min_lr,
                     self.in_queues[name], self.out_queue,
                 ),
                 daemon=True,
             )
             p.start()
             self.processes.append(p)
+            logger.info("[parallel] city='%s' lr=%.2e lr_decay=%.4f", name, city_lr, lr_decay)
 
         logger.info("Started %d parallel city worker processes.", len(self.processes))
 
@@ -185,32 +225,82 @@ class ParallelFederatedServer:
         try:
             for r in range(1, rounds + 1):
                 logger.info("=== Federated round %d / %d (parallel) ===", r, rounds)
-                global_state = self.global_model.state_dict()
+                global_state_before = self.global_model.state_dict()
 
                 # Dispatch to every city at once -- they now train concurrently.
                 for name in self.names:
-                    self.in_queues[name].put(("train", global_state))
+                    self.in_queues[name].put(("train", global_state_before))
 
                 # Collect results as they arrive (order doesn't matter).
-                updates = []
+                client_states: Dict[str, Dict[str, torch.Tensor]] = {}
+                infos: List[ClientRoundInfo] = []
                 total_samples = 0
                 pending = set(self.names)
+
+                client_action_counts: Dict[str, Optional[Dict[int, int]]] = {}
+
                 while pending:
-                    status, name, payload, n_samples = self.out_queue.get()
+                    status, name, payload, n_samples, mean_loss, action_counts = self.out_queue.get()
                     pending.discard(name)
                     if status == "error":
                         raise RuntimeError(f"Client '{name}' failed: {payload}")
+
                     state_dict = payload
-                    updates.append((state_dict, n_samples))
+                    client_states[name] = state_dict
+                    client_action_counts[name] = action_counts
                     total_samples += n_samples
+
+                    client_gradient = self.strategy.compute_pseudo_gradient(
+                        state_dict, global_state_before
+                    )
+
+                    infos.append(ClientRoundInfo(
+                        client_id=name,
+                        num_samples=n_samples,
+                        client_state=state_dict,
+                        previous_client_state=self._previous_client_state.get(name),
+                        global_state=global_state_before,
+                        previous_global_state=self._previous_global_state,
+                        client_gradient=client_gradient,
+                        previous_gradient=self.strategy.get_state(name).get("_last_client_gradient"),
+                        global_gradient=self._global_gradient,
+                        local_loss=mean_loss,
+                        previous_loss=self._previous_loss.get(name),
+                        round_num=r,
+                    ))
+
+                    self._previous_client_state[name] = state_dict
+                    if mean_loss is not None:
+                        self._previous_loss[name] = mean_loss
+                    if client_gradient is not None:
+                        self.strategy.get_state(name)["_last_client_gradient"] = client_gradient
 
                     if self.client_checkpoint_every and (r % self.client_checkpoint_every == 0):
                         ckpt_path = os.path.join(self.checkpoint_dir, "clients", f"{name}_round_{r:03d}.pth")
                         torch.save(state_dict, ckpt_path)
-                        logger.info("Client '%s' local checkpoint saved: %s (samples=%d)", name, ckpt_path, n_samples)
+                        logger.info(
+                            "Client '%s' local checkpoint saved: %s (samples=%d, mean_loss=%s)",
+                            name, ckpt_path, n_samples,
+                            f"{mean_loss:.6f}" if mean_loss is not None else "n/a",
+                        )
 
-                agg_state = fed_avg(updates)
+                # ---- weight + aggregate ----------------------------------
+                weights = self.strategy.compute_weights(infos)
+                ordered_ids = [info.client_id for info in infos]
+                agg_state = masked_head_weighted_average(
+                    [client_states[cid] for cid in ordered_ids],
+                    [weights[cid] for cid in ordered_ids],
+                    [client_action_counts.get(cid) for cid in ordered_ids],
+                )
                 self.global_model.load_state_dict(agg_state)
+
+                new_global_gradient = self.strategy.compute_pseudo_gradient(
+                    agg_state, global_state_before
+                )
+                self._global_gradient = new_global_gradient
+                self._previous_global_state = global_state_before
+                if isinstance(self.strategy, GradientSurvivalStrategy):
+                    self.strategy.record_global_gradient(new_global_gradient)
 
                 if r % eval_every == 0:
                     history["round"].append(r)

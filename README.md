@@ -5,7 +5,7 @@ This repository implements a research-grade federated reinforcement learning pip
 Quick start (mock, no SUMO required):
 
 ```bash
-python experiments/federated_training.py --rounds 3 --local_episodes 3
+ python -m experiments.federated_training --parallel --rounds 10 --local_episodes 2 --aggregation_strategy fedavg --lr 3e-4 --lr_decay 0.97 --min_lr 1e-5
 python experiments/evaluate.py --model results/global_fed.pth --episodes 5
 ```
 

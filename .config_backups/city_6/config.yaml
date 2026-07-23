@@ -1,8 +1,0 @@
-name: city_6
-mode: sumo
-net_file: sumo_rl/nets/Nguyen/nguyentl.net.xml
-route_file: sumo_rl/nets/Nguyen/nguyentesteod.rou.xml
-single_agent: true
-delta_time: 5
-num_seconds: 1200
-sumo_seed: 6

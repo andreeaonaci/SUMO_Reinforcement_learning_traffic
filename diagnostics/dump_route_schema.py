@@ -27,7 +27,7 @@ def main():
         if not os.path.isabs(route_file):
             # route_file paths in config.yaml are often relative to the
             # config's own directory
-            route_file = os.path.join(os.path.dirname(args.path), route_file)
+            route_file = os.path.join(route_file)
     else:
         route_file = args.path
 

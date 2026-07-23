@@ -92,9 +92,16 @@ class NeighborAttentionQNetwork(nn.Module):
             nn.Linear(d_model, d_model),
         )
 
-        self.attn = nn.MultiheadAttention(
-            embed_dim=d_model, num_heads=n_heads, batch_first=True
-        )
+        try:
+            self.attn = nn.MultiheadAttention(
+                embed_dim=d_model, num_heads=n_heads, batch_first=True
+            )
+            self._attn_batch_first = True
+        except TypeError:
+            self.attn = nn.MultiheadAttention(
+                embed_dim=d_model, num_heads=n_heads
+            )
+            self._attn_batch_first = False
         self.attn_norm = nn.LayerNorm(d_model)
 
         # Learnable fallback so a fully isolated intersection (mask all
@@ -134,8 +141,23 @@ class NeighborAttentionQNetwork(nn.Module):
         key_padding_mask = full_mask < 0.5  # True = ignore this position
 
         query = own_emb.unsqueeze(1)  # (B, 1, d_model)
-        attn_out, _ = self.attn(query, kv, kv, key_padding_mask=key_padding_mask)
-        attn_out = self.attn_norm(attn_out.squeeze(1) + own_emb)  # residual
+
+        if self._attn_batch_first:
+            attn_out, _ = self.attn(query, kv, kv, key_padding_mask=key_padding_mask)
+            attn_out = attn_out.squeeze(1)
+        else:
+            # Older torch versions only support (seq, batch, embed).
+            query_t = query.transpose(0, 1)
+            kv_t = kv.transpose(0, 1)
+            attn_out, _ = self.attn(
+                query_t,
+                kv_t,
+                kv_t,
+                key_padding_mask=key_padding_mask,
+            )
+            attn_out = attn_out.transpose(0, 1).squeeze(1)
+
+        attn_out = self.attn_norm(attn_out + own_emb)  # residual
 
         combined = torch.cat([own_emb, attn_out], dim=-1)
         return self.head(combined)

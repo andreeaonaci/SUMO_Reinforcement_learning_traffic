@@ -2,7 +2,7 @@ from typing import Dict, List, Optional, Tuple, Any
 import random
 import logging
 import math
-from collections import deque
+from collections import Counter, deque
 
 import numpy as np
 
@@ -108,6 +108,8 @@ class DQNAgent:
         n_hops: int = 4,
         reward_clip: Optional[float] = 10.0,
         eps_decay: float = 20000.0,
+        lr_decay: float = 1.0,
+        min_lr: float = 1e-6,
     ):
         self.own_dim = own_dim
         self.neighbor_dim = neighbor_dim
@@ -129,6 +131,8 @@ class DQNAgent:
         self.q_target.load_state_dict(self.q.state_dict())
 
         self.optimizer = optim.Adam(self.q.parameters(), lr=lr, weight_decay=1e-5, eps=1e-6)
+        self.lr_decay = lr_decay   # multiplicative decay applied once per federated round
+        self.min_lr = min_lr
         self.replay = ReplayBuffer(buffer_size)
         self.batch_size = batch_size
         self.gamma = gamma
@@ -277,6 +281,22 @@ class DQNAgent:
     # Persistence
     # ------------------------------------------------------------------
 
+    def decay_lr(self) -> float:
+        """Multiply the optimizer's LR by ``lr_decay``, floored at ``min_lr``.
+
+        Call once per federated round (not per gradient step) -- e.g. from
+        the client after ``train()`` returns, or from the server after
+        aggregation. A per-city ``lr_decay`` close to 1.0 keeps the rate
+        essentially fixed; a value like 0.97 gives a gentle exponential
+        decay so a noisy, small city's updates get progressively gentler
+        as training proceeds, without needing a fixed schedule length.
+        Returns the new LR for logging.
+        """
+        for group in self.optimizer.param_groups:
+            new_lr = max(group["lr"] * self.lr_decay, self.min_lr)
+            group["lr"] = new_lr
+        return self.optimizer.param_groups[0]["lr"]
+
     def save(self, path: str) -> None:
         torch.save(self.q.state_dict(), path)
 
@@ -318,6 +338,8 @@ class DQNAgent:
         replay buffer.
         """
         total_steps = 0
+        all_losses: List[float] = []   # across every episode this call
+        action_counts: Counter = Counter()   # {action_index: times_taken}, this call
 
         for ep in range(1, episodes + 1):
             obs_dict = env.reset()
@@ -336,6 +358,7 @@ class DQNAgent:
                 eps = self._current_epsilon()
                 actions = {ts_id: self.act(o, explore=True, eps=eps) for ts_id, o in obs_dict.items()}
                 self.steps_done += 1
+                action_counts.update(actions.values())
 
                 if len(actions) == 1 and "__single__" in actions:
                     next_obs, reward, done, _ = env.step(actions["__single__"])
@@ -354,6 +377,7 @@ class DQNAgent:
                 loss = self.optimize()
                 if loss is not None:
                     ep_losses.append(loss)
+                    all_losses.append(loss)
 
                 obs_dict = next_obs_dict
                 done = dones.get("__all__", all(dones.values()) if dones else True)
@@ -380,4 +404,11 @@ class DQNAgent:
                 msg = f"[train] ep={ep}/{episodes}  steps={ep_steps}  loss=n/a (buffer not yet full)"
             logger.info(msg)
 
-        return self.state_dict(), total_steps
+        # Mean loss across every gradient step this call -- forwarded by
+        # FederatedClient/CityClient to the server so aggregation strategies
+        # that need a loss signal (EMA-based ones) have real data instead
+        # of None every round.
+        mean_loss = float(np.mean(all_losses)) if all_losses else None
+        # Plain dict, not Counter -- keeps it picklable/simple across the
+        # process boundary in the parallel path.
+        return self.state_dict(), total_steps, mean_loss, dict(action_counts)

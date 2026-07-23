@@ -1,189 +1,132 @@
-"""CityClient — one federated client per city, one DQN agent per intersection.
+"""FederatedClient — one participant per city in the sequential FedAvg loop.
 
-Each city runs in multi-agent mode.  All intersections step the shared SUMO
-simulation simultaneously, so the training loop collects experience from every
-active intersection in lockstep.
+Design notes
+------------
+One DQNAgent per city (not per intersection).  The same network weights
+act for every intersection each tick, and every intersection's transitions
+land in the same replay buffer -- this is what trains a topology-agnostic
+policy (see agents/dqn.py and agents/networks.py for details).
 
-Dead intersections (zero traffic during the probe phase) are excluded by
-``build_multi_agent_city`` before this client is created, so every agent
-here is guaranteed to receive a non-trivial reward signal.
+The env handed in here is already fully wrapped:
+    raw SUMO env
+        -> MultiAgentFederatedWrapper   (own + neighbor obs, action_mask)
+        -> ActionMaskPadder             (pads to global action_dim)
+        -> CommDropoutWrapper           (simulates unreliable comms)
+All of that is assembled in main.py load_clients(); this class just
+drives the training loop.
 
-Action selection respects each intersection's actual phase count: a 3-way
-junction with 2 green phases only explores and evaluates actions {0, 1} even
-though the shared DQN head outputs ``global_action_dim`` Q-values.  This
-prevents the model from wasting capacity on impossible actions.
-
-At the end of ``local_train`` the per-intersection weights are averaged locally
-before being returned to the server (local FedAvg), which is then combined
-with other cities' updates by the global FedAvg in the server.
+Relationship to parallel_server.py
+------------------------------------
+``_client_worker`` in parallel_server.py does the same job as
+``local_train`` here, but runs in its own OS process. Both call
+``agent.train(env, episodes=..., log_loss_every_steps=...)`` and return
+the result to the server. The logic is intentionally kept identical so
+sequential and parallel modes produce the same training behavior.
 """
-
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Tuple
-
-import numpy as np
-import torch
+from typing import Callable, Dict, Tuple
 
 from agents.dqn import DQNAgent
-from environments.federated_env import MultiAgentFederatedWrapper
 
 logger = logging.getLogger(__name__)
 
 
-class CityClient:
-    """One federated participant per city.
+class FederatedClient:
+    """One city participant in the sequential FedAvg training loop.
 
     Args:
         name:                 City name (used in log messages).
-        env:                  ``MultiAgentFederatedWrapper`` for this city.
-        global_action_dim:    Output size of the shared DQN — must match
-                              across all cities.  Passed explicitly so all
-                              agents use the same architecture regardless of
-                              how many green phases this city's intersections
-                              happen to have.
+        env_builder:          Zero-argument callable that returns the fully
+                              wrapped city environment.  Called once at
+                              construction time so the env (and SUMO) persists
+                              across every federated round.
+        agent_builder:        Zero-argument callable that returns a fresh
+                              DQNAgent.  Called once at construction time.
+                              The agent's replay buffer and epsilon schedule
+                              also persist across rounds -- only the network
+                              weights are synced at the start of each round.
         local_episodes:       Episodes to run per federated round.
-        log_loss_every_steps: Print a mid-episode loss line every N steps.
+        log_loss_every_steps: Passed through to ``DQNAgent.train()``.
+                              Print a mid-episode loss line every N steps.
                               0 = end-of-episode summaries only.
     """
 
     def __init__(
         self,
         name: str,
-        env: MultiAgentFederatedWrapper,
-        global_action_dim: int,
+        env_builder: Callable,
+        agent_builder: Callable,
         local_episodes: int = 5,
         log_loss_every_steps: int = 50,
     ):
         self.name                 = name
         self.local_episodes       = local_episodes
         self.log_loss_every_steps = log_loss_every_steps
-        self._env                 = env
-        self._global_action_dim   = global_action_dim
 
-        # One agent per active intersection, all using the global action dim
-        self._agents: Dict[str, DQNAgent] = {
-            ts_id: DQNAgent(
-                obs_dim=env.observation_dim,
-                action_dim=global_action_dim,
-            )
-            for ts_id in env.ts_ids
-        }
-        logger.info(
-            "CityClient '%s': %d active intersections, obs_dim=%d, "
-            "global_action_dim=%d, valid phases: %s",
-            name,
-            len(self._agents),
-            env.observation_dim,
-            global_action_dim,
-            {ts: env.n_valid(ts) for ts in env.ts_ids},
-        )
+        # Build once; reuse across all federated rounds.
+        self._env   = env_builder()
+        self._agent: DQNAgent = agent_builder()
 
     # ------------------------------------------------------------------
     # Federated interface
     # ------------------------------------------------------------------
 
     def local_train(self, global_state: Dict) -> Tuple[Dict, int]:
-        """Sync with global model, run local episodes, return averaged weights.
+        """Sync network weights with the global model, then train locally.
+
+        The replay buffer and epsilon schedule are NOT reset -- they
+        accumulate warm experience across rounds, which is the main
+        advantage of persistent clients over spawn-fresh-each-round.
 
         Args:
             global_state: ``state_dict`` from the global DQNAgent.
 
         Returns:
-            state_dict:  Local FedAvg of all intersection agents' weights.
-            total_steps: Total environment steps taken.
+            state_dict:  Updated local weights after training.
+            n_samples:   Environment steps taken (used for weighted FedAvg).
         """
         logger.info(
-            "CityClient '%s' starting local training (%d episodes, "
-            "%d intersections).",
-            self.name, self.local_episodes, len(self._agents),
+            "Client '%s' starting local training (%d episodes).",
+            self.name, self.local_episodes,
         )
 
-        # Sync weights; preserve replay buffers and epsilon schedules
-        for agent in self._agents.values():
-            agent.load_state_dict(global_state)
+        # Sync weights only -- keep replay buffer + epsilon schedule alive.
+        self._agent.load_state_dict(global_state)
 
-        total_steps = 0
+        try:
+            # DQNAgent.train() handles the full multi-agent loop:
+            #   - same shared epsilon for all intersections each tick
+            #   - one replay buffer entry per intersection per tick
+            #   - one gradient step per tick (all intersections pooled)
+            #   - mid-episode and end-of-episode loss logging
+            state_dict, n_samples, mean_loss, action_counts = self._agent.train(
+                self._env,
+                episodes=self.local_episodes,
+                log_loss_every_steps=self.log_loss_every_steps,
+            )
+        except Exception:
+            logger.exception("Client '%s' local training failed.", self.name)
+            try:
+                self._env.close()
+            except Exception:
+                pass
+            raise
 
-        for ep in range(1, self.local_episodes + 1):
-            obs        = self._env.reset()    # {ts_id: np.ndarray}
-            done       = False
-            ep_steps   = 0
-            ep_losses: List[float] = []
-
-            while not done:
-                # Each intersection acts within its own valid phase count,
-                # not the full global action space
-                actions = {
-                    ts_id: agent.act(
-                        obs[ts_id],
-                        explore=True,
-                        n_valid=self._env.n_valid(ts_id),
-                    )
-                    for ts_id, agent in self._agents.items()
-                }
-
-                next_obs, rewards, done, _ = self._env.step(actions)
-
-                for ts_id, agent in self._agents.items():
-                    agent.remember(
-                        obs[ts_id],
-                        actions[ts_id],
-                        float(rewards.get(ts_id, 0.0)),
-                        next_obs[ts_id],
-                        done,
-                    )
-                    loss = agent.train_step()
-                    if loss is not None:
-                        ep_losses.append(loss)
-
-                obs       = next_obs
-                ep_steps += 1
-                total_steps += 1
-
-                # Mid-episode loss log
-                if (
-                    self.log_loss_every_steps > 0
-                    and ep_losses
-                    and ep_steps % self.log_loss_every_steps == 0
-                ):
-                    n = self.log_loss_every_steps * len(self._agents)
-                    recent = ep_losses[-n:]
-                    msg = (
-                        f"  [{self.name}] ep={ep}/{self.local_episodes}"
-                        f"  step={ep_steps}"
-                        f"  loss(last {len(recent)})={np.mean(recent):.6f}"
-                    )
-                    logger.info(msg)
-                    print(msg, flush=True)
-
-            # End-of-episode summary
-            if ep_losses:
-                msg = (
-                    f"[{self.name}] ep={ep}/{self.local_episodes}"
-                    f"  steps={ep_steps}"
-                    f"  intersections={len(self._agents)}"
-                    f"  loss  mean={np.mean(ep_losses):.6f}"
-                    f"  min={np.min(ep_losses):.6f}"
-                    f"  max={np.max(ep_losses):.6f}"
-                    f"  updates={len(ep_losses)}"
-                )
-            else:
-                msg = (
-                    f"[{self.name}] ep={ep}/{self.local_episodes}"
-                    f"  steps={ep_steps}"
-                    f"  loss=n/a (buffer not yet full)"
-                )
-            logger.info(msg)
-            print(msg, flush=True)
-
-        local_avg = self._local_fedavg()
+        new_lr = self._agent.decay_lr()
         logger.info(
-            "CityClient '%s' done: total_steps=%d, intersections=%d.",
-            self.name, total_steps, len(self._agents),
+            "Client '%s' finished local training: n_samples=%d  mean_loss=%s  lr=%.2e  "
+            "action_counts=%s.",
+            self.name, n_samples,
+            f"{mean_loss:.6f}" if mean_loss is not None else "n/a",
+            new_lr, action_counts,
         )
-        return local_avg, total_steps
+        return state_dict, n_samples, mean_loss, action_counts
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
 
     def close(self) -> None:
         if hasattr(self, "_env"):
@@ -191,15 +134,3 @@ class CityClient:
                 self._env.close()
             except Exception:
                 pass
-
-    # ------------------------------------------------------------------
-    # Internal
-    # ------------------------------------------------------------------
-
-    def _local_fedavg(self) -> Dict[str, torch.Tensor]:
-        """Average state_dicts across all intersection agents."""
-        weights = [agent.state_dict() for agent in self._agents.values()]
-        return {
-            key: torch.mean(torch.stack([w[key].float() for w in weights]), dim=0)
-            for key in weights[0]
-        }

@@ -1,4 +1,4 @@
-name: city_5_holdout
+name: city_7
 net_file: sumo_rl/nets/RESCO/grid4x4/grid4x4.net.xml
 route_file: sumo_rl/nets/RESCO/grid4x4/grid4x4_dense.rou.xml
 

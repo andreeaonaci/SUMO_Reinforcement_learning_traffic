@@ -10,229 +10,210 @@ per-topology code or models.
 """
 import argparse
 from datetime import datetime
-import copy
 import logging
 import os
-import random
+import pprint
 import sys
 import yaml
 import json
 
-import numpy as np
-import torch
-from pyfiglet import Figlet
+try:
+    from pyfiglet import Figlet
+except ImportError:  # pragma: no cover - optional dependency fallback
+    class Figlet:  # type: ignore[no-redef]
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def renderText(self, text: str) -> str:
+            return text
 
 from federated.server import FederatedServer
 from federated.parallel_server import ParallelFederatedServer
-from federated.client import CityClient
+from federated.client import FederatedClient
 from federated.evaluator import HoldoutEvaluator
 from federated.comm_dropout import CommDropoutWrapper
 from environments.federated_env import build_federated_env, ActionMaskPadder
 from agents.dqn import DQNAgent
 from federated.utils import compute_eps_decay
 
-timestamp = datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
-run_dir = os.path.join("results", f"run_{timestamp}")
-os.makedirs(run_dir, exist_ok=True)
-
+run_dir = None
 logger = logging.getLogger(__name__)
 
-
-def seed_everything(seed: int | None = None) -> None:
-    """Make the training run deterministic when a seed is provided."""
-    if seed is None:
-        return
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-    os.environ.setdefault("PYTHONHASHSEED", str(seed))
-
-
-# Default communication-unreliability profile applied during TRAINING.
-# Tune per-experiment; set all to 0.0 to train under "perfect comms".
 DEFAULT_COMM_DROPOUT = dict(
-    p_link=0.10,        # per-neighbor-slot chance of dropping, every tick
-    p_isolate=0.05,      # chance this intersection loses ALL neighbors this tick
-    p_hop_cutoff=0.10,   # chance of a cascading "cut beyond hop h" failure
+    p_link=0.10,
+    p_isolate=0.05,
+    p_hop_cutoff=0.10,
 )
 
 
 # ---------------------------------------------------------------------------
-# Client loading
+# Helpers
 # ---------------------------------------------------------------------------
 
-def load_city_configs(base_dir: str, seed: int | None = None) -> list:
-    city_configs = []
-    for name in sorted(os.listdir(base_dir)):
-        if name == "city_5_holdout":
-            continue
-
-        cfg_path = os.path.join(base_dir, name, "config.yaml")
-        if not os.path.exists(cfg_path):
-            continue
-
-        with open(cfg_path) as f:
-            cfg = yaml.safe_load(f)
-
-        cfg = copy.deepcopy(cfg)
-        if seed is not None:
-            cfg["seed"] = seed
-            cfg["sumo_seed"] = seed
-        city_configs.append((name, cfg))
-
-    if not city_configs:
-        raise RuntimeError(f"No city configs found under '{base_dir}'.")
-
-    return city_configs
+def steps_per_episode_from_cfg(cfg: dict) -> int:
+    """Ticks per episode = num_seconds / delta_time."""
+    return int(cfg.get("num_seconds", 3600) // cfg.get("delta_time", 5))
 
 
-def infer_steps_per_episode(city_configs: list) -> int:
-    steps_per_episode = []
-    for _, cfg in city_configs:
-        num_seconds = cfg.get("num_seconds")
-        delta_time = cfg.get("delta_time")
-        if num_seconds is None or delta_time in (None, 0):
-            continue
-        steps_per_episode.append(int(num_seconds / delta_time))
+def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay):
+    """Single place that constructs a DQNAgent with the computed eps_decay."""
+    return DQNAgent(
+        own_dim=own_dim,
+        neighbor_dim=neighbor_dim,
+        k_max=k_max,
+        action_dim=action_dim,
+        eps_decay=eps_decay,
+    )
 
-    if not steps_per_episode:
-        raise RuntimeError("Could not infer steps_per_episode from city configs.")
 
-    unique_steps = {s for s in steps_per_episode}
-    if len(unique_steps) != 1:
-        raise RuntimeError(f"Inconsistent steps_per_episode values: {sorted(unique_steps)}")
-
-    return unique_steps.pop()
-
+# ---------------------------------------------------------------------------
+# Client loading  (sequential path)
+# ---------------------------------------------------------------------------
 
 def load_clients(
     base_dir: str,
+    rounds: int,
     local_episodes: int,
+    explore_fraction: float,
     log_loss_every_steps: int = 50,
     comm_dropout_cfg: dict | None = None,
-    eps_decay: float = 20000.0,
-    seed: int | None = None,
 ) -> tuple:
-    """Build one CityClient per city directory.
-
-    Every city needs only ``config.yaml`` + ``net.xml`` + ``routes.xml``.
-    No ``phase_mapping``, no per-city adapter code: ``build_federated_env``
-    is responsible for discovering intersections, building the neighbor
-    graph, and exposing the fixed-size dict-observation contract described
-    in ``agents/networks.py``. It must expose on the returned env:
-
-        env.own_dim          int   -- dim of the per-intersection own obs
-        env.neighbor_dim     int   -- dim of a single neighbor's feature vec
-        env.k_max            int   -- max neighbor slots (any hop, 1..K)
-        env.max_action_dim   int   -- max number of valid actions among
-                                       this city's intersections
-        env.reset()          -> Dict[ts_id, obs_dict]
-        env.step(actions)    -> (Dict[ts_id, obs_dict],
-                                  Dict[ts_id, float] rewards,
-                                  Dict[ts_id, bool] dones (+ "__all__"),
-                                  info dict)
-
-    ``own_dim``, ``neighbor_dim`` and ``k_max`` must be identical across
-    cities (they define the shared network's input shapes). Action
-    counts do NOT need to match across intersections or cities -- the
-    global model is sized to ``max(max_action_dim)`` and each
-    intersection's ``action_mask`` hides the slots that don't apply to it.
+    """Build one FederatedClient per city directory.
 
     Returns:
-        clients   list of CityClient
-        obs_dims  (own_dim, neighbor_dim, k_max) shared across all cities
-        action_dim  shared Q-output size (== max over all intersections)
+        clients     list of FederatedClient
+        obs_dims    (own_dim, neighbor_dim, k_max)
+        action_dim  global Q-output size
+        eps_decay   computed from training schedule (logged for reference)
     """
     comm_dropout_cfg = comm_dropout_cfg or DEFAULT_COMM_DROPOUT
 
-    # Pass 1: build every city's raw federated env so we know each one's
-    # dims (own_dim/neighbor_dim/k_max must match; max_action_dim doesn't
-    # need to, since it gets padded to the global max below).
-    city_envs = []
-    for name, cfg in load_city_configs(base_dir, seed=seed):
+    # ── Pass 1: build envs, collect dims ────────────────────────────────
+    city_envs = []   # (name, env, cfg)
+    for name in sorted(os.listdir(base_dir)):
+        if name == "city_5_holdout":
+            continue
+        cfg_path = os.path.join(base_dir, name, "config.yaml")
+        if not os.path.exists(cfg_path):
+            continue
+        with open(cfg_path) as f:
+            cfg = yaml.safe_load(f)
         env = build_federated_env(cfg)
-        city_envs.append((name, env))
+        city_envs.append((name, env, cfg))
 
-    own_dims = {env.own_dim for _, env in city_envs}
-    neighbor_dims = {env.neighbor_dim for _, env in city_envs}
-    k_maxs = {env.k_max for _, env in city_envs}
+    if not city_envs:
+        raise RuntimeError(f"No city configs found under '{base_dir}'.")
+
+    own_dims      = {env.own_dim      for _, env, _ in city_envs}
+    neighbor_dims = {env.neighbor_dim for _, env, _ in city_envs}
+    k_maxs        = {env.k_max        for _, env, _ in city_envs}
 
     if len(own_dims) != 1:
         raise RuntimeError(f"Cities produce different own_dim values: {own_dims}.")
     if len(neighbor_dims) != 1:
         raise RuntimeError(f"Cities produce different neighbor_dim values: {neighbor_dims}.")
     if len(k_maxs) != 1:
-        raise RuntimeError(f"Cities use different k_max (neighbor slot count) values: {k_maxs}.")
+        raise RuntimeError(f"Cities use different k_max values: {k_maxs}.")
 
     own_dim, neighbor_dim, k_max = own_dims.pop(), neighbor_dims.pop(), k_maxs.pop()
-    # Global action_dim = widest action space among ALL intersections in
-    # ALL cities (e.g. a 5-way with protected lefts elsewhere). Cities
-    # with narrower local action spaces get their action_mask padded with
-    # zeros for the unused slots -- see ActionMaskPadder.
-    action_dim = max(env.max_action_dim for _, env in city_envs)
+    action_dim = max(env.max_action_dim for _, env, _ in city_envs)
 
-    # Pass 2: pad each city up to the global action_dim, then layer on
-    # communication-dropout simulation for training.
-    city_envs = [
-        (name, CommDropoutWrapper(ActionMaskPadder(env, action_dim), **comm_dropout_cfg))
-        for name, env in city_envs
-    ]
+    # ── Compute eps_decay from actual training schedule ──────────────────
+    # Use the first city's config to derive steps_per_episode.  All cities
+    # must share num_seconds/delta_time (enforced implicitly by the dim
+    # checks above; a city with a different episode length would produce a
+    # different own_dim via the encoder).
+    first_cfg       = city_envs[0][2]
+    steps_per_ep    = steps_per_episode_from_cfg(first_cfg)
+    eps_decay       = compute_eps_decay(
+        rounds=rounds,
+        local_episodes=local_episodes,
+        steps_per_episode=steps_per_ep,
+        explore_fraction=explore_fraction,
+    )
+    logger.info(
+        "Training schedule: rounds=%d  local_episodes=%d  "
+        "steps_per_episode=%d  explore_fraction=%.2f  → eps_decay=%.1f",
+        rounds, local_episodes, steps_per_ep, explore_fraction, eps_decay,
+    )
 
+    # ── Pass 2: wrap envs, build clients ────────────────────────────────
     clients = []
-    for name, env in city_envs:
-        # NOTE: default-arg capture (e=env) avoids the classic late-binding
-        # closure bug -- each lambda is bound to ITS OWN env at definition
-        # time, not whatever `env` happens to be when the loop finishes.
-        def make_agent(e=env):
-            return DQNAgent(
-                own_dim=own_dim,
-                neighbor_dim=neighbor_dim,
-                k_max=k_max,
-                action_dim=action_dim,
-                eps_decay=eps_decay,
-            )
+    for name, env, _ in city_envs:
+        wrapped = CommDropoutWrapper(ActionMaskPadder(env, action_dim), **comm_dropout_cfg)
+
+        # Default-arg capture avoids late-binding closure bug.
+        def make_agent(
+            _own=own_dim, _nbr=neighbor_dim, _k=k_max,
+            _act=action_dim, _eps=eps_decay,
+        ):
+            return _make_agent(_own, _nbr, _k, _act, _eps)
 
         clients.append(
-            CityClient(
+            FederatedClient(
                 name=name,
-                env_builder=lambda e=env: e,
+                env_builder=lambda e=wrapped: e,
                 agent_builder=make_agent,
                 local_episodes=local_episodes,
                 log_loss_every_steps=log_loss_every_steps,
             )
         )
 
-    return clients, (own_dim, neighbor_dim, k_max), action_dim
+    return clients, (own_dim, neighbor_dim, k_max), action_dim, eps_decay
 
 
-def resolve_city_configs_and_dims(base_dir: str, seed: int | None = None) -> tuple:
-    """Used by the --parallel path: we need every city's raw config dict
-    (to hand to worker processes, which build their OWN env instances --
-    a live SUMO env generally can't cross a process boundary), plus the
-    shared dims that size the network. Builds each env once just to read
-    its dims/close it again; workers build fresh copies for real training.
+# ---------------------------------------------------------------------------
+# Dim resolution  (parallel path — workers build their own envs)
+# ---------------------------------------------------------------------------
+
+def resolve_city_configs_and_dims(base_dir: str) -> tuple:
+    """Read dims and raw configs for the parallel path.
+
+    Workers receive the raw cfg dict and build their own SUMO env inside
+    their own process — a live SUMO env can't cross a process boundary.
+
+    Returns:
+        city_configs      list of (name, cfg)
+        obs_dims          (own_dim, neighbor_dim, k_max)
+        action_dim        global Q-output size
+        steps_per_episode ticks per episode (from first city's config)
     """
     city_configs = []
-    dims = []
-    for name, cfg in load_city_configs(base_dir, seed=seed):
+    dims         = []
+    first_cfg    = None
+
+    for name in sorted(os.listdir(base_dir)):
+        if name == "city_5_holdout":
+            continue
+        cfg_path = os.path.join(base_dir, name, "config.yaml")
+        if not os.path.exists(cfg_path):
+            continue
+        with open(cfg_path) as f:
+            cfg = yaml.safe_load(f)
+        if first_cfg is None:
+            first_cfg = cfg
         env = build_federated_env(cfg)
         dims.append((env.own_dim, env.neighbor_dim, env.k_max, env.max_action_dim))
         env.close()
         city_configs.append((name, cfg))
 
-    own_dims = {d[0] for d in dims}
+    if not city_configs:
+        raise RuntimeError(f"No city configs found under '{base_dir}'.")
+
+    own_dims      = {d[0] for d in dims}
     neighbor_dims = {d[1] for d in dims}
-    k_maxs = {d[2] for d in dims}
+    k_maxs        = {d[2] for d in dims}
     if len(own_dims) != 1 or len(neighbor_dims) != 1 or len(k_maxs) != 1:
         raise RuntimeError(
             f"Mismatched dims across cities: own_dims={own_dims} "
             f"neighbor_dims={neighbor_dims} k_maxs={k_maxs}"
         )
+
     own_dim, neighbor_dim, k_max = own_dims.pop(), neighbor_dims.pop(), k_maxs.pop()
-    action_dim = max(d[3] for d in dims)
-    return city_configs, (own_dim, neighbor_dim, k_max), action_dim
+    action_dim       = max(d[3] for d in dims)
+    steps_per_episode = steps_per_episode_from_cfg(first_cfg)
+
+    return city_configs, (own_dim, neighbor_dim, k_max), action_dim, steps_per_episode
 
 
 # ---------------------------------------------------------------------------
@@ -245,9 +226,6 @@ def make_holdout_evaluator(
     action_dim: int,
     episodes: int = 1,
     eval_comm_dropout_cfg: dict | None = None,
-    output_dir: str | None = None,
-    eval_seeds: int = 3,
-    include_baselines: bool = False,
 ) -> "HoldoutEvaluator | None":
     cfg_path = os.path.join(base_dir, "city_5_holdout", "config.yaml")
     if not os.path.exists(cfg_path):
@@ -258,9 +236,6 @@ def make_holdout_evaluator(
         cfg = yaml.safe_load(f)
 
     own_dim, neighbor_dim, k_max = obs_dims
-    # Default: evaluate under realistic (not zero) comm dropout too, since
-    # that's the regime the model actually has to operate in. Pass an
-    # empty dict to eval_comm_dropout_cfg for a "perfect comms" reading.
     dropout_cfg = eval_comm_dropout_cfg if eval_comm_dropout_cfg is not None else DEFAULT_COMM_DROPOUT
 
     def build_holdout_env():
@@ -268,28 +243,19 @@ def make_holdout_evaluator(
         if env.own_dim != own_dim or env.neighbor_dim != neighbor_dim or env.k_max != k_max:
             raise RuntimeError(
                 f"Holdout city obs shape ({env.own_dim},{env.neighbor_dim},{env.k_max}) "
-                f"!= training obs shape ({own_dim},{neighbor_dim},{k_max}). "
-                "Check the universal lane encoder / neighbor graph config."
+                f"!= training obs shape ({own_dim},{neighbor_dim},{k_max})."
             )
         if env.max_action_dim > action_dim:
             raise RuntimeError(
-                f"Holdout city max_action_dim={env.max_action_dim} exceeds the "
-                f"global training action_dim={action_dim}; the global model "
-                "can't represent that many actions. Retrain with a holdout-"
-                "aware action_dim, or shrink the holdout intersection set."
+                f"Holdout city max_action_dim={env.max_action_dim} exceeds "
+                f"global action_dim={action_dim}."
             )
         env = ActionMaskPadder(env, action_dim)
         if dropout_cfg:
             env = CommDropoutWrapper(env, **dropout_cfg)
         return env
 
-    return HoldoutEvaluator(
-        env_builder=build_holdout_env,
-        episodes=episodes,
-        output_dir=output_dir,
-        eval_seeds=eval_seeds,
-        include_baselines=include_baselines,
-    )
+    return HoldoutEvaluator(env_builder=build_holdout_env, episodes=episodes)
 
 
 # ---------------------------------------------------------------------------
@@ -297,54 +263,80 @@ def make_holdout_evaluator(
 # ---------------------------------------------------------------------------
 
 def main(args):
-    seed_everything(args.seed)
+    global run_dir
+
+    timestamp = datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
+    run_dir = os.path.join("results", f"run_{timestamp}")
+    os.makedirs("results", exist_ok=True)
+    os.makedirs(run_dir, exist_ok=True)
+
+    log_file = os.path.join(run_dir, "training.log")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler(log_file),
+        ],
+        force=True,
+    )
+    logger = logging.getLogger(__name__)
+
+    logger.info("Arguments:\n%s", pprint.pformat(vars(args), sort_dicts=True))
 
     base = "environments"
-    city_configs_for_schedule = load_city_configs(base, seed=args.seed)
-    steps_per_episode = infer_steps_per_episode(city_configs_for_schedule)
-    eps_decay = compute_eps_decay(
-        rounds=args.rounds,
-        local_episodes=args.local_episodes,
-        steps_per_episode=steps_per_episode,
-        explore_fraction=args.explore_fraction,
-    )
 
     if args.parallel:
-        city_configs, obs_dims, action_dim = resolve_city_configs_and_dims(base, seed=args.seed)
+        city_configs, obs_dims, action_dim, steps_per_ep = resolve_city_configs_and_dims(base)
         own_dim, neighbor_dim, k_max = obs_dims
 
+        eps_decay = compute_eps_decay(
+            rounds=args.rounds,
+            local_episodes=args.local_episodes,
+            steps_per_episode=steps_per_ep,
+            explore_fraction=args.explore_fraction,
+        )
         logger.info(
-            "[parallel] own_dim=%d neighbor_dim=%d k_max=%d action_dim=%d clients=%d",
-            own_dim, neighbor_dim, k_max, action_dim, len(city_configs),
+            "[parallel] own_dim=%d neighbor_dim=%d k_max=%d action_dim=%d "
+            "clients=%d eps_decay=%.1f",
+            own_dim, neighbor_dim, k_max, action_dim, len(city_configs), eps_decay,
         )
 
-        global_model = DQNAgent(
-            own_dim=own_dim,
-            neighbor_dim=neighbor_dim,
-            k_max=k_max,
-            action_dim=action_dim,
-            eps_decay=eps_decay,
-        )
-        evaluator = make_holdout_evaluator(
-            base,
-            obs_dims,
-            action_dim,
-            episodes=args.eval_episodes,
-            output_dir=run_dir,
-            eval_seeds=args.eval_seeds,
-            include_baselines=args.include_baselines,
-        )
+        global_model = _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay)
+        evaluator    = make_holdout_evaluator(base, obs_dims, action_dim, episodes=args.eval_episodes)
+
+        aggregation_config = {
+            "ema_beta": args.ema_beta,
+            "survival_window": args.survival_window,
+        }
+        # Per-city LR override: a city's own config.yaml may set `lr: ...`
+        # to give it a different starting rate than the global default
+        # (e.g. a lower rate for a small, noisy single-intersection city).
+        per_city_lr = {
+            name: float(cfg["lr"]) for name, cfg in city_configs if "lr" in cfg
+        }
+        if per_city_lr:
+            logger.info("[parallel] Per-city LR overrides: %s", per_city_lr)
 
         server = ParallelFederatedServer(
             global_model=global_model,
             city_configs=city_configs,
-            own_dim=own_dim, neighbor_dim=neighbor_dim, k_max=k_max, action_dim=action_dim,
+            own_dim=own_dim,
+            neighbor_dim=neighbor_dim,
+            k_max=k_max,
+            action_dim=action_dim,
+            eps_decay=eps_decay,                   # ← threaded through to workers
             comm_dropout_cfg=DEFAULT_COMM_DROPOUT,
             local_episodes=args.local_episodes,
             log_loss_every_steps=args.log_loss_every_steps,
-            eps_decay=eps_decay,
             evaluator=evaluator,
             checkpoint_dir=run_dir,
+            aggregation_strategy=args.aggregation_strategy,
+            aggregation_config=aggregation_config,
+            default_lr=args.lr,
+            lr_decay=args.lr_decay,
+            min_lr=args.min_lr,
+            per_city_lr=per_city_lr,
         )
         history = server.run(rounds=args.rounds, eval_every=args.eval_every)
 
@@ -352,50 +344,41 @@ def main(args):
             evaluator.close()
 
     else:
-        clients, obs_dims, action_dim = load_clients(
-            base,
-            args.local_episodes,
-            args.log_loss_every_steps,
-            eps_decay=eps_decay,
-            seed=args.seed,
+        clients, obs_dims, action_dim, eps_decay = load_clients(
+            base_dir=base,
+            rounds=args.rounds,
+            local_episodes=args.local_episodes,
+            explore_fraction=args.explore_fraction,
+            log_loss_every_steps=args.log_loss_every_steps,
         )
         own_dim, neighbor_dim, k_max = obs_dims
 
         logger.info("Results directory : %s", run_dir)
         logger.info(
-            "own_dim=%d neighbor_dim=%d k_max=%d action_dim=%d clients=%d",
-            own_dim, neighbor_dim, k_max, action_dim, len(clients),
+            "own_dim=%d neighbor_dim=%d k_max=%d action_dim=%d "
+            "clients=%d eps_decay=%.1f",
+            own_dim, neighbor_dim, k_max, action_dim, len(clients), eps_decay,
         )
 
-        global_model = DQNAgent(
-            own_dim=own_dim,
-            neighbor_dim=neighbor_dim,
-            k_max=k_max,
-            action_dim=action_dim,
-            eps_decay=eps_decay,
-        )
+        global_model = _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay)
+        evaluator    = make_holdout_evaluator(base, obs_dims, action_dim, episodes=args.eval_episodes)
 
-        evaluator = make_holdout_evaluator(
-            base,
-            obs_dims,
-            action_dim,
-            episodes=args.eval_episodes,
-            output_dir=run_dir,
-            eval_seeds=args.eval_seeds,
-            include_baselines=args.include_baselines,
-        )
-
+        aggregation_config = {
+            "ema_beta": args.ema_beta,
+            "survival_window": args.survival_window,
+        }
         server = FederatedServer(
             global_model=global_model,
             clients=clients,
             evaluator=evaluator,
             checkpoint_dir=run_dir,
+            aggregation_strategy=args.aggregation_strategy,
+            aggregation_config=aggregation_config,
         )
         history = server.run(rounds=args.rounds, eval_every=args.eval_every)
 
         for c in clients:
             c.close()
-
         if evaluator:
             evaluator.close()
 
@@ -418,34 +401,38 @@ if __name__ == "__main__":
     print("\n")
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--rounds",          type=int, default=5)
-    parser.add_argument("--local_episodes",  type=int, default=1)
-    parser.add_argument("--seed", type=int, default=0,
-                        help="Random seed used for reproducible training and evaluation.")
-    parser.add_argument("--eval_every",      type=int, default=1)
-    parser.add_argument("--eval_episodes",        type=int, default=1)
-    parser.add_argument("--eval_seeds", type=int, default=3,
-                        help="Number of distinct evaluation seeds to use for the baseline policies; the trained policy always uses the first seed.")
-    parser.add_argument("--include_baselines", action="store_true",
-                        help="Compare the trained policy against simple baselines during evaluation.")
-    parser.add_argument("--log_loss_every_steps", type=int, default=50,
+    parser.add_argument("--rounds",               type=int,   default=5)
+    parser.add_argument("--local_episodes",        type=int,   default=1)
+    parser.add_argument("--eval_every",            type=int,   default=1)
+    parser.add_argument("--eval_episodes",         type=int,   default=1)
+    parser.add_argument("--log_loss_every_steps",  type=int,   default=50,
                         help="Print mid-episode loss every N steps (0 = end-of-episode only).")
-    parser.add_argument("--explore_fraction", type=float, default=0.5,
-                        help="Fraction of total training steps over which epsilon decays to its floor.")
+    parser.add_argument("--explore_fraction",      type=float, default=0.5,
+                        help="Fraction of total training steps to spend exploring. "
+                             "eps_decay is computed automatically so epsilon reaches "
+                             "its floor at this fraction of total steps. "
+                             "Default 0.5 = explore first half, exploit second half.")
     parser.add_argument("--parallel", action="store_true",
                         help="Train all cities concurrently, one persistent OS process per "
-                             "city, instead of sequentially. Biggest win when you have >=2 "
-                             "cities and spare CPU cores -- see federated/parallel_server.py.")
+                             "city. See federated/parallel_server.py.")
+    parser.add_argument("--aggregation_strategy", type=str, default="fedavg",
+                        choices=["fedavg", "ema_loss", "ema_alignment",
+                                 "velocity_novelty", "gradient_survival"],
+                        help="How to weight each client's update when aggregating. "
+                             "'fedavg' = classic sample-weighted average (unchanged "
+                             "default behavior). See federated/aggregation_strategies.py.")
+    parser.add_argument("--ema_beta", type=float, default=0.9,
+                        help="Smoothing factor for EMA-based strategies (ema_loss, "
+                             "ema_alignment, velocity_novelty).")
+    parser.add_argument("--survival_window", type=int, default=3,
+                        help="Rounds of gradient history kept for gradient_survival.")
+    parser.add_argument("--lr", type=float, default=3e-4,
+                        help="Default learning rate, used for any city without an explicit "
+                             "'lr:' key in its own config.yaml.")
+    parser.add_argument("--lr_decay", type=float, default=1.0,
+                        help="Multiplicative LR decay applied once per federated round "
+                             "(e.g. 0.97). 1.0 = no decay (default, unchanged behavior).")
+    parser.add_argument("--min_lr", type=float, default=1e-6,
+                        help="Floor for lr_decay -- LR never drops below this.")
     args = parser.parse_args()
-
-    log_file = os.path.join(run_dir, "training.log")
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler(log_file),
-        ],
-    )
-
     main(args)
