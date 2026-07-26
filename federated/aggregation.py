@@ -46,6 +46,32 @@ def weighted_average(
     return out
 
 
+def aggregate_round(
+    state_dicts: List[Dict[str, torch.Tensor]],
+    base_weights: List[float],
+    action_counts: List[Optional[Dict[int, int]]],
+    use_masked_head: bool = True,
+    head_weight_key: str = "head.4.weight",
+    head_bias_key: str = "head.4.bias",
+) -> Dict[str, torch.Tensor]:
+    """Aggregate one federated round.
+
+    If use_masked_head=True, use per-action aggregation for the final Q-head.
+    Otherwise perform ordinary weighted averaging on every parameter,
+    reproducing the pre-fix behavior.
+    """
+    if use_masked_head:
+        return masked_head_weighted_average(
+            state_dicts,
+            base_weights,
+            action_counts,
+            head_weight_key=head_weight_key,
+            head_bias_key=head_bias_key,
+        )
+
+    # original FedAvg on every parameter, including the head.
+    return weighted_average(state_dicts, base_weights)
+
 def masked_head_weighted_average(
     state_dicts: List[Dict[str, torch.Tensor]],
     base_weights: List[float],

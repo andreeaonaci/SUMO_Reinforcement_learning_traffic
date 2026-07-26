@@ -28,6 +28,7 @@ class HoldoutEvaluator:
         self.eval_seeds = max(1, eval_seeds)
         self.include_baselines = include_baselines
         self._env = None
+        self._round_robin_offset = {}
         self.last_summary = {}
 
     def _get_env(self):
@@ -53,7 +54,7 @@ class HoldoutEvaluator:
                 return float(info[key])
         return float(default)
 
-    def _policy_action(self, policy_name: str, obs: dict, model) -> int:
+    def _policy_action(self, policy_name: str, ts_id: str | None, obs: dict, model) -> int:
         if policy_name == "trained":
             return int(model.act(obs, explore=False))
 
@@ -67,10 +68,23 @@ class HoldoutEvaluator:
         if policy_name == "random":
             return int(np.random.choice(valid))
 
+        if policy_name == "round_robin":
+            key = ts_id or "__default__"
+            idx = self._round_robin_offset.get(key, 0)
+            choice = int(valid[idx % len(valid)])
+            self._round_robin_offset[key] = (idx + 1) % len(valid)
+            return choice
+
+        if policy_name == "fixed_time":
+            return int(valid[0])
+
         return int(valid[0])
 
     def _evaluate_policy(self, policy_name: str, model=None, seed_offset: int = 0, episode_count: int | None = None) -> dict:
         env = self._get_env()
+        if hasattr(env, "fixed_ts"):
+            env.fixed_ts = (policy_name == "fixed_time")
+        self._round_robin_offset.clear()
         ep_rewards = []
         ep_waiting_times = []
         ep_stopped = []
@@ -98,7 +112,7 @@ class HoldoutEvaluator:
 
                 while not done:
                     actions = {
-                        ts_id: self._policy_action(policy_name, o, model)
+                        ts_id: self._policy_action(policy_name, ts_id, o, model)
                         for ts_id, o in obs_dict.items()
                     }
 
@@ -216,7 +230,7 @@ class HoldoutEvaluator:
 
         if self.include_baselines:
             baseline_count = max(1, self.eval_seeds)
-            for policy_name in ["always_zero", "random"]:
+            for policy_name in ["always_zero", "random", "round_robin", "fixed_time"]:
                 summary[policy_name] = self._evaluate_policy(
                     policy_name,
                     model=None,

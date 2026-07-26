@@ -13,9 +13,12 @@ from datetime import datetime
 import logging
 import os
 import pprint
+import random
 import sys
 import yaml
 import json
+
+import numpy as np
 
 try:
     from pyfiglet import Figlet
@@ -55,7 +58,7 @@ def steps_per_episode_from_cfg(cfg: dict) -> int:
     return int(cfg.get("num_seconds", 3600) // cfg.get("delta_time", 5))
 
 
-def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay):
+def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: bool = True):
     """Single place that constructs a DQNAgent with the computed eps_decay."""
     return DQNAgent(
         own_dim=own_dim,
@@ -63,6 +66,7 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay):
         k_max=k_max,
         action_dim=action_dim,
         eps_decay=eps_decay,
+        head_fix=head_fix,
     )
 
 
@@ -77,6 +81,7 @@ def load_clients(
     explore_fraction: float,
     log_loss_every_steps: int = 50,
     comm_dropout_cfg: dict | None = None,
+    head_fix: bool = True,
 ) -> tuple:
     """Build one FederatedClient per city directory.
 
@@ -146,8 +151,9 @@ def load_clients(
         def make_agent(
             _own=own_dim, _nbr=neighbor_dim, _k=k_max,
             _act=action_dim, _eps=eps_decay,
+            _head_fix=head_fix,
         ):
-            return _make_agent(_own, _nbr, _k, _act, _eps)
+            return _make_agent(_own, _nbr, _k, _act, _eps, head_fix=_head_fix)
 
         clients.append(
             FederatedClient(
@@ -226,30 +232,115 @@ def make_holdout_evaluator(
     action_dim: int,
     episodes: int = 1,
     eval_comm_dropout_cfg: dict | None = None,
+    holdout_base_dir: str | None = None,
 ) -> "HoldoutEvaluator | None":
-    cfg_path = os.path.join(base_dir, "city_5_holdout", "config.yaml")
-    if not os.path.exists(cfg_path):
-        logger.warning("No holdout city found at %s, skipping evaluator.", cfg_path)
-        return None
-
-    with open(cfg_path) as f:
-        cfg = yaml.safe_load(f)
+    candidate_base_dirs = [base_dir]
+    if holdout_base_dir and holdout_base_dir not in candidate_base_dirs:
+        candidate_base_dirs.append(holdout_base_dir)
+    if "environments" not in candidate_base_dirs:
+        candidate_base_dirs.append("environments")
 
     own_dim, neighbor_dim, k_max = obs_dims
     dropout_cfg = eval_comm_dropout_cfg if eval_comm_dropout_cfg is not None else DEFAULT_COMM_DROPOUT
 
+    preferred_cfg = None
+    preferred_cfg_path = None
+    fallback_candidates = []
+
+    for candidate in candidate_base_dirs:
+        preferred_path = os.path.join(candidate, "city_5_holdout", "config.yaml")
+        if os.path.exists(preferred_path) and preferred_cfg is None:
+            with open(preferred_path) as f:
+                preferred_cfg = yaml.safe_load(f)
+            preferred_cfg_path = preferred_path
+
+        if not os.path.isdir(candidate):
+            continue
+        for city_name in sorted(os.listdir(candidate)):
+            cfg_path = os.path.join(candidate, city_name, "config.yaml")
+            if os.path.exists(cfg_path):
+                fallback_candidates.append((city_name, cfg_path))
+
+    if preferred_cfg is None and not fallback_candidates:
+        logger.warning(
+            "No evaluation city found. Searched base dirs: %s",
+            candidate_base_dirs,
+        )
+        return None
+
+    selected_cfg = None
+    selected_name = None
+
+    # First preference: true holdout city if compatible.
+    if preferred_cfg is not None:
+        env = build_federated_env(preferred_cfg)
+        try:
+            dims_match = (
+                env.own_dim == own_dim
+                and env.neighbor_dim == neighbor_dim
+                and env.k_max == k_max
+            )
+            action_ok = env.max_action_dim <= action_dim
+            if dims_match and action_ok:
+                selected_cfg = preferred_cfg
+                selected_name = "city_5_holdout"
+            else:
+                logger.warning(
+                    "Holdout evaluator city is incompatible (dims_match=%s, holdout_action_dim=%d, global_action_dim=%d). "
+                    "Falling back to a compatible city from base dirs.",
+                    dims_match,
+                    env.max_action_dim,
+                    action_dim,
+                )
+        finally:
+            env.close()
+
+    # Fallback: any compatible city config (useful for subset smoke tests).
+    if selected_cfg is None:
+        seen = set()
+        for city_name, cfg_path in fallback_candidates:
+            if cfg_path in seen:
+                continue
+            seen.add(cfg_path)
+            with open(cfg_path) as f:
+                candidate_cfg = yaml.safe_load(f)
+            env = build_federated_env(candidate_cfg)
+            try:
+                dims_match = (
+                    env.own_dim == own_dim
+                    and env.neighbor_dim == neighbor_dim
+                    and env.k_max == k_max
+                )
+                action_ok = env.max_action_dim <= action_dim
+                if dims_match and action_ok:
+                    selected_cfg = candidate_cfg
+                    selected_name = city_name
+                    break
+            finally:
+                env.close()
+
+    if selected_cfg is None:
+        logger.warning(
+            "No compatible evaluation city found for obs_dims=%s and action_dim=%d.",
+            obs_dims,
+            action_dim,
+        )
+        return None
+
+    if selected_name != "city_5_holdout":
+        logger.info(
+            "Using '%s' as evaluation city for this run (compatibility fallback).",
+            selected_name,
+        )
+    elif preferred_cfg_path and not preferred_cfg_path.startswith(base_dir):
+        logger.info(
+            "Holdout city not found under base_dir='%s'; using '%s' for evaluation.",
+            base_dir,
+            os.path.dirname(os.path.dirname(preferred_cfg_path)),
+        )
+
     def build_holdout_env():
-        env = build_federated_env(cfg)
-        if env.own_dim != own_dim or env.neighbor_dim != neighbor_dim or env.k_max != k_max:
-            raise RuntimeError(
-                f"Holdout city obs shape ({env.own_dim},{env.neighbor_dim},{env.k_max}) "
-                f"!= training obs shape ({own_dim},{neighbor_dim},{k_max})."
-            )
-        if env.max_action_dim > action_dim:
-            raise RuntimeError(
-                f"Holdout city max_action_dim={env.max_action_dim} exceeds "
-                f"global action_dim={action_dim}."
-            )
+        env = build_federated_env(selected_cfg)
         env = ActionMaskPadder(env, action_dim)
         if dropout_cfg:
             env = CommDropoutWrapper(env, **dropout_cfg)
@@ -262,8 +353,24 @@ def make_holdout_evaluator(
 # Entry point
 # ---------------------------------------------------------------------------
 
+def set_seed(seed: int | None) -> None:
+    if seed is None:
+        return
+    random.seed(seed)
+    np.random.seed(seed)
+    try:
+        import torch
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+    except Exception:
+        pass
+
+
 def main(args):
     global run_dir
+
+    set_seed(args.seed)
 
     timestamp = datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
     run_dir = os.path.join("results", f"run_{timestamp}")
@@ -284,7 +391,10 @@ def main(args):
 
     logger.info("Arguments:\n%s", pprint.pformat(vars(args), sort_dicts=True))
 
-    base = "environments"
+    if args.base_dir is not None:
+        base = args.base_dir
+    else:
+        base = "environments" 
 
     if args.parallel:
         city_configs, obs_dims, action_dim, steps_per_ep = resolve_city_configs_and_dims(base)
@@ -302,8 +412,17 @@ def main(args):
             own_dim, neighbor_dim, k_max, action_dim, len(city_configs), eps_decay,
         )
 
-        global_model = _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay)
-        evaluator    = make_holdout_evaluator(base, obs_dims, action_dim, episodes=args.eval_episodes)
+        global_model = _make_agent(
+            own_dim, neighbor_dim, k_max, action_dim, eps_decay,
+            head_fix=not args.disable_head_fix,
+        )
+        evaluator = make_holdout_evaluator(
+            base,
+            obs_dims,
+            action_dim,
+            episodes=args.eval_episodes,
+            holdout_base_dir=args.eval_base_dir,
+        )
 
         aggregation_config = {
             "ema_beta": args.ema_beta,
@@ -331,12 +450,14 @@ def main(args):
             log_loss_every_steps=args.log_loss_every_steps,
             evaluator=evaluator,
             checkpoint_dir=run_dir,
+            log_file=os.path.join(run_dir, "training.log"),
             aggregation_strategy=args.aggregation_strategy,
             aggregation_config=aggregation_config,
             default_lr=args.lr,
             lr_decay=args.lr_decay,
             min_lr=args.min_lr,
             per_city_lr=per_city_lr,
+            head_fix=not args.disable_head_fix,
         )
         history = server.run(rounds=args.rounds, eval_every=args.eval_every)
 
@@ -350,6 +471,7 @@ def main(args):
             local_episodes=args.local_episodes,
             explore_fraction=args.explore_fraction,
             log_loss_every_steps=args.log_loss_every_steps,
+            head_fix=not args.disable_head_fix,
         )
         own_dim, neighbor_dim, k_max = obs_dims
 
@@ -360,8 +482,17 @@ def main(args):
             own_dim, neighbor_dim, k_max, action_dim, len(clients), eps_decay,
         )
 
-        global_model = _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay)
-        evaluator    = make_holdout_evaluator(base, obs_dims, action_dim, episodes=args.eval_episodes)
+        global_model = _make_agent(
+            own_dim, neighbor_dim, k_max, action_dim, eps_decay,
+            head_fix=not args.disable_head_fix,
+        )
+        evaluator = make_holdout_evaluator(
+            base,
+            obs_dims,
+            action_dim,
+            episodes=args.eval_episodes,
+            holdout_base_dir=args.eval_base_dir,
+        )
 
         aggregation_config = {
             "ema_beta": args.ema_beta,
@@ -374,6 +505,7 @@ def main(args):
             checkpoint_dir=run_dir,
             aggregation_strategy=args.aggregation_strategy,
             aggregation_config=aggregation_config,
+            use_masked_head=not args.disable_head_fix,
         )
         history = server.run(rounds=args.rounds, eval_every=args.eval_every)
 
@@ -402,6 +534,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--rounds",               type=int,   default=5)
+    parser.add_argument("--seed",                 type=int,   default=None)
     parser.add_argument("--local_episodes",        type=int,   default=1)
     parser.add_argument("--eval_every",            type=int,   default=1)
     parser.add_argument("--eval_episodes",         type=int,   default=1)
@@ -415,6 +548,12 @@ if __name__ == "__main__":
     parser.add_argument("--parallel", action="store_true",
                         help="Train all cities concurrently, one persistent OS process per "
                              "city. See federated/parallel_server.py.")
+    parser.add_argument(
+        "--disable_head_fix",
+        action="store_true",
+        help="Ablation flag: use naive uniform averaging on the head layer instead of "
+            "masked_head_weighted_average. Used to reproduce the pre-fix behavior.",
+    )
     parser.add_argument("--aggregation_strategy", type=str, default="fedavg",
                         choices=["fedavg", "ema_loss", "ema_alignment",
                                  "velocity_novelty", "gradient_survival"],
@@ -434,5 +573,12 @@ if __name__ == "__main__":
                              "(e.g. 0.97). 1.0 = no decay (default, unchanged behavior).")
     parser.add_argument("--min_lr", type=float, default=1e-6,
                         help="Floor for lr_decay -- LR never drops below this.")
+    parser.add_argument("--base_dir", default="environments",
+                     help="Directory containing city_x subfolders with config.yaml")
+    parser.add_argument(
+        "--eval_base_dir",
+        default=None,
+        help="Optional directory to search for city_5_holdout when base_dir is a reduced subset.",
+    )
     args = parser.parse_args()
     main(args)

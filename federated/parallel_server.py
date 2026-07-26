@@ -35,6 +35,7 @@ fed by queue messages instead of direct method calls.
 import logging
 import multiprocessing as mp
 import os
+import sys
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
@@ -67,6 +68,8 @@ def _client_worker(
     lr: float,
     lr_decay: float,
     min_lr: float,
+    head_fix: bool,
+    log_file: str,
     in_queue: "mp.Queue",
     out_queue: "mp.Queue",
 ):
@@ -84,6 +87,11 @@ def _client_worker(
     logging.basicConfig(
         level=logging.INFO,
         format=f"%(asctime)s | %(levelname)s | [{name}] %(name)s | %(message)s",
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler(log_file, mode="a"),
+        ],
+        force=True,
     )
     try:
         env = build_federated_env(cfg)
@@ -92,6 +100,7 @@ def _client_worker(
             own_dim=own_dim, neighbor_dim=neighbor_dim, k_max=k_max,
             action_dim=action_dim, eps_decay=eps_decay,
             lr=lr, lr_decay=lr_decay, min_lr=min_lr,
+            head_fix=head_fix,
         )
 
         while True:
@@ -161,6 +170,7 @@ class ParallelFederatedServer:
         log_loss_every_steps: int = 50,
         evaluator: Optional[Any] = None,
         checkpoint_dir: str = "checkpoints",
+        log_file: Optional[str] = None,
         client_checkpoint_every: int = 1,
         aggregation_strategy: str = "fedavg",
         aggregation_config: Optional[Dict[str, Any]] = None,
@@ -168,10 +178,12 @@ class ParallelFederatedServer:
         lr_decay: float = 1.0,
         min_lr: float = 1e-6,
         per_city_lr: Optional[Dict[str, float]] = None,
+        head_fix: bool = True,
     ):
         self.global_model = global_model
         self.evaluator = evaluator
         self.checkpoint_dir = checkpoint_dir
+        self.log_file = log_file or os.path.join(checkpoint_dir, "training.log")
         self.client_checkpoint_every = client_checkpoint_every
         os.makedirs(os.path.join(checkpoint_dir, "clients"), exist_ok=True)
 
@@ -206,6 +218,8 @@ class ParallelFederatedServer:
                     name, cfg, own_dim, neighbor_dim, k_max, action_dim,
                     comm_dropout_cfg, local_episodes, log_loss_every_steps, eps_decay,
                     city_lr, lr_decay, min_lr,
+                    head_fix,
+                    self.log_file,
                     self.in_queues[name], self.out_queue,
                 ),
                 daemon=True,

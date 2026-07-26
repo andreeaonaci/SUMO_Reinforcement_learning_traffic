@@ -1,7 +1,7 @@
 """Federated server -- orchestrates rounds of pluggable-strategy aggregation.
 
 No aggregation-specific logic lives here beyond: build a ClientRoundInfo per
-client, hand the batch to the configured strategy, weighted_average the
+client, hand the batch to the configured strategy, aggregate the
 result. Swapping strategies is a config change (`aggregation_strategy: ...`),
 never a code change in this file.
 """
@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 import torch
 
-from federated.aggregation import masked_head_weighted_average, weighted_average
+from federated.aggregation import aggregate_round
 from federated.aggregation_strategies import (
     BaseAggregationStrategy,
     ClientRoundInfo,
@@ -23,38 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class FederatedServer:
-    """Coordinate clients through multiple rounds of pluggable-strategy FedAvg.
-
-    Each round:
-      1. Broadcast the current global weights to every client.
-      2. Each client trains locally, returning (state_dict, n_samples, mean_loss).
-      3. Build a ClientRoundInfo per client -- includes pseudo-gradients
-         (client_state - global_state_before_this_round) and the
-         federation's own last pseudo-gradient, so gradient-aware
-         strategies (alignment, novelty, survival) have real signal without
-         clients ever exposing raw autograd gradients to the server.
-      4. Ask the configured strategy for weights, then weighted_average.
-      5. Optionally evaluate on the holdout city and checkpoint to disk.
-
-    Args:
-        global_model:        A DQNAgent-like object exposing state_dict() /
-                             load_state_dict() and a ``.q`` submodule to
-                             checkpoint.
-        clients:             List of client objects. ``local_train`` must
-                             return ``(state_dict, n_samples)`` or
-                             ``(state_dict, n_samples, mean_loss)`` --
-                             both are accepted (see ``_call_local_train``).
-        evaluator:            Optional HoldoutEvaluator.
-        checkpoint_dir:       Directory for per-round ``.pth`` files.
-        aggregation_strategy: Name registered in
-                             ``aggregation_strategies.STRATEGY_REGISTRY``
-                             (default "fedavg" -- classic sample-weighted
-                             averaging, identical behavior to before this
-                             refactor).
-        aggregation_config:   Passed straight through to the strategy's
-                             constructor (e.g. {"ema_beta": 0.9,
-                             "survival_window": 3}).
-    """
+    """Coordinate clients through multiple rounds of pluggable-strategy FedAvg."""
 
     def __init__(
         self,
@@ -64,18 +33,26 @@ class FederatedServer:
         checkpoint_dir: str = "checkpoints",
         aggregation_strategy: str = "fedavg",
         aggregation_config: Optional[Dict[str, Any]] = None,
+        use_masked_head: bool = True,
     ):
         self.global_model = global_model
         self.clients = clients
         self.evaluator = evaluator
         self.checkpoint_dir = checkpoint_dir
+        self.use_masked_head = use_masked_head
 
         self.strategy: BaseAggregationStrategy = build_aggregation_strategy(
             aggregation_strategy, aggregation_config
         )
+
         logger.info(
             "Aggregation strategy: %s  config=%s",
-            type(self.strategy).__name__, aggregation_config or {},
+            type(self.strategy).__name__,
+            aggregation_config or {},
+        )
+        logger.info(
+            "Masked head aggregation: %s",
+            self.use_masked_head,
         )
 
         # Per-client history needed to compute deltas each round.
@@ -90,13 +67,9 @@ class FederatedServer:
 
     @staticmethod
     def _call_local_train(client: Any, global_state: Dict[str, torch.Tensor]):
-        """Accept clients whose local_train returns either a 2- or 3-tuple.
-
-        Older clients return (state_dict, n_samples). Strategy-aware
-        clients additionally return mean_loss as a third element. Both
-        work without touching client code that hasn't been updated yet.
-        """
+        """Accept clients whose local_train returns either a 2-, 3-, or 4-tuple."""
         result = client.local_train(global_state)
+
         if len(result) == 4:
             state_dict, n_samples, mean_loss, action_counts = result
         elif len(result) == 3:
@@ -106,6 +79,7 @@ class FederatedServer:
             state_dict, n_samples = result
             mean_loss = None
             action_counts = None
+
         return state_dict, n_samples, mean_loss, action_counts
 
     # ------------------------------------------------------------------
@@ -125,6 +99,7 @@ class FederatedServer:
             logger.info("=== Federated round %d / %d ===", r, rounds)
 
             global_state_before = self.global_model.state_dict()
+
             client_states: Dict[str, Dict[str, torch.Tensor]] = {}
             infos: List[ClientRoundInfo] = []
             total_samples = 0
@@ -133,67 +108,95 @@ class FederatedServer:
 
             for client in self.clients:
                 cid = getattr(client, "name", repr(client))
-                state_dict, n_samples, mean_loss, action_counts = self._call_local_train(
-                    client, global_state_before
-                )
+
+                (
+                    state_dict,
+                    n_samples,
+                    mean_loss,
+                    action_counts,
+                ) = self._call_local_train(client, global_state_before)
+
                 client_states[cid] = state_dict
                 client_action_counts[cid] = action_counts
                 total_samples += n_samples
 
                 client_gradient = self.strategy.compute_pseudo_gradient(
-                    state_dict, global_state_before
+                    state_dict,
+                    global_state_before,
                 )
 
-                infos.append(ClientRoundInfo(
-                    client_id=cid,
-                    num_samples=n_samples,
-                    client_state=state_dict,
-                    previous_client_state=self._previous_client_state.get(cid),
-                    global_state=global_state_before,
-                    previous_global_state=self._previous_global_state,
-                    client_gradient=client_gradient,
-                    previous_gradient=self.strategy.get_state(cid).get("_last_client_gradient"),
-                    global_gradient=self._global_gradient,
-                    local_loss=mean_loss,
-                    previous_loss=self._previous_loss.get(cid),
-                    round_num=r,
-                ))
+                infos.append(
+                    ClientRoundInfo(
+                        client_id=cid,
+                        num_samples=n_samples,
+                        client_state=state_dict,
+                        previous_client_state=self._previous_client_state.get(cid),
+                        global_state=global_state_before,
+                        previous_global_state=self._previous_global_state,
+                        client_gradient=client_gradient,
+                        previous_gradient=self.strategy.get_state(cid).get(
+                            "_last_client_gradient"
+                        ),
+                        global_gradient=self._global_gradient,
+                        local_loss=mean_loss,
+                        previous_loss=self._previous_loss.get(cid),
+                        round_num=r,
+                    )
+                )
 
-                # Persist this round's values as "previous" for next round.
+                # Persist this round's values for next round.
                 self._previous_client_state[cid] = state_dict
+
                 if mean_loss is not None:
                     self._previous_loss[cid] = mean_loss
-                if client_gradient is not None:
-                    self.strategy.get_state(cid)["_last_client_gradient"] = client_gradient
 
-            # ---- weight + aggregate ---------------------------------------
+                if client_gradient is not None:
+                    self.strategy.get_state(cid)[
+                        "_last_client_gradient"
+                    ] = client_gradient
+
+            # ----------------------------------------------------------
+            # Compute aggregation weights
+            # ----------------------------------------------------------
+
             weights = self.strategy.compute_weights(infos)
             ordered_ids = [info.client_id for info in infos]
-            agg_state = masked_head_weighted_average(
-                [client_states[cid] for cid in ordered_ids],
-                [weights[cid] for cid in ordered_ids],
-                [client_action_counts.get(cid) for cid in ordered_ids],
+
+            agg_state = aggregate_round(
+                state_dicts=[client_states[cid] for cid in ordered_ids],
+                base_weights=[weights[cid] for cid in ordered_ids],
+                action_counts=[client_action_counts.get(cid) for cid in ordered_ids],
+                use_masked_head=self.use_masked_head,
             )
+
             self.global_model.load_state_dict(agg_state)
 
-            # Update the federation's own trajectory for next round's
-            # alignment/novelty/survival scoring.
+            # Update the federation's own trajectory.
             new_global_gradient = self.strategy.compute_pseudo_gradient(
-                agg_state, global_state_before
+                agg_state,
+                global_state_before,
             )
+
             self._global_gradient = new_global_gradient
             self._previous_global_state = global_state_before
+
             if isinstance(self.strategy, GradientSurvivalStrategy):
                 self.strategy.record_global_gradient(new_global_gradient)
 
             if r % eval_every == 0:
-                total_norm = sum(
-                    p.data.norm(2).item() ** 2
-                    for p in self.global_model.q.parameters()
-                ) ** 0.5
+                total_norm = (
+                    sum(
+                        p.data.norm(2).item() ** 2
+                        for p in self.global_model.q.parameters()
+                    )
+                    ** 0.5
+                )
+
                 logger.info(
                     "Round %d | global weight norm=%.6f | total_samples=%d",
-                    r, total_norm, total_samples,
+                    r,
+                    total_norm,
+                    total_samples,
                 )
 
                 history["round"].append(r)
@@ -201,19 +204,30 @@ class FederatedServer:
 
                 if self.evaluator:
                     metrics = self.evaluator.evaluate(self.global_model)
+
                     history["eval_reward"].append(metrics["mean_reward"])
-                    history["eval_waiting_time"].append(metrics["mean_waiting_time"])
+                    history["eval_waiting_time"].append(
+                        metrics["mean_waiting_time"]
+                    )
                     history["eval_stopped"].append(metrics["mean_stopped"])
+
                     logger.info(
                         "Round %d | reward=%.4f | waiting_time=%.2fs | stopped=%.1f",
-                        r, metrics["mean_reward"], metrics["mean_waiting_time"], metrics["mean_stopped"],
+                        r,
+                        metrics["mean_reward"],
+                        metrics["mean_waiting_time"],
+                        metrics["mean_stopped"],
                     )
                 else:
                     history["eval_reward"].append(None)
                     history["eval_waiting_time"].append(None)
                     history["eval_stopped"].append(None)
 
-                ckpt_path = os.path.join(self.checkpoint_dir, f"global_round_{r:03d}.pth")
+                ckpt_path = os.path.join(
+                    self.checkpoint_dir,
+                    f"global_round_{r:03d}.pth",
+                )
+
                 torch.save(self.global_model.q.state_dict(), ckpt_path)
                 logger.info("Checkpoint saved: %s", ckpt_path)
 

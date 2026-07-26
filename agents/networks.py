@@ -70,11 +70,13 @@ class NeighborAttentionQNetwork(nn.Module):
         d_model: int = 128,
         n_heads: int = 4,
         n_hops: int = 4,
+        head_fix: bool = True,
     ):
         super().__init__()
         self.k_max = k_max
         self.d_model = d_model
         self.n_hops = n_hops
+        self.head_fix = head_fix
 
         self.own_encoder = nn.Sequential(
             nn.Linear(own_dim, d_model),
@@ -117,6 +119,13 @@ class NeighborAttentionQNetwork(nn.Module):
             nn.Linear(d_model, action_dim),
         )
 
+        if not self.head_fix:
+            self.pool_head = nn.Sequential(
+                nn.Linear(d_model, d_model),
+                nn.ReLU(),
+                nn.Linear(d_model, d_model),
+            )
+
     def forward(
         self,
         own_obs: torch.Tensor,
@@ -127,8 +136,17 @@ class NeighborAttentionQNetwork(nn.Module):
         B, K, _ = neighbor_obs.shape
 
         own_emb = self.own_encoder(own_obs)  # (B, d_model)
-
         nbr_emb = self.neighbor_encoder(neighbor_obs)  # (B, K, d_model)
+
+        if not self.head_fix:
+            valid = neighbor_mask.clamp(min=0.0, max=1.0)
+            nbr_pool = torch.sum(nbr_emb * valid.unsqueeze(-1), dim=1)
+            nbr_count = valid.sum(dim=1, keepdim=True).clamp(min=1.0)
+            nbr_pool = nbr_pool / nbr_count
+            nbr_pool = self.pool_head(nbr_pool)
+            combined = torch.cat([own_emb, nbr_pool], dim=-1)
+            return self.head(combined)
+
         if hop_dist is not None:
             hop_dist = hop_dist.clamp(0, self.n_hops)
             nbr_emb = nbr_emb + self.hop_embedding(hop_dist.long())

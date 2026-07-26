@@ -110,6 +110,7 @@ class DQNAgent:
         eps_decay: float = 20000.0,
         lr_decay: float = 1.0,
         min_lr: float = 1e-6,
+        head_fix: bool = True,
     ):
         self.own_dim = own_dim
         self.neighbor_dim = neighbor_dim
@@ -125,6 +126,7 @@ class DQNAgent:
             d_model=d_model,
             n_heads=n_heads,
             n_hops=n_hops,
+            head_fix=head_fix,
         )
         self.q = NeighborAttentionQNetwork(**net_kwargs).to(self.device)
         self.q_target = NeighborAttentionQNetwork(**net_kwargs).to(self.device)
