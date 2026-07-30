@@ -17,16 +17,22 @@ class HoldoutEvaluator:
     def __init__(
         self,
         env_builder,
-        episodes: int = 1,
+        episodes: int = 5,
         output_dir: str | None = None,
         eval_seeds: int = 3,
         include_baselines: bool = False,
+        eval_seed_base: int = 12345,
+        deterministic_eval: bool = True,
+        rebuild_env_each_evaluate: bool = True,
     ):
         self.env_builder = env_builder
-        self.episodes = episodes
+        self.episodes = max(1, episodes)
         self.output_dir = output_dir
         self.eval_seeds = max(1, eval_seeds)
         self.include_baselines = include_baselines
+        self.eval_seed_base = int(eval_seed_base)
+        self.deterministic_eval = bool(deterministic_eval)
+        self.rebuild_env_each_evaluate = bool(rebuild_env_each_evaluate)
         self._env = None
         self._round_robin_offset = {}
         self.last_summary = {}
@@ -80,6 +86,12 @@ class HoldoutEvaluator:
 
         return int(valid[0])
 
+    @staticmethod
+    def _std(values: list[float]) -> float:
+        if len(values) < 2:
+            return 0.0
+        return float(np.std(values, ddof=1))
+
     def _evaluate_policy(self, policy_name: str, model=None, seed_offset: int = 0, episode_count: int | None = None) -> dict:
         env = self._get_env()
         if hasattr(env, "fixed_ts"):
@@ -97,8 +109,9 @@ class HoldoutEvaluator:
         episode_count = self.episodes if episode_count is None else max(1, episode_count)
         for ep in range(episode_count):
             try:
-                seed = seed_offset + ep
-                self._set_seed(seed)
+                if self.deterministic_eval:
+                    seed = self.eval_seed_base + seed_offset + ep
+                    self._set_seed(seed)
                 obs_dict = env.reset()
                 if not isinstance(obs_dict, dict):
                     obs_dict = {"__single__": obs_dict}
@@ -180,8 +193,14 @@ class HoldoutEvaluator:
         result = {
             "policy": policy_name,
             "mean_reward": float(np.mean(ep_rewards)),
+            "std_reward": self._std(ep_rewards),
+            "per_episode_reward": [float(x) for x in ep_rewards],
             "mean_waiting_time": float(np.mean(ep_waiting_times)),
+            "std_waiting_time": self._std(ep_waiting_times),
+            "per_episode_waiting_time": [float(x) for x in ep_waiting_times],
             "mean_stopped": float(np.mean(ep_stopped)),
+            "std_stopped": self._std(ep_stopped),
+            "per_episode_stopped": [float(x) for x in ep_stopped],
             "mean_arrived": float(np.mean(ep_arrived)),
             "mean_queue_length": float(np.mean(ep_queue_lengths)),
             "episodes": len(ep_rewards),
@@ -190,13 +209,22 @@ class HoldoutEvaluator:
             "q_gaps": ep_q_gaps,
         }
         logger.info(
-            "Holdout eval[%s]: reward=%.4f, waiting_time=%.2fs, stopped=%.1f, arrived=%.1f, queue=%.2f",
+            "Holdout eval[%s]: reward mean=%.4f std=%.4f, waiting_time mean=%.2fs std=%.2f, "
+            "stopped mean=%.1f std=%.1f, arrived=%.1f, queue=%.2f",
             policy_name,
             result["mean_reward"],
+            result["std_reward"],
             result["mean_waiting_time"],
+            result["std_waiting_time"],
             result["mean_stopped"],
+            result["std_stopped"],
             result["mean_arrived"],
             result["mean_queue_length"],
+        )
+        logger.info(
+            "Holdout eval[%s] per-episode waiting_time=%s",
+            policy_name,
+            result["per_episode_waiting_time"],
         )
         return result
 
@@ -224,6 +252,9 @@ class HoldoutEvaluator:
                 ])
 
     def evaluate(self, model) -> dict:
+        if self.rebuild_env_each_evaluate:
+            self.close()
+
         summary = {}
         trained_result = self._evaluate_policy("trained", model=model, seed_offset=0, episode_count=self.episodes)
         summary["trained"] = trained_result

@@ -168,6 +168,10 @@ class DQNAgent:
             -1.0 * self.steps_done / self.eps_decay
         )
 
+    def current_epsilon(self) -> float:
+        """Public read-only view of the current epsilon value."""
+        return self._current_epsilon()
+
     def _greedy_action(self, obs: Observation) -> int:
         with torch.no_grad():
             own, neighbors, neighbor_mask, hop_dist, action_mask = _collate([obs], self.device)

@@ -36,6 +36,7 @@ import logging
 import multiprocessing as mp
 import os
 import sys
+import json
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
@@ -111,19 +112,21 @@ def _client_worker(
             _, global_state = msg
             agent.load_state_dict(global_state)
             try:
+                eps_start = agent.current_epsilon()
                 state_dict, n_samples, mean_loss, action_counts = agent.train(
                     env, episodes=local_episodes, log_loss_every_steps=log_loss_every_steps
                 )
                 new_lr = agent.decay_lr()
+                eps_end = agent.current_epsilon()
                 logger.info(
-                    "Worker '%s' round done: mean_loss=%s  lr=%.2e  action_counts=%s",
+                    "Worker '%s' round done: mean_loss=%s  lr=%.2e  eps_start=%.4f eps_end=%.4f  action_counts=%s",
                     name, f"{mean_loss:.6f}" if mean_loss is not None else "n/a",
-                    new_lr, action_counts,
+                    new_lr, eps_start, eps_end, action_counts,
                 )
-                out_queue.put(("ok", name, state_dict, n_samples, mean_loss, action_counts))
+                out_queue.put(("ok", name, state_dict, n_samples, mean_loss, action_counts, eps_start, eps_end))
             except Exception as e:
                 logger.exception("Worker '%s' local training failed.", name)
-                out_queue.put(("error", name, str(e), 0, None, None))
+                out_queue.put(("error", name, str(e), 0, None, None, None, None))
     finally:
         try:
             env.close()
@@ -230,10 +233,21 @@ class ParallelFederatedServer:
 
         logger.info("Started %d parallel city worker processes.", len(self.processes))
 
+    def _atomic_save_history(self, history: Dict[str, list]) -> None:
+        history_path = os.path.join(self.checkpoint_dir, "federated_history.json")
+        tmp_path = history_path + ".tmp"
+        with open(tmp_path, "w") as f:
+            json.dump(history, f, indent=2)
+        os.replace(tmp_path, history_path)
+
     def run(self, rounds: int, eval_every: int = 1) -> Dict[str, Any]:
         history: Dict[str, list] = {
             "round": [], "client_samples": [], "eval_reward": [],
-            "eval_waiting_time": [], "eval_stopped": [], "eval_action_counts": [], "eval_q_gaps": [],
+            "round_eps_start": [], "round_eps_end": [],
+            "eval_reward_std": [], "eval_reward_episodes": [],
+            "eval_waiting_time": [], "eval_waiting_time_std": [], "eval_waiting_time_episodes": [],
+            "eval_stopped": [], "eval_stopped_std": [], "eval_stopped_episodes": [],
+            "eval_action_counts": [], "eval_q_gaps": [],
         }
 
         try:
@@ -252,9 +266,11 @@ class ParallelFederatedServer:
                 pending = set(self.names)
 
                 client_action_counts: Dict[str, Optional[Dict[int, int]]] = {}
+                eps_start_by_client: Dict[str, Optional[float]] = {}
+                eps_end_by_client: Dict[str, Optional[float]] = {}
 
                 while pending:
-                    status, name, payload, n_samples, mean_loss, action_counts = self.out_queue.get()
+                    status, name, payload, n_samples, mean_loss, action_counts, eps_start, eps_end = self.out_queue.get()
                     pending.discard(name)
                     if status == "error":
                         raise RuntimeError(f"Client '{name}' failed: {payload}")
@@ -262,6 +278,8 @@ class ParallelFederatedServer:
                     state_dict = payload
                     client_states[name] = state_dict
                     client_action_counts[name] = action_counts
+                    eps_start_by_client[name] = eps_start
+                    eps_end_by_client[name] = eps_end
                     total_samples += n_samples
 
                     client_gradient = self.strategy.compute_pseudo_gradient(
@@ -288,6 +306,15 @@ class ParallelFederatedServer:
                         self._previous_loss[name] = mean_loss
                     if client_gradient is not None:
                         self.strategy.get_state(name)["_last_client_gradient"] = client_gradient
+
+                    if eps_start is not None and eps_end is not None:
+                        logger.info(
+                            "Round %d | client=%s epsilon start=%.4f end=%.4f",
+                            r,
+                            name,
+                            eps_start,
+                            eps_end,
+                        )
 
                     if self.client_checkpoint_every and (r % self.client_checkpoint_every == 0):
                         ckpt_path = os.path.join(self.checkpoint_dir, "clients", f"{name}_round_{r:03d}.pth")
@@ -319,24 +346,51 @@ class ParallelFederatedServer:
                 if r % eval_every == 0:
                     history["round"].append(r)
                     history["client_samples"].append(total_samples)
+                    history["round_eps_start"].append(eps_start_by_client)
+                    history["round_eps_end"].append(eps_end_by_client)
 
                     if self.evaluator:
                         metrics = self.evaluator.evaluate(self.global_model)
                         history["eval_reward"].append(metrics["mean_reward"])
+                        history["eval_reward_std"].append(metrics.get("std_reward"))
+                        history["eval_reward_episodes"].append(metrics.get("per_episode_reward"))
                         history["eval_waiting_time"].append(metrics["mean_waiting_time"])
+                        history["eval_waiting_time_std"].append(metrics.get("std_waiting_time"))
+                        history["eval_waiting_time_episodes"].append(metrics.get("per_episode_waiting_time"))
                         history["eval_stopped"].append(metrics["mean_stopped"])
+                        history["eval_stopped_std"].append(metrics.get("std_stopped"))
+                        history["eval_stopped_episodes"].append(metrics.get("per_episode_stopped"))
                         history["eval_action_counts"].append(metrics.get("action_counts"))
                         history["eval_q_gaps"].append(metrics.get("q_gaps"))
                         logger.info(
-                            "Round %d | reward=%.4f | waiting_time=%.2fs | stopped=%.1f",
-                            r, metrics["mean_reward"], metrics["mean_waiting_time"], metrics["mean_stopped"],
+                            "Round %d | reward mean=%.4f std=%.4f | waiting_time mean=%.2fs std=%.2f | stopped mean=%.1f std=%.1f",
+                            r,
+                            metrics["mean_reward"],
+                            metrics.get("std_reward", 0.0),
+                            metrics["mean_waiting_time"],
+                            metrics.get("std_waiting_time", 0.0),
+                            metrics["mean_stopped"],
+                            metrics.get("std_stopped", 0.0),
                         )
                     else:
                         history["eval_reward"].append(None)
+                        history["eval_reward_std"].append(None)
+                        history["eval_reward_episodes"].append(None)
                         history["eval_waiting_time"].append(None)
+                        history["eval_waiting_time_std"].append(None)
+                        history["eval_waiting_time_episodes"].append(None)
                         history["eval_stopped"].append(None)
+                        history["eval_stopped_std"].append(None)
+                        history["eval_stopped_episodes"].append(None)
                         history["eval_action_counts"].append(None)
                         history["eval_q_gaps"].append(None)
+
+                    self._atomic_save_history(history)
+                    logger.info(
+                        "Round %d | partial history saved to %s",
+                        r,
+                        os.path.join(self.checkpoint_dir, "federated_history.json"),
+                    )
 
                     ckpt_path = os.path.join(self.checkpoint_dir, f"global_round_{r:03d}.pth")
                     torch.save(self.global_model.q.state_dict(), ckpt_path)

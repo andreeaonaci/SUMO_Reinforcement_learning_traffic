@@ -94,6 +94,7 @@ class FederatedClient:
 
         # Sync weights only -- keep replay buffer + epsilon schedule alive.
         self._agent.load_state_dict(global_state)
+        eps_start = self._agent.current_epsilon()
 
         try:
             # DQNAgent.train() handles the full multi-agent loop:
@@ -115,14 +116,15 @@ class FederatedClient:
             raise
 
         new_lr = self._agent.decay_lr()
+        eps_end = self._agent.current_epsilon()
         logger.info(
             "Client '%s' finished local training: n_samples=%d  mean_loss=%s  lr=%.2e  "
-            "action_counts=%s.",
+            "eps_start=%.4f eps_end=%.4f  action_counts=%s.",
             self.name, n_samples,
             f"{mean_loss:.6f}" if mean_loss is not None else "n/a",
-            new_lr, action_counts,
+            new_lr, eps_start, eps_end, action_counts,
         )
-        return state_dict, n_samples, mean_loss, action_counts
+        return state_dict, n_samples, mean_loss, action_counts, eps_start, eps_end
 
     # ------------------------------------------------------------------
     # Lifecycle

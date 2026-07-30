@@ -16,7 +16,6 @@ import pprint
 import random
 import sys
 import yaml
-import json
 
 import numpy as np
 
@@ -230,9 +229,10 @@ def make_holdout_evaluator(
     base_dir: str,
     obs_dims: tuple,
     action_dim: int,
-    episodes: int = 1,
+    episodes: int = 5,
     eval_comm_dropout_cfg: dict | None = None,
     holdout_base_dir: str | None = None,
+    eval_sumo_seed: int = 12345,
 ) -> "HoldoutEvaluator | None":
     candidate_base_dirs = [base_dir]
     if holdout_base_dir and holdout_base_dir not in candidate_base_dirs:
@@ -340,13 +340,21 @@ def make_holdout_evaluator(
         )
 
     def build_holdout_env():
-        env = build_federated_env(selected_cfg)
+        eval_cfg = dict(selected_cfg)
+        eval_cfg["sumo_seed"] = int(eval_sumo_seed)
+        env = build_federated_env(eval_cfg)
         env = ActionMaskPadder(env, action_dim)
         if dropout_cfg:
-            env = CommDropoutWrapper(env, **dropout_cfg)
+            env = CommDropoutWrapper(env, seed=int(eval_sumo_seed), **dropout_cfg)
         return env
 
-    return HoldoutEvaluator(env_builder=build_holdout_env, episodes=episodes)
+    return HoldoutEvaluator(
+        env_builder=build_holdout_env,
+        episodes=episodes,
+        eval_seed_base=int(eval_sumo_seed),
+        deterministic_eval=True,
+        rebuild_env_each_evaluate=True,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -390,6 +398,13 @@ def main(args):
     logger = logging.getLogger(__name__)
 
     logger.info("Arguments:\n%s", pprint.pformat(vars(args), sort_dicts=True))
+    logger.info(
+        "config: strategy=%s head_fix=%s eval_episodes=%d rounds=%d",
+        args.aggregation_strategy,
+        not args.disable_head_fix,
+        args.eval_episodes,
+        args.rounds,
+    )
 
     if args.base_dir is not None:
         base = args.base_dir
@@ -422,6 +437,7 @@ def main(args):
             action_dim,
             episodes=args.eval_episodes,
             holdout_base_dir=args.eval_base_dir,
+            eval_sumo_seed=args.eval_sumo_seed,
         )
 
         aggregation_config = {
@@ -492,6 +508,7 @@ def main(args):
             action_dim,
             episodes=args.eval_episodes,
             holdout_base_dir=args.eval_base_dir,
+            eval_sumo_seed=args.eval_sumo_seed,
         )
 
         aggregation_config = {
@@ -517,8 +534,6 @@ def main(args):
     global_model.save(os.path.join(run_dir, "global_fed.pth"))
 
     history_path = os.path.join(run_dir, "federated_history.json")
-    with open(history_path, "w") as f:
-        json.dump(history, f, indent=2)
 
     logger.info("Federated training finished.")
     logger.info("History saved to %s", history_path)
@@ -533,11 +548,11 @@ if __name__ == "__main__":
     print("\n")
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--rounds",               type=int,   default=5)
+    parser.add_argument("--rounds",               type=int,   default=10)
     parser.add_argument("--seed",                 type=int,   default=None)
     parser.add_argument("--local_episodes",        type=int,   default=1)
     parser.add_argument("--eval_every",            type=int,   default=1)
-    parser.add_argument("--eval_episodes",         type=int,   default=1)
+    parser.add_argument("--eval_episodes",         type=int,   default=5)
     parser.add_argument("--log_loss_every_steps",  type=int,   default=50,
                         help="Print mid-episode loss every N steps (0 = end-of-episode only).")
     parser.add_argument("--explore_fraction",      type=float, default=0.5,
@@ -579,6 +594,12 @@ if __name__ == "__main__":
         "--eval_base_dir",
         default=None,
         help="Optional directory to search for city_5_holdout when base_dir is a reduced subset.",
+    )
+    parser.add_argument(
+        "--eval_sumo_seed",
+        type=int,
+        default=12345,
+        help="Fixed SUMO seed for evaluation env so round-to-round comparisons use a deterministic scenario.",
     )
     args = parser.parse_args()
     main(args)
