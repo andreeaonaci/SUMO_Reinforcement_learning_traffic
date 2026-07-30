@@ -10,6 +10,7 @@ per-topology code or models.
 """
 import argparse
 from datetime import datetime
+import json
 import logging
 import os
 import pprint
@@ -406,10 +407,70 @@ def main(args):
         args.rounds,
     )
 
+    if args.no_federation and args.aggregation_strategy != "fedavg":
+        logger.warning(
+            "--no_federation ignores aggregation strategy '%s' because aggregation is skipped.",
+            args.aggregation_strategy,
+        )
+
     if args.base_dir is not None:
         base = args.base_dir
     else:
         base = "environments" 
+
+    if args.baseline_controller != "none":
+        city_configs, obs_dims, action_dim, _steps_per_ep = resolve_city_configs_and_dims(base)
+        evaluator = make_holdout_evaluator(
+            base,
+            obs_dims,
+            action_dim,
+            episodes=args.eval_episodes,
+            holdout_base_dir=args.eval_base_dir,
+            eval_sumo_seed=args.eval_sumo_seed,
+        )
+        if evaluator is None:
+            raise RuntimeError("Could not construct holdout evaluator for baseline controller run.")
+
+        metrics = evaluator.evaluate_controller(args.baseline_controller)
+        evaluator.close()
+
+        history = {
+            "round": [0],
+            "client_samples": [0],
+            "round_eps_start": [{}],
+            "round_eps_end": [{}],
+            "eval_reward": [metrics.get("mean_reward")],
+            "eval_reward_std": [metrics.get("std_reward")],
+            "eval_reward_episodes": [metrics.get("per_episode_reward")],
+            "eval_waiting_time": [metrics.get("mean_waiting_time")],
+            "eval_waiting_time_std": [metrics.get("std_waiting_time")],
+            "eval_waiting_time_episodes": [metrics.get("per_episode_waiting_time")],
+            "eval_stopped": [metrics.get("mean_stopped")],
+            "eval_stopped_std": [metrics.get("std_stopped")],
+            "eval_stopped_episodes": [metrics.get("per_episode_stopped")],
+            "eval_arrived": [metrics.get("mean_arrived")],
+            "eval_action_counts": [metrics.get("action_counts")],
+            "eval_q_gaps": [metrics.get("q_gaps")],
+            "eval_mode": [f"baseline_{args.baseline_controller}"],
+            "cluster_assignments": [None],
+            "baseline_controller": args.baseline_controller,
+            "baseline_only": True,
+            "n_cities": len(city_configs),
+        }
+        history_path = os.path.join(run_dir, "federated_history.json")
+        with open(history_path, "w") as f:
+            json.dump(history, f, indent=2)
+
+        logger.info(
+            "Baseline controller '%s' holdout metrics | reward=%.4f waiting_time=%.2f stopped=%.2f arrived=%.2f",
+            args.baseline_controller,
+            float(metrics.get("mean_reward", 0.0)),
+            float(metrics.get("mean_waiting_time", 0.0)),
+            float(metrics.get("mean_stopped", 0.0)),
+            float(metrics.get("mean_arrived", 0.0)),
+        )
+        logger.info("Baseline-only history saved to %s", history_path)
+        return
 
     if args.parallel:
         city_configs, obs_dims, action_dim, steps_per_ep = resolve_city_configs_and_dims(base)
@@ -443,6 +504,7 @@ def main(args):
         aggregation_config = {
             "ema_beta": args.ema_beta,
             "survival_window": args.survival_window,
+            "n_clusters": args.n_clusters,
         }
         # Per-city LR override: a city's own config.yaml may set `lr: ...`
         # to give it a different starting rate than the global default
@@ -474,6 +536,7 @@ def main(args):
             min_lr=args.min_lr,
             per_city_lr=per_city_lr,
             head_fix=not args.disable_head_fix,
+            no_federation=args.no_federation,
         )
         history = server.run(rounds=args.rounds, eval_every=args.eval_every)
 
@@ -514,6 +577,7 @@ def main(args):
         aggregation_config = {
             "ema_beta": args.ema_beta,
             "survival_window": args.survival_window,
+            "n_clusters": args.n_clusters,
         }
         server = FederatedServer(
             global_model=global_model,
@@ -523,6 +587,7 @@ def main(args):
             aggregation_strategy=args.aggregation_strategy,
             aggregation_config=aggregation_config,
             use_masked_head=not args.disable_head_fix,
+            no_federation=args.no_federation,
         )
         history = server.run(rounds=args.rounds, eval_every=args.eval_every)
 
@@ -571,10 +636,17 @@ if __name__ == "__main__":
     )
     parser.add_argument("--aggregation_strategy", type=str, default="fedavg",
                         choices=["fedavg", "ema_loss", "ema_alignment",
-                                 "velocity_novelty", "gradient_survival"],
+                               "velocity_novelty", "gradient_survival", "clustered_fedavg"],
                         help="How to weight each client's update when aggregating. "
                              "'fedavg' = classic sample-weighted average (unchanged "
                              "default behavior). See federated/aggregation_strategies.py.")
+    parser.add_argument("--n_clusters", type=int, default=2,
+                        help="Number of clusters for clustered_fedavg strategy.")
+    parser.add_argument("--no_federation", action="store_true",
+                        help="Train each city independently (no aggregation/broadcast across cities).")
+    parser.add_argument("--baseline_controller", type=str, default="none",
+                        choices=["none", "fixed_time", "max_pressure"],
+                        help="Run holdout evaluation only with a rule-based controller and skip training.")
     parser.add_argument("--ema_beta", type=float, default=0.9,
                         help="Smoothing factor for EMA-based strategies (ema_loss, "
                              "ema_alignment, velocity_novelty).")

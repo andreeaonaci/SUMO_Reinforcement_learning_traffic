@@ -29,6 +29,9 @@ from typing import Any, Deque, Dict, Optional, Sequence, Type
 
 import torch
 
+from federated.clustering import cluster_cities
+from federated.aggregation import weighted_average
+
 logger = logging.getLogger(__name__)
 
 
@@ -469,6 +472,78 @@ class GradientSurvivalStrategy(BaseAggregationStrategy):
 
 
 # ---------------------------------------------------------------------------
+# 6. Clustered FedAvg
+# ---------------------------------------------------------------------------
+
+class ClusteredFedAvgStrategy(BaseAggregationStrategy):
+    """Cluster clients by action_dim, then run FedAvg inside each cluster.
+
+    This strategy intentionally returns one aggregated model per cluster.
+    Server code must broadcast the cluster-specific model back to only the
+    clients in that cluster.
+
+    Config:
+        n_clusters (int): number of clusters (default 2)
+        cluster_weighting (str): 'samples' (default) or 'uniform'
+    """
+
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        super().__init__(config)
+        self.n_clusters = int(self.config.get("n_clusters", 2))
+        self.cluster_weighting = str(self.config.get("cluster_weighting", "samples")).lower()
+        self._last_cluster_map: Dict[str, int] = {}
+
+    def compute_client_score(self, info: ClientRoundInfo) -> float:
+        return float(max(info.num_samples, 0))
+
+    def assign_clusters(self, infos: Sequence[ClientRoundInfo]) -> Dict[str, int]:
+        city_stats: Dict[str, Dict[str, int]] = {}
+        for info in infos:
+            action_dim = None
+            if info.metadata:
+                action_dim = info.metadata.get("action_dim")
+            if action_dim is None and info.client_state is not None:
+                head = info.client_state.get("head.4.bias")
+                if head is not None:
+                    action_dim = int(head.shape[0])
+            if action_dim is None and info.global_state is not None:
+                head = info.global_state.get("head.4.bias")
+                if head is not None:
+                    action_dim = int(head.shape[0])
+            city_stats[info.client_id] = {"action_dim": int(action_dim or 1)}
+
+        self._last_cluster_map = cluster_cities(city_stats, n_clusters=self.n_clusters)
+        return dict(self._last_cluster_map)
+
+    def aggregate_by_cluster(
+        self,
+        infos: Sequence[ClientRoundInfo],
+        cluster_map: Dict[str, int],
+    ) -> Dict[int, Dict[str, torch.Tensor]]:
+        by_cluster: Dict[int, list[ClientRoundInfo]] = {}
+        for info in infos:
+            cluster_id = int(cluster_map.get(info.client_id, 0))
+            by_cluster.setdefault(cluster_id, []).append(info)
+
+        cluster_models: Dict[int, Dict[str, torch.Tensor]] = {}
+        for cluster_id, members in by_cluster.items():
+            member_states = [m.client_state for m in members if m.client_state is not None]
+            if not member_states:
+                continue
+
+            if self.cluster_weighting == "uniform":
+                weights = [1.0 for _ in members]
+            else:
+                weights = [float(max(m.num_samples, 0)) for m in members]
+            cluster_models[cluster_id] = weighted_average(member_states, weights)
+
+        return cluster_models
+
+    def get_last_cluster_map(self) -> Dict[str, int]:
+        return dict(self._last_cluster_map)
+
+
+# ---------------------------------------------------------------------------
 # Registry / factory
 # ---------------------------------------------------------------------------
 
@@ -478,6 +553,7 @@ STRATEGY_REGISTRY: Dict[str, Type[BaseAggregationStrategy]] = {
     "ema_alignment": EMAGradientAlignmentStrategy,
     "velocity_novelty": LearningVelocityNoveltyStrategy,
     "gradient_survival": GradientSurvivalStrategy,
+    "clustered_fedavg": ClusteredFedAvgStrategy,
 }
 
 
@@ -509,6 +585,7 @@ __all__ = [
     "EMAGradientAlignmentStrategy",
     "LearningVelocityNoveltyStrategy",
     "GradientSurvivalStrategy",
+    "ClusteredFedAvgStrategy",
     "STRATEGY_REGISTRY",
     "build_aggregation_strategy",
 ]

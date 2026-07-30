@@ -37,6 +37,16 @@ class HoldoutEvaluator:
         self._round_robin_offset = {}
         self.last_summary = {}
 
+    def _unwrap_base_env(self, env):
+        cur = env
+        for _ in range(8):
+            if hasattr(cur, "traffic_signals") and hasattr(cur, "sumo"):
+                return cur
+            if not hasattr(cur, "env"):
+                break
+            cur = cur.env
+        return cur
+
     def _get_env(self):
         if self._env is None:
             self._env = self.env_builder()
@@ -59,6 +69,64 @@ class HoldoutEvaluator:
             if key in info and info[key] is not None:
                 return float(info[key])
         return float(default)
+
+    def _max_pressure_action(self, ts_id: str | None, obs: dict) -> int:
+        valid = np.flatnonzero(obs["action_mask"] > 0.5)
+        if len(valid) == 0:
+            return 0
+        if ts_id is None or ts_id == "__single__":
+            return int(valid[0])
+
+        env = self._get_env()
+        base_env = self._unwrap_base_env(env)
+        ts_map = getattr(base_env, "traffic_signals", None)
+        sumo = getattr(base_env, "sumo", None)
+        if not isinstance(ts_map, dict) or sumo is None or ts_id not in ts_map:
+            return int(valid[0])
+
+        ts = ts_map[ts_id]
+        try:
+            links = sumo.trafficlight.getControlledLinks(ts_id)
+            phases = list(getattr(ts, "green_phases", []))
+        except Exception:
+            return int(valid[0])
+
+        if not phases or not links:
+            return int(valid[0])
+
+        best_action = int(valid[0])
+        best_pressure = None
+        valid_set = set(int(a) for a in valid)
+
+        for action_idx in range(min(len(phases), int(obs["action_mask"].shape[0]))):
+            if action_idx not in valid_set:
+                continue
+            state = phases[action_idx].state
+            pressure = 0.0
+
+            for signal_pos, signal_state in enumerate(state):
+                if signal_state not in ("G", "g"):
+                    continue
+                if signal_pos >= len(links):
+                    continue
+                movement_links = links[signal_pos] or []
+                for link in movement_links:
+                    if not link or len(link) < 2:
+                        continue
+                    in_lane = link[0]
+                    out_lane = link[1]
+                    try:
+                        upstream = float(sumo.lane.getLastStepVehicleNumber(in_lane))
+                        downstream = float(sumo.lane.getLastStepVehicleNumber(out_lane))
+                        pressure += upstream - downstream
+                    except Exception:
+                        continue
+
+            if best_pressure is None or pressure > best_pressure:
+                best_pressure = pressure
+                best_action = action_idx
+
+        return int(best_action)
 
     def _policy_action(self, policy_name: str, ts_id: str | None, obs: dict, model) -> int:
         if policy_name == "trained":
@@ -83,6 +151,9 @@ class HoldoutEvaluator:
 
         if policy_name == "fixed_time":
             return int(valid[0])
+
+        if policy_name == "max_pressure":
+            return self._max_pressure_action(ts_id, obs)
 
         return int(valid[0])
 
@@ -261,7 +332,7 @@ class HoldoutEvaluator:
 
         if self.include_baselines:
             baseline_count = max(1, self.eval_seeds)
-            for policy_name in ["always_zero", "random", "round_robin", "fixed_time"]:
+            for policy_name in ["always_zero", "random", "round_robin", "fixed_time", "max_pressure"]:
                 summary[policy_name] = self._evaluate_policy(
                     policy_name,
                     model=None,
@@ -272,6 +343,27 @@ class HoldoutEvaluator:
         self.last_summary = summary
         self._persist_summary(summary)
         return trained_result
+
+    def evaluate_controller(self, controller_name: str) -> dict:
+        if self.rebuild_env_each_evaluate:
+            self.close()
+
+        allowed = {"fixed_time", "max_pressure", "always_zero", "random", "round_robin"}
+        if controller_name not in allowed:
+            raise ValueError(
+                f"Unknown controller '{controller_name}'. Allowed: {sorted(allowed)}"
+            )
+
+        result = self._evaluate_policy(
+            controller_name,
+            model=None,
+            seed_offset=0,
+            episode_count=self.episodes,
+        )
+        summary = {controller_name: result}
+        self.last_summary = summary
+        self._persist_summary(summary)
+        return result
 
     def close(self):
         if self._env is not None:

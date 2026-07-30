@@ -15,6 +15,7 @@ import torch
 from federated.aggregation import aggregate_round
 from federated.aggregation_strategies import (
     BaseAggregationStrategy,
+    ClusteredFedAvgStrategy,
     ClientRoundInfo,
     GradientSurvivalStrategy,
     build_aggregation_strategy,
@@ -35,12 +36,14 @@ class FederatedServer:
         aggregation_strategy: str = "fedavg",
         aggregation_config: Optional[Dict[str, Any]] = None,
         use_masked_head: bool = True,
+        no_federation: bool = False,
     ):
         self.global_model = global_model
         self.clients = clients
         self.evaluator = evaluator
         self.checkpoint_dir = checkpoint_dir
         self.use_masked_head = use_masked_head
+        self.no_federation = bool(no_federation)
 
         self.strategy: BaseAggregationStrategy = build_aggregation_strategy(
             aggregation_strategy, aggregation_config
@@ -55,12 +58,69 @@ class FederatedServer:
             "Masked head aggregation: %s",
             self.use_masked_head,
         )
+        logger.info("No federation mode: %s", self.no_federation)
 
         # Per-client history needed to compute deltas each round.
         self._previous_client_state: Dict[str, Dict[str, torch.Tensor]] = {}
         self._previous_loss: Dict[str, float] = {}
         self._previous_global_state: Optional[Dict[str, torch.Tensor]] = None
         self._global_gradient: Optional[Dict[str, torch.Tensor]] = None
+
+    @staticmethod
+    def _clone_state_dict(state: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        return {k: v.detach().clone() for k, v in state.items()}
+
+    @staticmethod
+    def _mean(values: List[float]) -> float:
+        if not values:
+            return 0.0
+        return float(sum(values) / len(values))
+
+    @staticmethod
+    def _std(values: List[float]) -> float:
+        if len(values) < 2:
+            return 0.0
+        t = torch.tensor(values, dtype=torch.float32)
+        return float(torch.std(t, unbiased=True).item())
+
+    def _evaluate_multiple_models(self, named_states: Dict[str, Dict[str, torch.Tensor]]) -> tuple[dict, dict]:
+        per_model = {}
+        rewards = []
+        waits = []
+        stops = []
+        arrived = []
+        reward_stds = []
+        wait_stds = []
+        stop_stds = []
+
+        for name, state in named_states.items():
+            self.global_model.load_state_dict(state)
+            m = self.evaluator.evaluate(self.global_model)
+            per_model[name] = m
+            rewards.append(float(m.get("mean_reward", 0.0)))
+            waits.append(float(m.get("mean_waiting_time", 0.0)))
+            stops.append(float(m.get("mean_stopped", 0.0)))
+            arrived.append(float(m.get("mean_arrived", 0.0)))
+            reward_stds.append(float(m.get("std_reward", 0.0)))
+            wait_stds.append(float(m.get("std_waiting_time", 0.0)))
+            stop_stds.append(float(m.get("std_stopped", 0.0)))
+
+        aggregate = {
+            "mean_reward": self._mean(rewards),
+            "std_reward": self._std(rewards),
+            "per_episode_reward": None,
+            "mean_waiting_time": self._mean(waits),
+            "std_waiting_time": self._std(waits),
+            "per_episode_waiting_time": None,
+            "mean_stopped": self._mean(stops),
+            "std_stopped": self._std(stops),
+            "per_episode_stopped": None,
+            "mean_arrived": self._mean(arrived),
+            "action_counts": None,
+            "q_gaps": None,
+        }
+        aggregate["eval_per_model"] = per_model
+        return aggregate, per_model
 
     # ------------------------------------------------------------------
     # Client call compatibility
@@ -114,6 +174,15 @@ class FederatedServer:
             "eval_stopped": [],
             "eval_stopped_std": [],
             "eval_stopped_episodes": [],
+            "eval_arrived": [],
+            "eval_mode": [],
+            "cluster_assignments": [],
+        }
+
+        base_global_state = self._clone_state_dict(self.global_model.state_dict())
+        per_client_state: Dict[str, Dict[str, torch.Tensor]] = {
+            getattr(c, "name", repr(c)): self._clone_state_dict(base_global_state)
+            for c in self.clients
         }
 
         for r in range(1, rounds + 1):
@@ -139,9 +208,13 @@ class FederatedServer:
                     action_counts,
                     eps_start,
                     eps_end,
-                ) = self._call_local_train(client, global_state_before)
+                ) = self._call_local_train(
+                    client,
+                    per_client_state[cid] if self.no_federation or isinstance(self.strategy, ClusteredFedAvgStrategy) else global_state_before,
+                )
 
                 client_states[cid] = state_dict
+                per_client_state[cid] = self._clone_state_dict(state_dict)
                 client_action_counts[cid] = action_counts
                 eps_start_by_client[cid] = eps_start
                 eps_end_by_client[cid] = eps_end
@@ -194,18 +267,63 @@ class FederatedServer:
             # ----------------------------------------------------------
             # Compute aggregation weights
             # ----------------------------------------------------------
+            cluster_assignments = None
+            eval_named_states: Dict[str, Dict[str, torch.Tensor]] = {}
+            if self.no_federation:
+                logger.info("No-federation mode: skipping aggregation for round %d.", r)
+                first_cid = next(iter(per_client_state))
+                self.global_model.load_state_dict(per_client_state[first_cid])
+                agg_state = self.global_model.state_dict()
+                eval_named_states = {cid: sd for cid, sd in per_client_state.items()}
+            elif isinstance(self.strategy, ClusteredFedAvgStrategy):
+                cluster_assignments = self.strategy.assign_clusters(infos)
+                logger.info("Round %d | clustered_fedavg assignments: %s", r, cluster_assignments)
+                cluster_models = self.strategy.aggregate_by_cluster(infos, cluster_assignments)
 
-            weights = self.strategy.compute_weights(infos)
-            ordered_ids = [info.client_id for info in infos]
+                for cid in per_client_state:
+                    cluster_id = cluster_assignments.get(cid, 0)
+                    if cluster_id in cluster_models:
+                        per_client_state[cid] = self._clone_state_dict(cluster_models[cluster_id])
 
-            agg_state = aggregate_round(
-                state_dicts=[client_states[cid] for cid in ordered_ids],
-                base_weights=[weights[cid] for cid in ordered_ids],
-                action_counts=[client_action_counts.get(cid) for cid in ordered_ids],
-                use_masked_head=self.use_masked_head,
-            )
+                if cluster_models:
+                    cluster_states = list(cluster_models.values())
+                    cluster_weights = []
+                    for cluster_id, _state in cluster_models.items():
+                        cluster_weights.append(
+                            float(
+                                sum(
+                                    info.num_samples
+                                    for info in infos
+                                    if cluster_assignments.get(info.client_id, 0) == cluster_id
+                                )
+                            )
+                        )
+                    agg_state = aggregate_round(
+                        state_dicts=cluster_states,
+                        base_weights=cluster_weights,
+                        action_counts=[None for _ in cluster_states],
+                        use_masked_head=False,
+                    )
+                    self.global_model.load_state_dict(agg_state)
+                else:
+                    agg_state = global_state_before
 
-            self.global_model.load_state_dict(agg_state)
+                eval_named_states = {
+                    f"cluster_{cluster_id}": state
+                    for cluster_id, state in cluster_models.items()
+                }
+            else:
+                weights = self.strategy.compute_weights(infos)
+                ordered_ids = [info.client_id for info in infos]
+
+                agg_state = aggregate_round(
+                    state_dicts=[client_states[cid] for cid in ordered_ids],
+                    base_weights=[weights[cid] for cid in ordered_ids],
+                    action_counts=[client_action_counts.get(cid) for cid in ordered_ids],
+                    use_masked_head=self.use_masked_head,
+                )
+
+                self.global_model.load_state_dict(agg_state)
 
             # Update the federation's own trajectory.
             new_global_gradient = self.strategy.compute_pseudo_gradient(
@@ -239,9 +357,21 @@ class FederatedServer:
                 history["client_samples"].append(total_samples)
                 history["round_eps_start"].append(eps_start_by_client)
                 history["round_eps_end"].append(eps_end_by_client)
+                history["cluster_assignments"].append(cluster_assignments)
+                history["eval_mode"].append(
+                    "no_federation" if self.no_federation else (
+                        "clustered_fedavg" if isinstance(self.strategy, ClusteredFedAvgStrategy) else "federated"
+                    )
+                )
 
                 if self.evaluator:
-                    metrics = self.evaluator.evaluate(self.global_model)
+                    if self.no_federation or isinstance(self.strategy, ClusteredFedAvgStrategy):
+                        if not eval_named_states:
+                            eval_named_states = {"model": self.global_model.state_dict()}
+                        metrics, per_model = self._evaluate_multiple_models(eval_named_states)
+                        history.setdefault("eval_per_model", []).append(per_model)
+                    else:
+                        metrics = self.evaluator.evaluate(self.global_model)
 
                     history["eval_reward"].append(metrics["mean_reward"])
                     history["eval_reward_std"].append(metrics.get("std_reward"))
@@ -254,6 +384,7 @@ class FederatedServer:
                     history["eval_stopped"].append(metrics["mean_stopped"])
                     history["eval_stopped_std"].append(metrics.get("std_stopped"))
                     history["eval_stopped_episodes"].append(metrics.get("per_episode_stopped"))
+                    history["eval_arrived"].append(metrics.get("mean_arrived"))
 
                     logger.info(
                         "Round %d | reward mean=%.4f std=%.4f | waiting_time mean=%.2fs std=%.2f | stopped mean=%.1f std=%.1f",
@@ -275,6 +406,7 @@ class FederatedServer:
                     history["eval_stopped"].append(None)
                     history["eval_stopped_std"].append(None)
                     history["eval_stopped_episodes"].append(None)
+                    history["eval_arrived"].append(None)
 
                 self._atomic_save_history(history)
                 logger.info(
