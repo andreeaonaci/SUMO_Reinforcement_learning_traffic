@@ -53,6 +53,7 @@ def aggregate_round(
     use_masked_head: bool = True,
     head_weight_key: str = "head.4.weight",
     head_bias_key: str = "head.4.bias",
+    previous_global_state: Optional[Dict[str, torch.Tensor]] = None,
 ) -> Dict[str, torch.Tensor]:
     """Aggregate one federated round.
 
@@ -67,6 +68,7 @@ def aggregate_round(
             action_counts,
             head_weight_key=head_weight_key,
             head_bias_key=head_bias_key,
+            previous_global_state=previous_global_state,
         )
 
     # original FedAvg on every parameter, including the head.
@@ -78,6 +80,7 @@ def masked_head_weighted_average(
     action_counts: List[Optional[Dict[int, int]]],
     head_weight_key: str = "head.4.weight",
     head_bias_key: str = "head.4.bias",
+    previous_global_state: Optional[Dict[str, torch.Tensor]] = None,
 ) -> Dict[str, torch.Tensor]:
     """Weighted average where the final Q-head is aggregated ROW-BY-ROW,
     weighted by how many samples actually trained each action index --
@@ -118,6 +121,16 @@ def masked_head_weighted_average(
                           (falls back to base_weights for the head too).
         head_weight_key:  state_dict key of the final Linear's weight.
         head_bias_key:    state_dict key of the final Linear's bias.
+        previous_global_state: the global state_dict this round started
+                          from. Used (when given) as the source for a row
+                          no client touched this round, since that is the
+                          actual "don't move this row" value. Without it,
+                          falls back to state_dicts[0]'s row, which is only
+                          an approximation -- a client's local copy of an
+                          untouched row still drifts round to round (optimizer
+                          weight decay, floating point), and "client 0" is an
+                          arbitrary pick with no guarantee its drift is
+                          smallest.
 
     Returns:
         Aggregated state_dict, same keys as the inputs.
@@ -141,6 +154,17 @@ def masked_head_weighted_average(
     new_head_w = torch.zeros_like(prev_head_w)
     new_head_b = torch.zeros_like(state_dicts[0][head_bias_key])
 
+    fallback_w = (
+        previous_global_state[head_weight_key]
+        if previous_global_state is not None and head_weight_key in previous_global_state
+        else state_dicts[0][head_weight_key]
+    )
+    fallback_b = (
+        previous_global_state[head_bias_key]
+        if previous_global_state is not None and head_bias_key in previous_global_state
+        else state_dicts[0][head_bias_key]
+    )
+
     for row in range(action_dim):
         row_weights = []
         for client_idx, counts in enumerate(action_counts):
@@ -151,12 +175,8 @@ def masked_head_weighted_average(
         if total <= 1e-12:
             # No client touched this action index this round -- leave the
             # row exactly as it was, don't invent an update from nothing.
-            # Caller is expected to have loaded `agg` from the previous
-            # global state's structure; we fall back to whichever client's
-            # row is closest to that (client 0's is fine since undilated
-            # rows are byte-identical to the pre-round global weights).
-            new_head_w[row] = state_dicts[0][head_weight_key][row]
-            new_head_b[row] = state_dicts[0][head_bias_key][row]
+            new_head_w[row] = fallback_w[row]
+            new_head_b[row] = fallback_b[row]
             continue
 
         norm_weights = [w / total for w in row_weights]

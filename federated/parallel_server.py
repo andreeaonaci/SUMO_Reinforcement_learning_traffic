@@ -71,6 +71,8 @@ def _client_worker(
     lr_decay: float,
     min_lr: float,
     head_fix: bool,
+    tau: float,
+    target_update: int,
     log_file: str,
     in_queue: "mp.Queue",
     out_queue: "mp.Queue",
@@ -103,6 +105,7 @@ def _client_worker(
             action_dim=action_dim, eps_decay=eps_decay,
             lr=lr, lr_decay=lr_decay, min_lr=min_lr,
             head_fix=head_fix,
+            tau=tau, target_update=target_update,
         )
 
         while True:
@@ -184,6 +187,9 @@ class ParallelFederatedServer:
         per_city_lr: Optional[Dict[str, float]] = None,
         head_fix: bool = True,
         no_federation: bool = False,
+        fedavg_blend: float = 1.0,
+        tau: float = 0.005,
+        target_update: int = 200,
     ):
         self.global_model = global_model
         self.evaluator = evaluator
@@ -191,16 +197,19 @@ class ParallelFederatedServer:
         self.log_file = log_file or os.path.join(checkpoint_dir, "training.log")
         self.client_checkpoint_every = client_checkpoint_every
         self.no_federation = bool(no_federation)
+        self.fedavg_blend = float(max(0.0, min(1.0, fedavg_blend)))
         os.makedirs(os.path.join(checkpoint_dir, "clients"), exist_ok=True)
-
-        self.strategy: BaseAggregationStrategy = build_aggregation_strategy(
+        self.strategy = build_aggregation_strategy(
             aggregation_strategy, aggregation_config
         )
+        
         logger.info(
             "[parallel] Aggregation strategy: %s  config=%s",
             type(self.strategy).__name__, aggregation_config or {},
         )
         logger.info("[parallel] No federation mode: %s", self.no_federation)
+        logger.info("[parallel] FedAvg blend: %.3f  tau: %.4f  target_update: %d",
+                    self.fedavg_blend, tau, target_update)
 
         # Per-client history for computing deltas each round (same fields
         # as the sequential FederatedServer).
@@ -226,6 +235,7 @@ class ParallelFederatedServer:
                     comm_dropout_cfg, local_episodes, log_loss_every_steps, eps_decay,
                     city_lr, lr_decay, min_lr,
                     head_fix,
+                    tau, target_update,
                     self.log_file,
                     self.in_queues[name], self.out_queue,
                 ),
@@ -439,7 +449,15 @@ class ParallelFederatedServer:
                         [client_states[cid] for cid in ordered_ids],
                         [weights[cid] for cid in ordered_ids],
                         [client_action_counts.get(cid) for cid in ordered_ids],
+                        previous_global_state=global_state_before,
                     )
+                    if self.fedavg_blend < 1.0:
+                        prev_state = self.global_model.state_dict()
+                        b = self.fedavg_blend
+                        agg_state = {
+                            k: b * agg_state[k].float() + (1.0 - b) * prev_state[k].float()
+                            for k in agg_state
+                        }
                     self.global_model.load_state_dict(agg_state)
 
                 new_global_gradient = self.strategy.compute_pseudo_gradient(

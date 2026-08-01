@@ -102,7 +102,7 @@ class DQNAgent:
         buffer_size: int = 50000,
         batch_size: int = 64,
         gamma: float = 0.99,
-        target_update: int = 1000,
+        target_update: int = 200,
         d_model: int = 128,
         n_heads: int = 4,
         n_hops: int = 4,
@@ -111,6 +111,7 @@ class DQNAgent:
         lr_decay: float = 1.0,
         min_lr: float = 1e-6,
         head_fix: bool = True,
+        tau: float = 0.005,
     ):
         self.own_dim = own_dim
         self.neighbor_dim = neighbor_dim
@@ -132,7 +133,20 @@ class DQNAgent:
         self.q_target = NeighborAttentionQNetwork(**net_kwargs).to(self.device)
         self.q_target.load_state_dict(self.q.state_dict())
 
-        self.optimizer = optim.Adam(self.q.parameters(), lr=lr, weight_decay=1e-5, eps=1e-6)
+        # AdamW, not Adam: plain torch.optim.Adam folds weight_decay into the
+        # gradient before the moment estimates, so a parameter that gets
+        # ~zero true gradient (e.g. a masked-out Q-head row for an action a
+        # low-action-count city never takes) still gets a "gradient" of
+        # weight_decay*param every step. Once Adam's running estimates lock
+        # onto that as a near-constant signal, the normalized update
+        # collapses to essentially -lr*sign(param) -- decaying that weight
+        # at a rate set by the LEARNING RATE, not by the (tiny) weight_decay
+        # coefficient. Over the hundreds of optimizer steps in one local
+        # round this silently erases untouched action rows/features.
+        # AdamW applies weight_decay as a separate, decoupled term
+        # (param -= lr*weight_decay*param), which behaves like the mild
+        # regularizer weight_decay=1e-5 was actually meant to be.
+        self.optimizer = optim.AdamW(self.q.parameters(), lr=lr, weight_decay=1e-5, eps=1e-6)
         self.lr_decay = lr_decay   # multiplicative decay applied once per federated round
         self.min_lr = min_lr
         self.replay = ReplayBuffer(buffer_size)
@@ -143,6 +157,7 @@ class DQNAgent:
         self.eps_decay = eps_decay
         self.steps_done = 0
         self.target_update = target_update
+        self.tau = tau          # 0 = legacy hard copy; >0 = Polyak soft update every step
         self.learn_steps = 0
         # Reward clipping: applied when a transition is stored, not just
         # at optimize() time -- this is what actually stopped city_2's
@@ -278,7 +293,14 @@ class DQNAgent:
         nn.utils.clip_grad_norm_(self.q.parameters(), 10.0)
         self.optimizer.step()
         self.learn_steps += 1
-        if self.learn_steps % self.target_update == 0:
+        if self.tau > 0:
+            # Polyak (soft) update: target = (1-tau)*target + tau*online
+            # Applied every step with small tau so the target drifts
+            # smoothly instead of snapping every target_update steps.
+            for p, pt in zip(self.q.parameters(), self.q_target.parameters()):
+                pt.data.mul_(1.0 - self.tau).add_(self.tau * p.data)
+        elif self.learn_steps % self.target_update == 0:
+            # Legacy hard copy: kept for ablation (pass tau=0 to enable).
             self.q_target.load_state_dict(self.q.state_dict())
 
         return float(loss.item())

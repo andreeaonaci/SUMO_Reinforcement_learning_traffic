@@ -197,7 +197,9 @@ class LaneEncoder:
     FEATURES = [
         ("queue", lambda l, n: l.queue / n.max_queue),
         ("waiting_time", lambda l, n: l.waiting_time / n.max_wait),
-        ("occupancy", lambda l, n: l.occupancy),
+        # traci's getLastStepOccupancy returns a percentage (0-100), not a
+        # 0-1 fraction -- normalize like every other feature here.
+        ("occupancy", lambda l, n: l.occupancy / 100.0),
         ("speed", lambda l, n: l.speed / n.max_speed),
         ("is_left", lambda l, n: float(l.is_left)),
         ("is_straight", lambda l, n: float(l.is_straight)),
