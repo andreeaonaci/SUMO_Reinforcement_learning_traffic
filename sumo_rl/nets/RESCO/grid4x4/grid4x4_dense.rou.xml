@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2026-07-08 19:46:55.186031 by Eclipse SUMO randomTrips.py v1.27.0
+<configuration>
+    <net-file value="sumo_rl/nets/RESCO/grid4x4/grid4x4.net.xml"/>
+    <output-trip-file value="sumo_rl/nets/RESCO/grid4x4/grid4x4_dense.rou.xml"/>
+    <min-distance value="300.0"/>
+    <end value="1200.0"/>
+    <flows value="60"/>
+</configuration>
+-->
+
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+    <flow id="0" begin="0" end="1200" period="60" from="D1C1" to="A0B0"/>
+    <flow id="1" begin="0" end="1200" period="60" from="B2A2" to="A3left3"/>
+    <flow id="2" begin="0" end="1200" period="60" from="D3D2" to="C2D2"/>
+    <flow id="3" begin="0" end="1200" period="60" from="right1D1" to="A1A2"/>
+    <flow id="4" begin="0" end="1200" period="60" from="C1B1" to="A0B0"/>
+    <flow id="5" begin="0" end="1200" period="60" from="B1A1" to="C0B0"/>
+    <flow id="6" begin="0" end="1200" period="60" from="A0B0" to="A3A2"/>
+    <flow id="7" begin="0" end="1200" period="60" from="D1D0" to="C0D0"/>
+    <flow id="8" begin="0" end="1200" period="60" from="B1B0" to="C1C0"/>
+    <flow id="9" begin="0" end="1200" period="60" from="bottom3D0" to="A0A1"/>
+    <flow id="10" begin="0" end="1200" period="60" from="bottom3D0" to="C3B3"/>
+    <flow id="11" begin="0" end="1200" period="60" from="B3A3" to="A2A3"/>
+    <flow id="12" begin="0" end="1200" period="60" from="top1B3" to="B1B0"/>
+    <flow id="13" begin="0" end="1200" period="60" from="A2A1" to="A1B1"/>
+    <flow id="14" begin="0" end="1200" period="60" from="left2A2" to="C1C2"/>
+    <flow id="15" begin="0" end="1200" period="60" from="bottom3D0" to="C3D3"/>
+    <flow id="16" begin="0" end="1200" period="60" from="C2D2" to="D3right3"/>
+    <flow id="17" begin="0" end="1200" period="60" from="C0B0" to="C0bottom2"/>
+    <flow id="18" begin="0" end="1200" period="60" from="left1A1" to="C1D1"/>
+    <flow id="19" begin="0" end="1200" period="60" from="left3A3" to="C1B1"/>
+    <flow id="20" begin="0" end="1200" period="60" from="D2D3" to="A0bottom0"/>
+    <flow id="21" begin="0" end="1200" period="60" from="B1B0" to="B0C0"/>
+    <flow id="22" begin="0" end="1200" period="60" from="A2A1" to="A3left3"/>
+    <flow id="23" begin="0" end="1200" period="60" from="A2A3" to="B0B1"/>
+    <flow id="24" begin="0" end="1200" period="60" from="D1C1" to="B1C1"/>
+    <flow id="25" begin="0" end="1200" period="60" from="B2A2" to="D2right2"/>
+    <flow id="26" begin="0" end="1200" period="60" from="D1D0" to="C1C2"/>
+    <flow id="27" begin="0" end="1200" period="60" from="B0A0" to="C3D3"/>
+    <flow id="28" begin="0" end="1200" period="60" from="B0A0" to="B2A2"/>
+    <flow id="29" begin="0" end="1200" period="60" from="top3D3" to="C2B2"/>
+    <flow id="30" begin="0" end="1200" period="60" from="C3B3" to="C2D2"/>
+    <flow id="31" begin="0" end="1200" period="60" from="left1A1" to="D0D1"/>
+    <flow id="32" begin="0" end="1200" period="60" from="B1B0" to="A0bottom0"/>
+    <flow id="33" begin="0" end="1200" period="60" from="B2C2" to="B0B1"/>
+    <flow id="34" begin="0" end="1200" period="60" from="B1A1" to="D3C3"/>
+    <flow id="35" begin="0" end="1200" period="60" from="right0D0" to="B1A1"/>
+    <flow id="36" begin="0" end="1200" period="60" from="D1D0" to="B2B1"/>
+    <flow id="37" begin="0" end="1200" period="60" from="right2D2" to="B3B2"/>
+    <flow id="38" begin="0" end="1200" period="60" from="B1C1" to="A3top0"/>
+    <flow id="39" begin="0" end="1200" period="60" from="C3B3" to="B0A0"/>
+    <flow id="40" begin="0" end="1200" period="60" from="C3D3" to="D2D1"/>
+    <flow id="41" begin="0" end="1200" period="60" from="C0C1" to="A3left3"/>
+    <flow id="42" begin="0" end="1200" period="60" from="top3D3" to="C0B0"/>
+    <flow id="43" begin="0" end="1200" period="60" from="A2A1" to="A0left0"/>
+    <flow id="44" begin="0" end="1200" period="60" from="A2B2" to="C2B2"/>
+    <flow id="45" begin="0" end="1200" period="60" from="bottom2C0" to="B2C2"/>
+    <flow id="46" begin="0" end="1200" period="60" from="A1B1" to="B2A2"/>
+    <flow id="47" begin="0" end="1200" period="60" from="top3D3" to="C0C1"/>
+    <flow id="48" begin="0" end="1200" period="60" from="top2C3" to="D1right1"/>
+    <flow id="49" begin="0" end="1200" period="60" from="A0A1" to="C3D3"/>
+    <flow id="50" begin="0" end="1200" period="60" from="D2C2" to="C0D0"/>
+    <flow id="51" begin="0" end="1200" period="60" from="B2A2" to="C2C1"/>
+    <flow id="52" begin="0" end="1200" period="60" from="A2B2" to="B2C2"/>
+    <flow id="53" begin="0" end="1200" period="60" from="C1C2" to="D3D2"/>
+    <flow id="54" begin="0" end="1200" period="60" from="right0D0" to="B0A0"/>
+    <flow id="55" begin="0" end="1200" period="60" from="C2C1" to="A2left2"/>
+    <flow id="56" begin="0" end="1200" period="60" from="right2D2" to="D1right1"/>
+    <flow id="57" begin="0" end="1200" period="60" from="D0C0" to="A2A3"/>
+    <flow id="58" begin="0" end="1200" period="60" from="bottom0A0" to="C0D0"/>
+    <flow id="59" begin="0" end="1200" period="60" from="bottom1B0" to="C0C1"/>
+</routes>

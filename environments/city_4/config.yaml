@@ -1,0 +1,14 @@
+name: city_4
+net_file: sumo_rl/nets/RESCO/cologne3/cologne3.net.xml
+route_file: sumo_rl/nets/RESCO/cologne3/cologne3.rou_shifted.xml
+delta_time: 5
+num_seconds: 3600
+sumo_seed: 42
+max_lanes: 16
+max_queue: 50.0
+max_wait: 300.0
+max_speed: 50
+k_max: 8
+max_hops: 3
+begin_time: 23500
+use_libsumo: true

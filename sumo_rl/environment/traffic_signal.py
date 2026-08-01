@@ -163,8 +163,7 @@ class TrafficSignal:
 
     @property
     def time_to_act(self):
-        """Returns True if the traffic signal should act in the current step."""
-        return self.next_action_time == self.env.sim_step
+        return self.next_action_time <= self.env.sim_step
 
     def update(self):
         """Updates the traffic signal state.
@@ -212,7 +211,7 @@ class TrafficSignal:
             self.is_yellow = True
             self.time_since_last_phase_change = 0
 
-        print(f"set_next_phase called with new_phase: {new_phase}, type: {type(new_phase)}")
+        # print(f"set_next_phase called with new_phase: {new_phase}, type: {type(new_phase)}")
 
     def compute_observation(self):
         """Computes the observation of the traffic signal and ensures it returns a fixed-size numeric vector."""

@@ -1,0 +1,17 @@
+name: city_3
+net_file: sumo_rl/nets/4x4-Lucas/4x4.net.xml
+route_file: sumo_rl/nets/4x4-Lucas/4x4lucas_dense.rou.xml
+
+delta_time: 5
+num_seconds: 3600
+sumo_seed: 42
+
+max_lanes: 16
+max_queue: 50.0
+max_wait: 300.0
+max_speed: 50.0
+
+k_max: 8
+max_hops: 3
+
+use_libsumo: true

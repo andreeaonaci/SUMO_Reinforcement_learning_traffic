@@ -1,0 +1,6 @@
+seed: 42
+rounds: 5
+local_episodes: 5
+eval_every: 1
+lr: 0.001
+batch_size: 64

@@ -4,7 +4,13 @@ import os
 import sys
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple, Union
-import torch
+import numpy as np
+import time
+
+try:
+    import torch
+except ImportError:
+    torch = None
 
 
 if "SUMO_HOME" in os.environ:
@@ -13,23 +19,93 @@ if "SUMO_HOME" in os.environ:
 else:
     raise ImportError("Please declare the environment variable 'SUMO_HOME'")
 import gymnasium as gym
-import numpy as np
-import pandas as pd
 import sumolib
 import traci
-from gymnasium.utils import EzPickle, seeding
-from pettingzoo import AECEnv
-from pettingzoo.utils import wrappers
 
+try:
+    from pettingzoo.utils.env import AECEnv
+    from pettingzoo.utils import wrappers
+    from pettingzoo.utils import seeding
+except ImportError:
+    class AECEnv:
+        def __init__(self):
+            self.agents = []
+            self.possible_agents = []
+            self.agent_selection = None
+            self.rewards = {}
+            self.terminations = {}
+            self.truncations = {}
+            self.infos = {}
+            self._cumulative_rewards = {}
+
+        def _was_dead_step(self, action):
+            return None
+
+        def _clear_rewards(self):
+            pass
+
+        def _accumulate_rewards(self):
+            pass
+
+    class _PassthroughWrapper:
+        def __init__(self, env):
+            self.env = env
+
+        def __getattr__(self, name):
+            return getattr(self.env, name)
+
+    class _WrappersModule:
+        AssertOutOfBoundsWrapper = _PassthroughWrapper
+        OrderEnforcingWrapper = _PassthroughWrapper
+
+    wrappers = _WrappersModule()
+
+    class _SeedingModule:
+        @staticmethod
+        def np_random(seed=None):
+            import random
+
+            rng = random.Random(seed)
+            return rng, seed
+
+    seeding = _SeedingModule()
+
+# Minimal stubs for gymnasium.utils compatibility
+class EzPickle:
+    def __init__(self, *args, **kwargs):
+        pass
 
 try:
     # pettingzoo 1.25+
     from pettingzoo.utils import AgentSelector
 except ImportError:
     # pettingzoo 1.24 or earlier
-    from pettingzoo.utils import agent_selector as AgentSelector
+    try:
+        from pettingzoo.utils import agent_selector as AgentSelector
+    except ImportError:
+        # fallback: simple round-robin selector
+        class AgentSelector:
+            def __init__(self, agents):
+                self.agents = list(agents)
+                self._idx = 0
+            def reset(self):
+                self._idx = 0
+                return self.agents[self._idx] if self.agents else None
+            def next(self):
+                if not self.agents:
+                    return None
+                self._idx = (self._idx + 1) % len(self.agents)
+                return self.agents[self._idx]
+            def is_last(self):
+                return self._idx == len(self.agents) - 1
 
-from pettingzoo.utils.conversions import parallel_wrapper_fn
+# Import or fallback for parallel_wrapper_fn
+try:
+    from pettingzoo.utils.conversions import parallel_wrapper_fn
+except ImportError:
+    # Simple fallback: identity wrapper
+    def parallel_wrapper_fn(fn):
+        return fn
 
 from .observations import DefaultObservationFunction, ObservationFunction
 from .traffic_signal import TrafficSignal
@@ -164,22 +240,33 @@ class SumoEnvironment(gym.Env):
         SumoEnvironment.CONNECTION_LABEL += 1
         self.sumo = None
 
+        init_label = "init_connection" + self.label
         if LIBSUMO:
-            traci.start([sumolib.checkBinary("sumo"), "-n", self._net])  # Start only to retrieve traffic light information
+            try:
+                self._close_traci(label=None)
+            except Exception:
+                pass
+            traci.start([sumolib.checkBinary("sumo"), "-n", self._net, "-r", self._route])
             conn = traci
         else:
-            traci.start([sumolib.checkBinary("sumo"), "-n", self._net], label="init_connection" + self.label)
-            conn = traci.getConnection("init_connection" + self.label)
+            try:
+                self._close_traci(label=init_label)
+            except Exception:
+                pass
+            traci.start([sumolib.checkBinary("sumo"), "-n", self._net, "-r", self._route], label=init_label)
+            conn = traci.getConnection(init_label)
 
         if ts_ids is None:
             self.ts_ids = list(conn.trafficlight.getIDList())
         else:
             self.ts_ids = ts_ids
         self.observation_class = observation_class
+        self.traffic_signals = {}
 
-        self._build_traffic_signals(conn)
-
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
 
         self.vehicles = dict()
         self.reward_range = (-float("inf"), float("inf"))
@@ -245,11 +332,38 @@ class SumoEnvironment(gym.Env):
                 self.disp.start()
                 print("Virtual display started.")
 
+        def _start_traci_connection():
+            attempts = 5
+            for attempt in range(1, attempts + 1):
+                try:
+                    # asigura-te ca labelul nu e deja activ inainte de a porni
+                    if not LIBSUMO:
+                        try:
+                            existing = traci.getConnection(self.label)
+                            existing.close()
+                        except Exception:
+                            pass
+
+                    if LIBSUMO:
+                        traci.start(sumo_cmd)
+                    else:
+                        traci.start(sumo_cmd, label=self.label)
+                    return
+                except Exception as e:
+                    print(f"traci.start failed (attempt {attempt}/{attempts}): {e}")
+                    self._close_traci(label=None if LIBSUMO else self.label)
+                    if attempt < attempts:
+                        time.sleep(2)
+                    else:
+                        raise
+
+        if self.sumo is not None:
+            self.close()
+
+        _start_traci_connection()
         if LIBSUMO:
-            traci.start(sumo_cmd)
             self.sumo = traci
         else:
-            traci.start(sumo_cmd, label=self.label)
             self.sumo = traci.getConnection(self.label)
 
         if self.use_gui or self.render_mode is not None:
@@ -262,7 +376,10 @@ class SumoEnvironment(gym.Env):
         super().reset(seed=seed, **kwargs)
 
         if self.episode != 0:
-            self.close()
+            try:
+                self.close()
+            except Exception:
+                pass
             self.save_csv(self.out_csv_name, self.episode)
         self.episode += 1
         self.metrics = []
@@ -289,47 +406,45 @@ class SumoEnvironment(gym.Env):
         return self.sumo.simulation.getTime()
     
     def step(self, action):
-        if self.truncations[self.agent_selection] or self.terminations[self.agent_selection]:
-            return self._was_dead_step(action)
-
-        agent = self.agent_selection
-
-        # FORCE scalar int
-        if isinstance(action, torch.Tensor):
-            if action.numel() != 1:
-                raise ValueError("Action must be a scalar.")
-            action = int(action.item())
-        else:
-            action = int(action)
-
-        if not self.action_spaces[agent].contains(action):
-            raise Exception(
-                f"Action for agent {agent} must be in Discrete({self.action_spaces[agent].n}). "
-                f"It is currently {action}"
-            )
-
-        if not self.env.fixed_ts:
-            self.env._apply_actions({agent: action})
-
-        if self._agent_selector.is_last():
-            if not self.env.fixed_ts:
-                self.env._run_steps()
+        if self.single_agent:
+            if torch is not None and isinstance(action, torch.Tensor):
+                if action.numel() != 1:
+                    raise ValueError("Action must be a scalar.")
+                action = int(action.item())
             else:
-                for _ in range(self.env.delta_time):
-                    self.env._sumo_step()
+                action = int(action)
 
-            self.env._compute_observations()
-            self.rewards = self.env._compute_rewards()
-            self.compute_info()
+            if not self.action_space.contains(action):
+                raise Exception(
+                    f"Action must be in Discrete({self.action_space.n}). It is currently {action}"
+                )
+
+            if not self.fixed_ts:
+                self._apply_actions(action)
         else:
-            self._clear_rewards()
+            if not isinstance(action, dict):
+                raise ValueError("Action must be a dict for multi-agent SUMO environment.")
+            for ts, act in action.items():
+                if ts not in self.ts_ids:
+                    raise KeyError(f"Unknown traffic signal id: {ts}")
+                if self.traffic_signals[ts].time_to_act:
+                    self._apply_actions({ts: act})
 
-        done = self.env._compute_dones()["__all__"]
-        self.truncations = {a: done for a in self.agents}
+        if not self.fixed_ts:
+            self._run_steps()
+        else:
+            for _ in range(self.delta_time):
+                self._sumo_step()
 
-        self.agent_selection = self._agent_selector.next()
-        self._cumulative_rewards[agent] = 0
-        self._accumulate_rewards()
+        observations = self._compute_observations()
+        rewards = self._compute_rewards()
+        info = self._compute_info()
+        dones = self._compute_dones()
+
+        if self.single_agent:
+            return observations[self.ts_ids[0]], rewards[self.ts_ids[0]], dones["__all__"], info
+
+        return observations, rewards, dones, info
 
 
     def _run_steps(self):
@@ -340,6 +455,8 @@ class SumoEnvironment(gym.Env):
                 self.traffic_signals[ts].update()
                 if self.traffic_signals[ts].time_to_act:
                     time_to_act = True
+            if self.sim_step >= self.sim_max_time:
+                break
                     
     def _apply_actions(self, actions):
         """Set the next green phase for the traffic signals.
@@ -351,7 +468,7 @@ class SumoEnvironment(gym.Env):
         """
 
         def _to_int(a):
-            if isinstance(a, torch.Tensor):
+            if torch is not None and isinstance(a, torch.Tensor):
                 if a.numel() != 1:
                     raise ValueError("Action must be a scalar.")
                 return int(a.item())
@@ -486,20 +603,72 @@ class SumoEnvironment(gym.Env):
         info["agents_total_accumulated_waiting_time"] = sum(accumulated_waiting_time)
         return info
 
-    def close(self):
-        """Close the environment and stop the SUMO simulation."""
-        if self.sumo is None:
+    def _close_traci(self, label: Optional[str] = None):
+        if LIBSUMO:
+            try:
+                traci.close()
+            except Exception:
+                pass
             return
 
-        if not LIBSUMO:
-            traci.switch(self.label)
-        traci.close()
+        if label is None:
+            try:
+                traci.close()
+            except Exception:
+                pass
+            return
+
+        try:
+            conn = traci.getConnection(label)
+        except Exception:
+            # nu exista conexiune cu acest label, nimic de facut
+            return
+
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+        try:
+            if hasattr(conn, '_process') and conn._process is not None:
+                conn._process.poll()
+                if conn._process.returncode is None:
+                    conn._process.kill()
+                    conn._process.wait(timeout=5)
+        except Exception:
+            pass
+
+    def close(self):
+        # Idempotent: capture and clear self.sumo FIRST so that any __del__
+        # triggered by the cyclic GC on a previously-closed SumoEnvironment
+        # (the cycle is SumoEnv → traffic_signals → TrafficSignal.env →
+        # SumoEnv) can never reach traci.close() and kill an *active* libsumo
+        # simulation.  The cycle is then broken by clearing traffic_signals,
+        # which allows CPython's reference counter to free the objects
+        # immediately rather than waiting for a non-deterministic GC pass.
+        sumo = self.sumo
+        self.sumo = None        # mark closed before any I/O so re-entry is safe
+        if sumo is None:
+            return              # already closed – do NOT call traci.close() again
+
+        # Break the reference cycle so CPython refcounts can free these objects
+        # without waiting for the cyclic GC.
+        self.traffic_signals = {}
+
+        try:
+            if LIBSUMO:
+                traci.close()
+            else:
+                self._close_traci(label=self.label)
+        except Exception:
+            pass
 
         if self.disp is not None:
-            self.disp.stop()
+            try:
+                self.disp.stop()
+            except Exception:
+                pass
             self.disp = None
-
-        self.sumo = None
 
     def __del__(self):
         """Close the environment and stop the SUMO simulation."""
@@ -528,6 +697,8 @@ class SumoEnvironment(gym.Env):
             episode (int): Episode number to be appended to the output file name.
         """
         if out_csv_name is not None:
+            import pandas as pd
+
             df = pd.DataFrame(self.metrics)
             Path(Path(out_csv_name).parent).mkdir(parents=True, exist_ok=True)
             df.to_csv(out_csv_name + f"_conn{self.label}_ep{episode}" + ".csv", index=False)
