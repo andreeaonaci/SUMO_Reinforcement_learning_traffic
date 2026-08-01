@@ -322,7 +322,10 @@ class LaneEncoder:
     FEATURES: List[Tuple[str, Callable]] = [
         ("queue",        lambda l, n: l.queue        / n.max_queue),
         ("waiting_time", lambda l, n: l.waiting_time / n.max_wait),
-        ("occupancy",    lambda l, n: l.occupancy),
+        # traci's getLastStepOccupancy returns a percentage (0-100), not a
+        # 0-1 fraction -- must be normalized like every other feature here,
+        # or this one dimension dominates the input scale by ~100x.
+        ("occupancy",    lambda l, n: l.occupancy    / 100.0),
         ("speed",        lambda l, n: l.speed        / n.max_speed),
         ("is_left",      lambda l, n: float(l.is_left)),
         ("is_straight",  lambda l, n: float(l.is_straight)),
@@ -632,6 +635,13 @@ class NeighborSummaryExtractor:
 
     def summarize(self, ts_id: str) -> np.ndarray:
         lanes, phase, _, _ = self.lane_extractor.extract(ts_id)
+        return self.summarize_from(lanes, phase)
+
+    def summarize_from(self, lanes: List[Lane], phase: float) -> np.ndarray:
+        """Same as ``summarize``, but from already-extracted (lanes, phase)
+        -- lets callers that already extracted this ts_id this tick (e.g.
+        because it's also someone's own-observation target) skip a second
+        round of traci calls."""
         if lanes:
             mean_queue = float(np.mean([l.queue for l in lanes])) / self.max_queue
             mean_wait = float(np.mean([l.waiting_time for l in lanes])) / self.max_wait
@@ -690,8 +700,25 @@ class MultiAgentFederatedWrapper:
         self.max_action_dim = action_inspector.max_action_dim
 
     # ------------------------------------------------------------------
-    def _build_obs(self, ts_id: str) -> Dict[str, np.ndarray]:
-        lanes, phase, elapsed, yellow = self.lane_extractor.extract(ts_id)
+    def _extract_cached(
+        self, ts_id: str, cache: Dict[str, Tuple[List[Lane], int, float, float]]
+    ) -> Tuple[List[Lane], int, float, float]:
+        """Memoized ``lane_extractor.extract`` for one tick.
+
+        Every ts_id gets extracted at most once per ``_build_all_obs`` call.
+        Without this, a ts_id with M neighbors that list it back gets
+        extracted 1 (own obs) + M (once per neighbor's summary) times per
+        tick -- each extraction is several traci calls per lane -- even
+        though the result is identical every time within the same tick.
+        """
+        if ts_id not in cache:
+            cache[ts_id] = self.lane_extractor.extract(ts_id)
+        return cache[ts_id]
+
+    def _build_obs(
+        self, ts_id: str, cache: Dict[str, Tuple[List[Lane], int, float, float]]
+    ) -> Dict[str, np.ndarray]:
+        lanes, phase, elapsed, yellow = self._extract_cached(ts_id, cache)
         lanes = self.sorter.sort(lanes)
         own = self.encoder.encode(lanes, phase, elapsed, yellow)
 
@@ -701,7 +728,8 @@ class MultiAgentFederatedWrapper:
 
         nbrs = self.neighbor_graph.neighbors_of(ts_id)[: self.k_max]
         for i, (nbr_ts, hop) in enumerate(nbrs):
-            neighbors[i] = self.neighbor_summary.summarize(nbr_ts)
+            nbr_lanes, nbr_phase, _, _ = self._extract_cached(nbr_ts, cache)
+            neighbors[i] = self.neighbor_summary.summarize_from(nbr_lanes, nbr_phase)
             neighbor_mask[i] = 1.0
             hop_dist[i] = hop
 
@@ -716,14 +744,27 @@ class MultiAgentFederatedWrapper:
         }
 
     def _build_all_obs(self) -> Dict[str, Dict[str, np.ndarray]]:
-        return {ts_id: self._build_obs(ts_id) for ts_id in self.ts_ids}
+        cache: Dict[str, Tuple[List[Lane], int, float, float]] = {}
+        return {ts_id: self._build_obs(ts_id, cache) for ts_id in self.ts_ids}
 
     # ------------------------------------------------------------------
     # Gym-ish multi-agent interface
     # ------------------------------------------------------------------
 
     def reset(self) -> Dict[str, Dict[str, np.ndarray]]:
-        if hasattr(self.env, "episode") and getattr(self.env, "episode", 0) > 0:
+        # Closing and restarting a SUMO connection needs a moment before the
+        # OS actually releases the old socket -- skipping this causes
+        # "Connection refused" on the next connect (verified empirically).
+        # That only applies to the plain-traci socket path though; libsumo
+        # runs embedded in-process with no socket to release, so the delay
+        # is pure dead time there -- and every city config in this repo
+        # runs with use_libsumo: true, so this was costing ~2s per episode
+        # (episodes x rounds x cities) for nothing on the path actually used.
+        if (
+            hasattr(self.env, "episode")
+            and getattr(self.env, "episode", 0) > 0
+            and "LIBSUMO_AS_TRACI" not in os.environ
+        ):
             time.sleep(2)
         ret = self.env.reset()
         if isinstance(ret, tuple):

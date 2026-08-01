@@ -639,6 +639,22 @@ class SumoEnvironment(gym.Env):
             pass
 
     def close(self):
+        # Idempotent: capture and clear self.sumo FIRST so that any __del__
+        # triggered by the cyclic GC on a previously-closed SumoEnvironment
+        # (the cycle is SumoEnv → traffic_signals → TrafficSignal.env →
+        # SumoEnv) can never reach traci.close() and kill an *active* libsumo
+        # simulation.  The cycle is then broken by clearing traffic_signals,
+        # which allows CPython's reference counter to free the objects
+        # immediately rather than waiting for a non-deterministic GC pass.
+        sumo = self.sumo
+        self.sumo = None        # mark closed before any I/O so re-entry is safe
+        if sumo is None:
+            return              # already closed – do NOT call traci.close() again
+
+        # Break the reference cycle so CPython refcounts can free these objects
+        # without waiting for the cyclic GC.
+        self.traffic_signals = {}
+
         try:
             if LIBSUMO:
                 traci.close()
@@ -653,8 +669,6 @@ class SumoEnvironment(gym.Env):
             except Exception:
                 pass
             self.disp = None
-
-        self.sumo = None
 
     def __del__(self):
         """Close the environment and stop the SUMO simulation."""

@@ -12,4 +12,6 @@ k_max: 8
 max_hops: 3
 use_libsumo: true
 begin_time: 0.0
-lr: 1e-4
+# lr intentionally removed so --lr CLI flag controls all cities uniformly.
+# If city_1 needs a different rate than the global LR after stable training
+# is confirmed, restore this with a value relative to the confirmed LR.

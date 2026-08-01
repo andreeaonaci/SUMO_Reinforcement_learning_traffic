@@ -37,6 +37,7 @@ class FederatedServer:
         aggregation_config: Optional[Dict[str, Any]] = None,
         use_masked_head: bool = True,
         no_federation: bool = False,
+        fedavg_blend: float = 1.0,
     ):
         self.global_model = global_model
         self.clients = clients
@@ -44,6 +45,7 @@ class FederatedServer:
         self.checkpoint_dir = checkpoint_dir
         self.use_masked_head = use_masked_head
         self.no_federation = bool(no_federation)
+        self.fedavg_blend = float(max(0.0, min(1.0, fedavg_blend)))
 
         self.strategy: BaseAggregationStrategy = build_aggregation_strategy(
             aggregation_strategy, aggregation_config
@@ -54,11 +56,9 @@ class FederatedServer:
             type(self.strategy).__name__,
             aggregation_config or {},
         )
-        logger.info(
-            "Masked head aggregation: %s",
-            self.use_masked_head,
-        )
+        logger.info("Masked head aggregation: %s", self.use_masked_head)
         logger.info("No federation mode: %s", self.no_federation)
+        logger.info("FedAvg blend factor: %.3f (1.0 = full replace, <1.0 = blend with prev global)", self.fedavg_blend)
 
         # Per-client history needed to compute deltas each round.
         self._previous_client_state: Dict[str, Dict[str, torch.Tensor]] = {}
@@ -321,7 +321,16 @@ class FederatedServer:
                     base_weights=[weights[cid] for cid in ordered_ids],
                     action_counts=[client_action_counts.get(cid) for cid in ordered_ids],
                     use_masked_head=self.use_masked_head,
+                    previous_global_state=global_state_before,
                 )
+
+                if self.fedavg_blend < 1.0:
+                    prev_state = self.global_model.state_dict()
+                    b = self.fedavg_blend
+                    agg_state = {
+                        k: b * agg_state[k].float() + (1.0 - b) * prev_state[k].float()
+                        for k in agg_state
+                    }
 
                 self.global_model.load_state_dict(agg_state)
 

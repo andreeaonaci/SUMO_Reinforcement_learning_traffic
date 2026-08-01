@@ -58,7 +58,8 @@ def steps_per_episode_from_cfg(cfg: dict) -> int:
     return int(cfg.get("num_seconds", 3600) // cfg.get("delta_time", 5))
 
 
-def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: bool = True):
+def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: bool = True,
+                tau: float = 0.005, target_update: int = 200):
     """Single place that constructs a DQNAgent with the computed eps_decay."""
     return DQNAgent(
         own_dim=own_dim,
@@ -67,6 +68,8 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
         action_dim=action_dim,
         eps_decay=eps_decay,
         head_fix=head_fix,
+        tau=tau,
+        target_update=target_update,
     )
 
 
@@ -82,6 +85,8 @@ def load_clients(
     log_loss_every_steps: int = 50,
     comm_dropout_cfg: dict | None = None,
     head_fix: bool = True,
+    tau: float = 0.005,
+    target_update: int = 200,
 ) -> tuple:
     """Build one FederatedClient per city directory.
 
@@ -152,8 +157,10 @@ def load_clients(
             _own=own_dim, _nbr=neighbor_dim, _k=k_max,
             _act=action_dim, _eps=eps_decay,
             _head_fix=head_fix,
+            _tau=tau, _tu=target_update,
         ):
-            return _make_agent(_own, _nbr, _k, _act, _eps, head_fix=_head_fix)
+            return _make_agent(_own, _nbr, _k, _act, _eps, head_fix=_head_fix,
+                               tau=_tau, target_update=_tu)
 
         clients.append(
             FederatedClient(
@@ -491,6 +498,7 @@ def main(args):
         global_model = _make_agent(
             own_dim, neighbor_dim, k_max, action_dim, eps_decay,
             head_fix=not args.disable_head_fix,
+            tau=args.tau, target_update=args.target_update,
         )
         evaluator = make_holdout_evaluator(
             base,
@@ -537,6 +545,9 @@ def main(args):
             per_city_lr=per_city_lr,
             head_fix=not args.disable_head_fix,
             no_federation=args.no_federation,
+            fedavg_blend=args.fedavg_blend,
+            tau=args.tau,
+            target_update=args.target_update,
         )
         history = server.run(rounds=args.rounds, eval_every=args.eval_every)
 
@@ -551,6 +562,8 @@ def main(args):
             explore_fraction=args.explore_fraction,
             log_loss_every_steps=args.log_loss_every_steps,
             head_fix=not args.disable_head_fix,
+            tau=args.tau,
+            target_update=args.target_update,
         )
         own_dim, neighbor_dim, k_max = obs_dims
 
@@ -564,6 +577,7 @@ def main(args):
         global_model = _make_agent(
             own_dim, neighbor_dim, k_max, action_dim, eps_decay,
             head_fix=not args.disable_head_fix,
+            tau=args.tau, target_update=args.target_update,
         )
         evaluator = make_holdout_evaluator(
             base,
@@ -588,6 +602,7 @@ def main(args):
             aggregation_config=aggregation_config,
             use_masked_head=not args.disable_head_fix,
             no_federation=args.no_federation,
+            fedavg_blend=args.fedavg_blend,
         )
         history = server.run(rounds=args.rounds, eval_every=args.eval_every)
 
@@ -647,6 +662,15 @@ if __name__ == "__main__":
     parser.add_argument("--baseline_controller", type=str, default="none",
                         choices=["none", "fixed_time", "max_pressure"],
                         help="Run holdout evaluation only with a rule-based controller and skip training.")
+    parser.add_argument("--tau", type=float, default=0.005,
+                        help="Polyak soft target-update coefficient. 0 = legacy hard copy every "
+                             "--target_update steps; 0.005 = smooth update every step (default).")
+    parser.add_argument("--target_update", type=int, default=200,
+                        help="Hard target-network sync interval (steps). Only used when --tau 0.")
+    parser.add_argument("--fedavg_blend", type=float, default=1.0,
+                        help="FedAvg blending: 1.0 = fully replace global with aggregated (default). "
+                             "0.7 = 70%% aggregated + 30%% previous global weights, preventing "
+                             "single-round catastrophic forgetting.")
     parser.add_argument("--ema_beta", type=float, default=0.9,
                         help="Smoothing factor for EMA-based strategies (ema_loss, "
                              "ema_alignment, velocity_novelty).")
