@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 A research pipeline for **federated reinforcement learning of a single shared traffic-signal
-policy** across multiple SUMO-simulated cities (intersections of different topologies: single
-intersection, 3x3/4x4 grids, RESCO cologne3/ingolstadt7/grid4x4). One DQN architecture — a
+policy** across multiple SUMO-simulated cities (intersections of different topologies: 3x3/4x4
+grids, RESCO cologne3/ingolstadt7/grid4x4/arterial4x4). One DQN architecture — a
 foundation model — controls every intersection in every city; topology differences (3-way vs
 5-way, missing neighbors, etc.) are expressed entirely through `action_mask` / `neighbor_mask`,
 never through per-topology code paths. `PROJECT_FLOW.md` has a detailed module-by-module trace
@@ -57,6 +57,15 @@ Phase 1 ablation sweep (7-city roster x 5 seeds x multiple aggregation strategie
 baselines; skips runs already completed): `bash analyse/run_phase1_ablation.sh`. Output lands in
 `results/phase1/<run_name>/`; summarize with
 `python experiments/analyze_phase1.py --results_root results/phase1`.
+
+**Default way to run any multi-run experiment batch** (seed sweeps, flag ablations, cheap
+validation matrices — the `environments_c1_4`/`environments_c1_4_6` style small-batch testing
+used throughout `fidings/divergence_investigation.md`): `analyse/run_concurrent_batch.sh`, not a
+one-off sequential script. Runs jobs with bounded concurrency (default 3 at a time) instead of
+one-at-a-time — empirically CPU is not the bottleneck for a single run (each city worker uses
+~13-15% of one core; SUMO/libsumo per-tick stepping is the real constraint), RAM is (~2.5-3.5GB
+per run). See the script's header for usage and the `run_dir` PID-suffix fix in
+`experiments/federated_training.py::main()` it depends on for concurrent launches to not collide.
 
 Tests:
 ```bash
@@ -131,7 +140,14 @@ baseline controller) on a held-out city not used in training (`city_5_holdout` i
 Each city is a directory under `environments/` (`city_1` … `city_7`, `city_5_holdout`) holding a
 `config.yaml` that points at a SUMO `.net.xml`/`.rou.xml` pair under `sumo_rl/nets/` plus
 sim params (`delta_time`, `num_seconds`, `k_max`, `max_hops`, `use_libsumo`, ...).
-`city_5_holdout` is auto-excluded from training and reserved for `HoldoutEvaluator`.
+`city_5_holdout` is auto-excluded from training and reserved for `HoldoutEvaluator` **only when its
+action space (width 8) fits within the roster's global `action_dim`** — `make_holdout_evaluator`
+(`experiments/federated_training.py`) silently falls back to the first compatible *training* city
+otherwise (logged as `"Using '<city>' as evaluation city ... (compatibility fallback)"`). Confirmed
+2026-08-13 (`fidings/divergence_investigation.md` §25) that every 2-city (`environments_c1_4`) run
+in this project has actually been evaluating on `city_1`, one of its own two training cities, not a
+true holdout — check the run's log for that warning before trusting any "generalizes to unseen
+city" framing on a reduced roster; the 7-city (`environments`) roster does use the real holdout.
 `environments_phase0/` and `environments_city1/` are alternate rosters made of symlinks back into
 `environments/*` (selected via `--base_dir`) — used to scope which cities a given experiment run
 sees, not separate environment implementations. `configs/default.yaml` holds the historical
@@ -149,3 +165,89 @@ This is the underlying installable Gymnasium/PettingZoo package (`sumo_rl/enviro
 the single-agent/multi-agent SUMO wrapper it's built on). It's a dependency of the federated
 pipeline above, not the pipeline itself — treat `environments/federated_env.py` as the layer that
 adapts `sumo_rl` environments into the federated multi-city contract.
+
+## Research plan status (paper track)
+
+`PROJECT_NEXT_STEPS.md` is the source of truth for the phased research plan (Phase 0 infra
+stabilization → Phase 1 cheap validation → Phase 2 full-scale validation → Phase 3 baselines →
+Phase 4 clustering/related-work). `fidings/` holds dated investigation write-ups (what was
+tested, what broke, what's still open) — read the latest one there before trusting any past run's
+numbers at face value. As of 2026-08-02, audited against the actual code (not just the plan doc,
+which had gone stale):
+
+- **Phase 0 infra items are already implemented**, contrary to the plan doc's "in progress"
+  status: target network + Double DQN (`agents/dqn.py::DQNAgent.optimize`), persistent
+  optimizer/replay-buffer/agent across rounds (one `DQNAgent` per worker process, created once
+  before the round loop — `federated/parallel_server.py`), no remaining per-city LR override
+  (`--lr` controls every city uniformly, confirmed no `environments/*/config.yaml` sets `lr:`),
+  reward clipping (`reward_clip=10.0`) + Huber loss for outlier robustness, gradient-norm
+  clipping, process-based (not thread-based) `--parallel` parallelism, incremental
+  checkpointing every round. Update the plan doc's Phase 0 status if you re-run this audit and
+  it still holds.
+- **Phase 0's decision gate is NOT cleanly passed**, despite the code being done: two full
+  20-round runs with identical code/config/`--seed 42` produced completely different outcomes
+  (one learned cleanly, one stayed flat the whole run) — see `fidings/divergence_investigation.md`
+  §3. This run-to-run non-determinism (suspect: SUMO/TraCI or multiprocessing-worker scheduling
+  not fully pinned by the Python-level seed) is the actual current blocker on the plan's critical
+  path, not any of the originally-diagnosed infra bugs.
+- **Phase 4's clustering strategy is already implemented and wired up correctly**
+  (`ClusteredFedAvgStrategy` in `federated/aggregation_strategies.py`), including the per-cluster
+  broadcast-routing the plan doc calls out as easy to get wrong — confirmed both
+  `federated/server.py` and `federated/parallel_server.py` route each client its own cluster's
+  aggregated state, not a naive single global broadcast. Only the *trustworthy comparison run*
+  (multi-seed, full roster) is still outstanding, same as the plan doc says.
+- **`federated/strategies.py::fed_prox` (a dead stub that delegated straight to plain `fed_avg`,
+  never wired into the strategy registry) was deleted 2026-08-13** during a code-quality pass —
+  confirmed zero references anywhere outside itself first. Don't confuse this with the *actually
+  implemented and tested* FedProx proximal term, `DQNAgent.mu` — see next bullet — which is real
+  and unaffected by this deletion.
+
+## RESUME HERE (as of 2026-08-13 — check this is still current before trusting it)
+
+Phase 1 is now complete at all three roster sizes (2/3/7-city, 5 seeds each). Read
+`fidings/divergence_investigation.md` in full before doing anything non-trivial here — it's long
+but every number is re-derivable and the reasoning matters. Short version:
+
+- **Current best-known training config: `--dueling --n_step 3`** (dueling Q-head +
+  n-step returns). Validated on 5 seeds, 2-city roster (§21): mean reward -2030.4 (std 515.0),
+  no seed-outlier failure mode. Do not use `--fedprox_mu` (tested, no effect, §14) or
+  `--server_momentum` combined with `--dueling` (tested, net-negative, §18 — a hard CLI check in
+  `experiments/federated_training.py` blocks this combination). `--pseudo_grad_clip` and
+  `--eval_ema_decay` are implemented but unconvincing (§19) — not part of the recommended config.
+- **Phase 1's masked-head ablation, redone on `--dueling --n_step 3`, three roster sizes, now
+  complete (§20 for 2/3-city, §23 for 7-city brought to 5 seeds on 2026-08-13):** mean-reward
+  benefit shrinks monotonically with roster size and is fully gone by 7 cities — |diff|/SE: 3.42
+  (2-city, clean win) → 0.71 (3-city, ambiguous) → 0.23 (7-city, genuine null, not a data gap).
+  Best-round benefit is real at every roster size (fix-on reaches a meaningfully better peak at
+  2/3/7-city) but also shrinks in relative terms: ~95% → 76% → 44% better best-round mean.
+  **No more seeds needed on this question — Phase 1 is done.**
+- **CRITICAL, as of 2026-08-13: the `fixed_time` rule-based baseline was broken project-wide, now
+  fixed — see §24.** Three-layer bug (wrapper classes' `__getattr__` covers reads only, not
+  writes, so `env.fixed_ts = True` silently shadowed instead of reaching the raw SUMO env; plus a
+  missing multi-agent guard in `sumo_rl`'s `SumoEnvironment.step()`). Every `fixed_time` number
+  ever cited in this project (going back to §1) measured a degenerate "never switch off the first
+  phase" policy, not real fixed-time control. Fixed in `environments/federated_env.py`,
+  `federated/comm_dropout.py`, `sumo_rl/environment/env.py`. **Consequence that matters far more
+  than the number itself: with the fix, `fixed_time` (-2.73) and `max_pressure` (-0.34) both beat
+  the 7-city trained DQN (mean -6918.4, best-round -2182.0) by a wide margin on the same holdout
+  city** — invisible before today since the only baseline was itself broken. Not yet multi-seed,
+  not yet checked on 2-city/3-city.
+- **NEXT ACTION — two open decisions, not a compute task to just run:** (1) §24's finding that the
+  trained DQN currently loses to simple rule-based control needs investigating properly (multi-seed
+  baseline numbers, check other rosters) before spending more compute on Phase 2's
+  aggregation-strategy comparison — that comparison matters less if no strategy beats a heuristic
+  yet. (2) Separately, Phase 1's own decision-gate outcome is mixed (see `PROJECT_NEXT_STEPS.md`
+  Phase 1/Phase 2 status) — 2-city passed cleanly but 7-city shows a null mean-reward result
+  alongside a real best-round win. Per the plan's own instruction not to guess on an ambiguous
+  gate, both of these need a call from the user on how to proceed. Don't unilaterally launch more
+  Phase 2 compute without that decision.
+- `analyse/run_concurrent_batch.sh` is the **default** way to run any multi-run batch (see
+  "Common commands" above). §22 measured ~1.5x wall-clock speedup at `MAX_CONCURRENT=3` on
+  2-city runs (each concurrent run individually slows ~60%, contention worsens over a run's
+  duration). §23 found 7-city runs handle `MAX_CONCURRENT=2` fine despite §22's more conservative
+  `MAX_CONCURRENT=1` assumption for that roster size (measured via `top`/`ps`: city workers are
+  bursty, not steadily CPU-bound; RAM, not CPU, was the binding constraint at ~9GB/15.8GB with 2
+  concurrent 7-city jobs) — don't assume `MAX_CONCURRENT=1` is required for 7-city, but watch RAM
+  headroom if pushing higher. Depends on the `run_dir` PID-suffix fix in
+  `experiments/federated_training.py::main()` (§22) — without it, concurrent launches within the
+  same wall-clock second silently corrupt each other's output directories.

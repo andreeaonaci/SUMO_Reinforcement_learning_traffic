@@ -656,7 +656,38 @@ class NeighborSummaryExtractor:
 # Multi-agent, dict-observation Gym-ish wrapper
 # ---------------------------------------------------------------------------
 
-class MultiAgentFederatedWrapper:
+class FixedTsForwardingMixin:
+    """Mixin for env-wrapper classes that hold ``self.env`` and forward
+    attribute *reads* to it (typically via ``__getattr__``) -- adds the
+    *write* half specifically for ``fixed_ts``, which a plain
+    ``__getattr__`` can't cover.
+
+    Without this, ``wrapper.fixed_ts = True`` (e.g. ``HoldoutEvaluator``'s
+    "fixed_time" rule-based-baseline toggle in ``federated/evaluator.py``)
+    just creates a same-named instance attribute on the wrapper itself,
+    shadowing all future reads and never reaching the real SUMO env
+    underneath -- the "fixed_time" baseline then silently degenerates into
+    whatever the caller's action-selection fallback is, not real
+    fixed-time signal control. See
+    ``fidings/divergence_investigation.md`` sec 24 for the incident this
+    fixes; shared here (rather than repeated per wrapper) since every env
+    wrapper in this chain (``MultiAgentFederatedWrapper``,
+    ``RewardShapingWrapper``, ``ActionMaskPadder``, and
+    ``federated/comm_dropout.py``'s ``CommDropoutWrapper``) needs the same
+    treatment or the bug just reappears at whichever layer skips it.
+    """
+
+    @property
+    def fixed_ts(self) -> bool:
+        return bool(getattr(self.env, "fixed_ts", False))
+
+    @fixed_ts.setter
+    def fixed_ts(self, value: bool) -> None:
+        if hasattr(self.env, "fixed_ts"):
+            self.env.fixed_ts = bool(value)
+
+
+class MultiAgentFederatedWrapper(FixedTsForwardingMixin):
     """Steps every intersection in a city simultaneously and returns the
     dict-observation contract consumed by ``agents/dqn.py`` /
     ``agents/networks.py``.
@@ -885,7 +916,7 @@ def build_federated_env(cfg: Dict[str, Any]) -> MultiAgentFederatedWrapper:
 # Cross-city action-space padding
 # ---------------------------------------------------------------------------
 
-class RewardShapingWrapper:
+class RewardShapingWrapper(FixedTsForwardingMixin):
     """Apply reward shaping only when it is safe for per-intersection credit assignment.
 
     This wrapper intentionally avoids using city-wide aggregates such as global waiting time,
@@ -947,7 +978,7 @@ class RewardShapingWrapper:
         return getattr(self.env, name)
 
 
-class ActionMaskPadder:
+class ActionMaskPadder(FixedTsForwardingMixin):
     """Right-pads a city's ``action_mask`` (and the shared network's
     output width) from that city's own local ``max_action_dim`` up to a
     GLOBAL ``target_action_dim`` decided across every city in the

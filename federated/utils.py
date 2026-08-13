@@ -1,7 +1,34 @@
-"""Utility: compute eps_decay from the training schedule."""
+"""Shared training utilities: eps_decay schedule, RNG seeding."""
 import math
- 
- 
+import random
+
+
+def set_seed(seed: int | None) -> None:
+    """Seed every RNG this codebase's training path draws from.
+
+    Shared by the main process (``experiments/federated_training.py``) and
+    each spawned parallel worker (``federated/parallel_server.py``) -- a
+    spawned worker is a fresh interpreter that doesn't inherit the main
+    process's seeded state, so it must call this itself. A no-op if
+    ``seed`` is None.
+    """
+    if seed is None:
+        return
+    random.seed(seed)
+    try:
+        import numpy as np
+        np.random.seed(seed)
+    except Exception:
+        pass
+    try:
+        import torch
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+    except Exception:
+        pass
+
+
 def compute_eps_decay(
     rounds: int,
     local_episodes: int,

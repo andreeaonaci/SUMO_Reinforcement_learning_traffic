@@ -1,0 +1,1400 @@
+# Federated Training Divergence — Investigation Findings
+
+Log of what we tested, what broke, what we fixed, and what's still open. Numbers below are
+pulled directly from `results/**/federated_history.json` and `training.log` for the runs named —
+re-derivable from those files if anything here looks off.
+
+## TL;DR
+
+- A real divergence bug existed (unnormalized occupancy feature, plain Adam decaying masked-out
+  Q-head rows, a masked-aggregation fallback that used the wrong reference weights). Fixed in
+  `dfadab5` ("Fix training divergence sources...").
+- Post-fix, **one** 20-round run improved substantially (waiting time 1632s → 609s). **Another**
+  20-round run with the *exact same code, config, and seed* stayed flat/bad the whole time. Root
+  cause found and fixed 2026-08-04 — see [§5](#5-root-cause-of-the-run-to-run-non-determinism-parallel-workers-were-never-seeded).
+- **`--disable_head_fix` has never worked under `--parallel`** (the path every real training run
+  uses) until fixed 2026-08-05 — see
+  [§10](#10-9s-own-follow-up-found-a-real-bug---disable_head_fix-never-worked-under---parallel).
+  Every past "fix off" ablation (§1, §8) actually ran with masked-head aggregation still on;
+  their conclusions about the fix aren't evidence about the fix. Rerun correctly in §11 (3 seeds,
+  looked like a clean win) then §12 (5 seeds, 2 more break that story) — **net result: ambiguous,
+  not a clean win.** Masked-head aggregation is confirmed (via direct weight-delta measurement) to
+  let untouched-by-some-clients rows move ~2.2-2.3x faster than naive averaging, which raises
+  variance in both directions — usually a much better achievable peak, but seed4 is an outright
+  failure that naive averaging never produces. Mean reward: not statistically distinguishable
+  between conditions (5 seeds).
+- **Seed4's failure minimally reproduced — see [§13](#13-minimal-reproduction-of-seed4s-failure-2-cities-is-already-enough).**
+  `city_1` alone (same seed): stable, near-optimal. `city_1`+`city_4` (2 cities, the minimum
+  possible federation): severe instability immediately, worse than the original 3-city case.
+  Confirms the failure is federation/client-drift itself, not `city_1`'s own training or a
+  specific 3-city combination — direct experimental support for the FedProx diagnosis already on
+  the `new_ideeas` list, now the top-priority item there.
+- **Phase 1 masked-head ablation redone on the validated `dueling+n_step` config, three roster
+  sizes, 2026-08-11/12 — see
+  [§20](#20-phase-1-masked-head-ablation-redone-on-duelingn_step-three-roster-sizes-the-fixs-benefit-shrinks-as-the-roster-grows).**
+  First-ever clean, statistically unambiguous mean-reward win for the fix, on 2-city (5 seeds,
+  |diff|/SE=3.42). 3-city reproduces the older "peak wins, mean ambiguous" pattern. 7-city (only
+  2 seeds so far) looks unclear-to-negative — needs more seeds before trusting. The fix's benefit
+  appears to shrink as roster size grows; a real, reportable pattern either way it resolves.
+- **FedProx tested, 2026-08-06 — negative result, see [§14](#14-fedprox-swept-across-mu-and-a-3rd-city-no-stabilizing-effect).**
+  Swept `mu` in {0, 0.01, 0.03, 0.1} on the `city_1`+`city_4` repro, plus `mu=0.01` on the 3-city
+  roster, all seed 4. No mu tested reduces the oscillation; `mu=0.1` is measurably worse on every
+  metric (mean/best/worst); `mu=0.01` on 3 cities reproduces the undamped failure almost exactly.
+  FedProx is not the fix for this instability. Dueling network head (next item on `new_ideeas`) is
+  now the priority follow-up.
+- Across every post-fix run, `city_1` (the single-intersection city) has the worst, most
+  persistent local loss growth of any city in the roster. Swapped it to a bigger, structurally
+  distinct topology (`RESCO/arterial4x4`) this session. Validated with a real 10-round training
+  run 2026-08-04 (`no_federation_vs_federated_comparison.md`) — city_1's new map is not a
+  training-time outlier.
+
+## Timeline
+
+| date | commit / event | what happened |
+|---|---|---|
+| 2026-06-17 → 07-26 | `589275f` … `9ab1329` | Initial working pipeline, Phase 0 sweep completed |
+| 2026-07-30 | `3a269ce` "strange divergence, trying with local episodes=4" | Divergence first noticed and named |
+| 2026-07-30/31 | Phase 1 ablation (`fedavg_with_fix_seed1` / `fedavg_without_fix_seed1`) | Masked-head-aggregation ablation, seed 1 only |
+| 2026-08-01 14:12 | `dfadab5` "Fix training divergence sources, add perf wins, remove dead code" | Root-cause fixes (see below) |
+| 2026-08-01 18:37 | `ed2ae4d` merge PR #2 | Fix merged into `next_phases` |
+| 2026-08-01 18:43 | `run_2026_08_01-18_43_01` | Post-fix 20-round run — **did not improve** |
+| 2026-08-02 02:38 | `run_2026_08_02-02_38_41` | Post-fix 20-round run, same config/seed — **improved substantially** |
+| 2026-08-02 (this session) | city_1 topology swap | Config change only, not yet trained |
+
+## 1. Masked-head aggregation ablation (Phase 1, seed 1)
+
+`masked_head_weighted_average` only averages the Q-head rows a city actually touched that round,
+instead of blending in untouched rows from other cities' locally-drifted copies.
+`fedavg_without_fix_seed1` ran with `--disable_head_fix` (plain full-head averaging) as the
+ablation control. 7-city roster, 10 rounds, `local_episodes=2`, `lr=3e-4`.
+
+| run | reward (round 1 → 10, best) | waiting_time (round 1 → 10, best) |
+|---|---|---|
+| `fedavg_with_fix_seed1` (masked-head ON) | -10247 → -9782 (best -3457) | 1967s → 1660s (best 947s) |
+| `fedavg_without_fix_seed1` (masked-head OFF) | -9759 → **-7371** (best -6992) | 1913s → **1517s** (best 1475s) |
+
+**Honest caveat:** on this single seed, masked-head aggregation did *not* come out ahead — the
+ablation (`without_fix`) actually finished with better reward and waiting time. The ablation
+script (`analyse/run_phase1_ablation.sh`) is written for 5 seeds per variant; only seed 1
+completed for both. One seed is not enough to conclude masked-head aggregation hurts — it's
+equally likely this seed is noise — but it means **the masked-head aggregation win is not yet
+demonstrated**, only implemented and reasoned about from first principles. Seeds 2-5 need to run
+before trusting either direction.
+
+Rule-based reference points from the same holdout city:
+- `baseline_fixed_time` (always phase 0): reward -9996, waiting_time 1900s
+- `baseline_max_pressure`: reward -0.34, waiting_time 2.9s — **implausible relative to every
+  other number in this doc**, almost certainly an artifact of the baseline-controller eval path
+  (e.g. degenerate/near-empty scenario or a units mismatch), not a real max-pressure result.
+  Flagging rather than trusting it; needs its own investigation before citing.
+
+## 2. Divergence fix (`dfadab5`, 2026-08-01)
+
+Three real bugs found tracing the pipeline end to end:
+
+1. **Unnormalized occupancy feature.** `LaneEncoder.FEATURES` fed raw `traci` occupancy (0-100)
+   into the network unscaled, next to every other feature normalized to ~0-1 — a ~100x scale
+   outlier on one input dimension, silently regressed relative to `environments/cologne.py`
+   which already divided by 100.
+2. **Plain Adam + weight_decay on masked-out Q-head rows.** Adam folds `weight_decay` into the
+   gradient *before* the moment estimates. A Q-head row for an action a low-action-count city
+   never takes gets ~zero true gradient every step, so Adam's running estimates lock onto the
+   `weight_decay*param` term as a near-constant signal — the effective update collapses to
+   `-lr*sign(param)`, decaying that weight at a rate set by the *learning rate*, not the tiny
+   `weight_decay` coefficient. Hundreds of optimizer steps per local round erased untouched
+   action rows. Fixed by switching to `AdamW` (decoupled decay).
+3. **Wrong fallback reference in masked-head aggregation.** When no client touched a given
+   action row, the fallback used `state_dicts[0]` (an arbitrary client's locally-drifted copy)
+   instead of the actual previous global weights the docstring claimed. Threaded
+   `previous_global_state` through `aggregate_round` / `masked_head_weighted_average` and both
+   callers (`federated/server.py`, `federated/parallel_server.py`) so untouched rows genuinely
+   stay frozen instead of drifting toward whichever client happened to be first in the list.
+
+Plus perf wins (per-tick lane-extraction cache, conditional reset sleep only on the socket/traci
+path) and dead-code removal (`environments/cologne.py`, `environments/federated_preprocessing.py`
+— both unimportable/unreferenced).
+
+## 3. Post-fix verification: two runs, same everything, different outcomes
+
+Both runs: `next_phases` @ `ed2ae4d` (post-merge), `base_dir=environments`, `aggregation_strategy=fedavg`,
+`disable_head_fix=False`, `lr=3e-4`, `lr_decay=0.97`, `min_lr=1e-5`, `local_episodes=2`,
+`parallel=True`, `eval_episodes=3`, `rounds=20`, **`seed=42`** — confirmed identical from each
+run's logged argparse `Namespace`.
+
+| | `run_2026_08_01-18_43_01` | `run_2026_08_02-02_38_41` |
+|---|---|---|
+| reward round 1 | -9082 | -9277 |
+| reward round 20 | -8106 | **-2776** |
+| reward trend | flat/noisy the whole run (-8100 to -10600) | net improvement, ends near best |
+| waiting_time round 1 | 1781s | 1632s |
+| waiting_time round 20 | 1618s | **609s (best of the run)** |
+| waiting_time trend | stays 1500-1900s throughout, never breaks out | drops steadily, best value at the very end |
+
+**The 18:43 run never learns; the 02:38 run learns cleanly** — with nothing different in code,
+config, or seed between them. See [Open questions](#open-questions--next-steps).
+
+### Per-city loss shape (from the improved run, `run_2026_08_02-02_38_41`)
+
+Every city's local loss rises through the early/mid rounds, peaks around round 9-11, then
+declines or plateaus — the signature of epsilon/LR decay settling out noisy early training,
+*not* runaway divergence:
+
+| city | round 1 | peak (round) | round 20 |
+|---|---|---|---|
+| city_1 (single-intersection) | 0.95 | 3.75 (13) | 3.79 — plateaus high, never really comes down |
+| city_2 (3x3grid) | 0.99 | 2.24 (11) | 1.77 |
+| city_3 (4x4-Lucas) | 0.006 | 0.026 (13/20) | 0.018 — negligible throughout |
+| city_4 (RESCO cologne3) | 0.78 | 1.14 (11) | 0.57 |
+| city_6 (RESCO ingolstadt7) | 0.046 | 0.15 (10) | 0.077 |
+| city_7 (RESCO grid4x4 dense) | 0.055 | 0.75 (11) | 0.54 |
+
+city_1 stands out: highest absolute loss of any city by a wide margin, and the only one whose
+loss doesn't meaningfully come back down by round 20 (it plateaus in a 3.6-3.9 band instead of
+continuing to climb, so it's *capped*, but never recovers the way every other city does).
+
+## 4. city_1 topology swap (this session)
+
+**Hypothesis:** city_1 uses `2way-single-intersection` — 1 traffic light, 720 steps/round vs.
+thousands for the grid/RESCO cities — so its local training does far fewer, higher-variance
+gradient updates per round while getting aggregated with the same weight as 16-intersection
+cities. Its outsized, non-recovering loss is consistent with this small-sample-size effect.
+
+**Change made:** `environments/city_1/config.yaml` net/route swapped from
+`2way-single-intersection` to `sumo_rl/nets/RESCO/arterial4x4` (16 traffic-light-controlled
+intersections, ~2500-vehicle route file, 0-2992s departure window — fits the existing 3600s
+`num_seconds` with no shifting needed).
+
+**Why this net and not another:** surveyed every unused net bundled in the repo
+(`2x2grid`, `4x4loop`, `Nguyen`, `OW`, `RESCO/{cologne1,cologne8,ingolstadt1,ingolstadt21,arterial4x4}`)
+against the existing roster to avoid duplicating structure already covered:
+
+| already in roster | structure |
+|---|---|
+| city_2 `3x3grid`, city_3 `4x4-Lucas`, city_5_holdout/city_7 `grid4x4` | regular grid |
+| city_4 `cologne3`, city_6 `ingolstadt7` | real-world extract |
+
+`arterial4x4` is a synthetic arterial-corridor layout (irregular node naming, not a rectangular
+grid) — distinct from every net already in use, same "well-known RESCO benchmark" provenance as
+the cities already in the roster, and the size class the swap was aimed at (16 intersections,
+matching the "bigger than 2x2, 4x4-ish" ask).
+
+**Caveat on roster balance:** city_1/city_3/city_5_holdout/city_7 are now all 16-intersection
+cities (different topologies, same size). If size diversity matters as much as topology
+diversity, `RESCO/cologne8` (8 TLS, real-world) or the Nguyen network (8 TLS, classic academic
+test net) are the other unused, structurally-distinct options sitting in the repo.
+
+**Status:** config changed, smoke-tested through `environments.federated_env.build_federated_env`
+(the actual factory training uses) — 16 intersections detected, `own`/`neighbor`/`action_mask`
+shapes match the shared contract (`own: (115,)`, `neighbors: (8,3)`, `action_mask: (5,)`),
+non-zero rewards flowing by step 20. **No actual training run has used this config yet** — the
+20-round run analyzed in §3 above started before this swap and used the old single-intersection
+city_1 the whole time (confirmed: its action_counts never exceed 4 actions, the old city's phase
+count, never arterial4x4's 5).
+
+## 5. Root cause of the run-to-run non-determinism: parallel workers were never seeded
+
+**Diagnosed and fixed 2026-08-04**, prompted by the same noise showing up again in a fresh 10-round
+A/B comparison (`no_federation_vs_federated_comparison.md`) — B (federated) was much noisier
+round-to-round than A (std 925 vs 370), and neither run showed a clean trend, so the open question
+from §3/#1 above got picked back up.
+
+**Root cause:** `ParallelFederatedServer` starts one worker per city via
+`mp.get_context("spawn")` (`federated/parallel_server.py`). `spawn` launches a **brand-new Python
+interpreter** per worker — unlike `fork`, it does not inherit the parent process's memory or RNG
+state. `set_seed(args.seed)` (`experiments/federated_training.py:389`) runs exactly once, in the
+main process, *before* the workers are spawned — so it never reaches them. Every worker's:
+
+- epsilon-greedy exploration (`agents/dqn.py:228,232` — `random.random()`, `random.choice()`)
+- replay-buffer minibatch sampling (`agents/dqn.py:42` — `random.sample()`)
+- greedy-action tie-breaking (`agents/dqn.py:207` — `np.random.choice()`)
+- training-side comm-dropout pattern (`CommDropoutWrapper` built in `_client_worker` with no
+  `seed` key in `DEFAULT_COMM_DROPOUT`, so it defaulted to `seed=None` → OS entropy)
+
+...was drawing from each worker's own **unseeded, OS-entropy-initialized** global `random`/
+`numpy.random` state — different every process launch, regardless of `--seed`. This fully explains
+§3: identical code/config/`--seed 42` can and did produce completely different training
+trajectories, because the actual stochastic decisions during training were never under seed
+control in the first place. (The sequential path, `federated/server.py`/`federated/client.py`,
+runs in the *same* process as `set_seed()`, so it was never affected — this bug is specific to
+`--parallel`, which is the path used for all real training runs per `CLAUDE.md`.) SUMO's own
+traffic randomness was already correctly pinned via each city's `sumo_seed:` config key — not
+part of the bug.
+
+**Fix (`federated/parallel_server.py`, `experiments/federated_training.py`):** `_client_worker`
+now seeds `random`, `numpy`, and `torch` explicitly at process start; `ParallelFederatedServer`
+takes a `seed` param and derives a distinct-but-deterministic per-city seed (`seed + city_index`)
+so cities don't all explore identically; the derived seed is also threaded into the training-side
+`CommDropoutWrapper`. `args.seed` is now passed through from `federated_training.py`.
+
+**Verified with a smoke test**, not just by inspection: built a temporary 2-city roster
+(`city_4`/cologne3, `city_6`/ingolstadt7, `city_5_holdout`/grid4x4, `num_seconds` shortened to 300
+for speed), ran the same `--seed 123`, `--rounds 2` config twice. Before this fix, two such runs
+were guaranteed to differ (per the mechanism above). After the fix: **identical
+`federated_history.json` eval metrics round-by-round, and byte-identical `global_round_002.pth`
+checkpoints** (`torch.equal` true on every tensor) — full determinism confirmed under `--parallel`.
+
+## 6. First real multi-seed run post-fix: loss is clean, holdout reward is noisy (confounded)
+
+**2026-08-04, same session as §5.** Cheap validation of the seeding fix: 3 seeds (1, 2, 3), 20
+rounds each, `--parallel`, plain `fedavg`, on a deliberately small 2-city roster
+(`environments_multiseed/`: `city_4`/cologne3 [3 intersections] + `city_6`/ingolstadt7 [7
+intersections]) — chosen as the two cheapest cities in the roster so 3 seeds x 20 rounds is
+affordable. `city_5_holdout` (grid4x4, 16 intersections) picked up via the existing base_dir
+fallback for eval, same as always. Full round-by-round numbers in
+`results/run_2026_08_04-{14_15_27,14_57_31,15_22_52}/federated_history.json` (seeds 1/2/3
+respectively).
+
+**Holdout reward: still noisy, no clean trend in any of the 3 seeds** (round-20 reward: seed1
+-644.9, seed2 -576.9, seed3 -2.3; std across rounds 277-518 depending on seed). At first glance
+this looks like the same unresolved problem as §3 — but there's a real confound this time: the
+model was trained *only* on two small cities (3 and 7 intersections) and evaluated on a
+16-intersection holdout it never saw anything structurally similar to during training. That
+mismatch alone is enough to produce erratic holdout behavior independent of whether local
+training itself is stable. This setup wasn't built to isolate that — worth fixing before reading
+too much into the holdout numbers here (see open question below).
+
+**Per-city local training loss (the metric Phase 0's gate actually asks about, and not subject to
+the holdout-mismatch confound): clean and consistent across all 3 seeds.**
+- `city_4`: monotonic-ish downward trend in every seed — round 1 loss 0.60-0.84, round 20 loss
+  0.42-0.46, roughly halving over the run, same shape in all three seeds.
+- `city_6`: stays bounded and low throughout (0.03-0.07) in every seed, no blow-up, no runaway
+  growth, mild wobble but no divergence.
+
+No sign of the city_1-style "high loss, never recovers" pattern from §3 in either city, in any
+seed. This is a meaningfully better result than anything pre-fix: three *different* seeds now
+produce three *differently-detailed-but-qualitatively-matching* loss curves — exactly what
+"reproducible but not identical" should look like, as opposed to §3's "identical seed, wildly
+different outcome."
+
+**Reading:** the core training-stability question Phase 0 asks (does local loss trend down /
+stay bounded) looks genuinely healthy and reproducible now. The holdout-reward volatility is real
+but likely dominated by the scale mismatch in this particular cheap setup, not by leftover
+training instability — needs a same-scale-ish holdout (or accepting this roster can only speak to
+loss, not holdout reward) before treating it as a second open problem.
+
+## 7. Speed optimizations, then the real test: city_1 (the hardest case) revalidated post-fix
+
+**2026-08-04, same session.** §6 deliberately tested the two *easiest* cities (city_4, city_6 —
+neither had ever shown instability, even pre-fix). Before spending more compute redoing that with
+`city_1` — the city with the worst, most persistent divergence in every prior run (§3) — added two
+speed optimizations, both verified risk-free before trusting them on a real run:
+
+- **Torch thread pinning** (`federated/parallel_server.py`): each city worker now runs with
+  `torch.set_num_threads(1)`. Previously every worker defaulted to 6 intra-op threads; with 6-7
+  cities training concurrently on a 12-core box that's up to 36-42 threads fighting over 12 cores.
+  Each worker is already its own OS process — the thread pool was pure redundant oversubscription
+  on top of that, not additional real parallelism.
+- **Batched per-tick action selection** (`agents/dqn.py`): `train()`'s action-selection loop
+  previously called the network once per intersection per tick (`agents/dqn.py`'s old
+  `{ts_id: self.act(o, ...) for ts_id, o in obs_dict.items()}`) — 16 separate batch-1 forward
+  passes per tick for a 16-intersection city. New `act_batch()`/`_greedy_action_batch()` batch the
+  network forward pass across every intersection in one call (batch size = however many
+  intersections that city has that tick, not a fixed constant), while preserving the *exact* same
+  per-intersection RNG draw order/semantics (explore-vs-greedy still decided independently per
+  intersection from the same two RNG streams) — verified genuinely **byte-identical** output
+  (not just close) on a city_4+city_6, `--seed 777`, 2-round before/after comparison:
+  `federated_history.json` eval metrics matched exactly and `global_round_002.pth` checkpoints
+  were `torch.equal`-identical on every tensor. `optimize()`'s replay-buffer training step was
+  already properly batched — this only affects action selection.
+
+**The real test**: `city_1` (`arterial4x4`, 16 intersections) + `city_4` + `city_6`, 3 seeds
+(1/2/3), 20 rounds, `--parallel`, plain `fedavg`. `city_1` being 16 intersections (same scale as
+the holdout) also removes §6's scale-mismatch confound.
+
+**`city_1`'s loss — the actual thing being re-tested — is now well-behaved in all 3 seeds:**
+
+| seed | round 1 | round 20 | range across all 20 rounds |
+|---|---|---|---|
+| 1 | 0.49 | 0.33 | 0.24 – 0.63 |
+| 2 | 0.42 | 0.17 | 0.16 – 0.42 (clean downward trend, more than halved) |
+| 3 | 0.42 | 0.38 | 0.25 – 0.42 |
+
+Compare to §3's pre-fix `city_1`: peaked at 3.75 (round 13) and *never recovered*, plateauing at
+3.6-3.9 through round 20 — roughly **an order of magnitude worse** than anything seen here.
+`city_4` and `city_6` again show the same healthy, consistent-shape-across-seeds pattern as §6
+(`city_4`: 0.57-0.83 → 0.43-0.47, downward in all 3 seeds; `city_6`: bounded 0.04-0.10 throughout).
+No sign of the old city_1-specific failure mode in any seed.
+
+**Holdout reward/waiting time: still noisy overall, but with a striking new pattern — all three
+seeds independently converge to near-optimal waiting times in the same round window, then regress
+at round 20:**
+
+| seed | round 15 | round 16 | round 17 | round 18 | round 19 | round 20 |
+|---|---|---|---|---|---|---|
+| 1 waiting(s) | 145.9 | 664.9 | 1284.8 | **9.2** | 474.6 | 829.8 |
+| 2 waiting(s) | 1990.2 | 1466.7 | **10.2** | **3.8** | **10.7** | 223.2 |
+| 3 waiting(s) | 1601.2 | **10.1** | **10.0** | 13.3 | 255.8 | 1499.0 |
+
+Every seed hits single-to-low-double-digit waiting time (i.e. a genuinely near-optimal signal
+control policy) somewhere in rounds 16-19, then every seed regresses at round 20. This is not
+random noise — three independent seeds landing on the same round window for both the good phase
+and the round-20 regression is a real, reproducible pattern, not coincidence. Not yet explained;
+candidates: `explore_fraction=0.5` means epsilon hits its floor around round 10 of 20, so rounds
+16-19 are pure exploitation of an already-good policy, and something about the last round
+specifically (LR near its floor, one more aggregation round, a target-network sync) may be
+knocking the policy off a sharp optimum. Needs its own look before trusting round-20 numbers as
+"final performance" in any future run of this length.
+
+**Reading:** this is the actual Phase 0 hard-case test that was missing — city_1's specific,
+long-standing failure mode is gone post-fix, confirmed across 3 seeds, not just 1. Combined with
+§6, per-city training loss (Phase 0's core "does local training even work" question) now looks
+solid across every city in the roster tested so far. The reward-variance side of Phase 0's gate
+is more nuanced than "resolved" — there's clear evidence of real learning (the rounds 16-19
+near-optimum) but also a new, specific, reproducible round-20 regression that wasn't visible
+before because no prior run had reproducible seeds to compare against. That's arguably a much
+better place to be than before (a narrow, analyzable pattern vs. total unpredictability), but it
+means "reward variance shrinking over time" still isn't a clean yes.
+
+## 8. Phase 1 masked-head ablation, redone properly: 3 seeds, post-fix, still ambiguous
+
+**2026-08-04/05, same session as §7.** §1's ablation was 1 seed, pre-seeding-fix, 7-city roster.
+Redone here with the seeding bug actually fixed: `city_1`+`city_4`+`city_6` (action_dim 5/4/3 —
+real heterogeneity, the mechanism `masked_head_weighted_average` specifically targets), 3 seeds
+(1/2/3), 20 rounds, plain `fedavg`, fix-on vs. `--disable_head_fix`. Fix-on reuses §7's runs
+directly; fix-off is 3 new matched runs
+(`results/run_2026_08_04-{21_38_15,22_26_24,23_14_29}`).
+
+| seed | condition | mean reward | std reward | round 20 reward | best-round reward | mean wait(s) | round 20 wait(s) |
+|---|---|---:|---:|---:|---:|---:|---:|
+| 1 | fix_on  | -2741.2 | 1463.4 | -2568.2 | -120.9 | 1311.7 | 829.8 |
+| 1 | fix_off | -2051.2 | 1082.8 |  -634.4 | -541.9 | 1345.3 |  53.9 |
+| 2 | fix_on  | -2575.9 | 1376.5 | -1135.2 |  -65.5 | 1217.5 | 223.2 |
+| 2 | fix_off | -2568.6 | 1295.0 |  -313.5 | -133.0 | 1375.8 | 440.7 |
+| 3 | fix_on  | -2198.7 | 1490.2 | -4080.8 |  -73.8 | 1411.3 | 1499.0 |
+| 3 | fix_off | -2313.4 | 1089.2 | -2640.4 | -534.5 | 1414.9 | 1138.7 |
+
+**No clean separation, but a real and consistent pattern in *how* the two conditions differ:**
+- **Mean reward across all 20 rounds**: fix_on avg -2505.3, fix_off avg -2311.0 — a ~200-point
+  gap that's small relative to either condition's own round-to-round std (~1100-1490). Not
+  distinguishable from noise on 3 seeds.
+- **Best single round**: fix_on hits a strikingly consistent, near-optimal best round in *every*
+  seed (-120.9, -65.5, -73.8 — all within a tight band). fix_off's best rounds are more variable
+  and never get as close to zero (-541.9, -133.0, -534.5). Fix-on reaches a better peak, reliably.
+- **Round 20 (final)**: the opposite pattern — fix_off's last round is less bad than fix_on's in
+  *all three* seeds (-634/-314/-2640 vs -2568/-1135/-4081). This lines up with §7's finding that
+  fix_on's round-20 regression (the still-unexplained dip after the rounds-16-19 near-optimum) is
+  itself part of what's being measured here — fix_off's smoother-but-lower-peak curve just doesn't
+  have as far to fall.
+- **Per-city training loss** (the actual mechanism under test): checked `city_1` (action_dim=5,
+  most exposed to the head-row-masking effect on this roster) and `city_6` (action_dim=3, most
+  masked-out rows relative to the shared 5-wide head) in detail — **no meaningful separation in
+  either city, any seed.** Loss curves for fix_on and fix_off sit within each other's seed-to-seed
+  spread, both bounded in the same ranges (`city_1`: ~0.16-0.63 either way; `city_6`: ~0.04-0.09
+  either way).
+
+**Reading, per the plan's own decision-gate categories: this is the "ambiguous / overlapping
+distributions" case**, not a clean win or loss for the fix. Unlike §1's single-seed result (which
+looked like a clean loss for the fix, but was one sample), 3 seeds now show the fix trading peak
+performance for final-round performance rather than being strictly better or worse — a more
+nuanced, more interesting result than either "fix wins" or "fix loses," but not yet a basis for a
+paper claim. Per the plan: don't scale to Phase 2 on this; either more seeds, or investigate
+whether the round-20 regression (§7) is entangled with this comparison (both conditions might be
+riding the same underlying end-of-schedule effect, in which case comparing final-round numbers
+between conditions is comparing two samples of the same unexplained artifact, not the head-fix
+mechanism itself).
+
+## 9. Digging into the round-20 regression: it's not generic noise, it's specific to the fix
+
+**2026-08-05, same session.** §7 flagged a round-20 regression as unexplained; §8's fix-off data
+(collected for an unrelated purpose) turned out to contain the control condition needed to test
+whether it's generic FedAvg noise or something the masked-head fix itself causes. No new training
+needed — this used data already on disk.
+
+**Where does each condition's best round actually land?**
+
+| seed | fix_on best round | fix_off best round |
+|---|---|---|
+| 1 | **18** (reward -120.9) | 3 (reward -541.9) |
+| 2 | **17** (reward -65.5) | 18 (reward -133.0) |
+| 3 | **16** (reward -73.8) | 13 (reward -534.5) |
+
+**fix_on's best round clusters tightly at 16-18 in all three seeds — practically the same 3-round
+window every time.** `fix_off`'s best round is scattered with no pattern (3, 13, 18). A generic
+"training is just noisy" explanation predicts scattered best-rounds in *both* conditions, the same
+way `fix_off` actually looks. Getting the *same narrow window* independently in 3 different seeds,
+only when the fix is on, is a specific, reproducible effect of the fix itself, not a property of
+FedAvg/replay-buffer training in general on this roster.
+
+**Per-city training loss doesn't explain the eval swing.** Checked `city_1` at rounds 19→20 for
+each `fix_on` seed specifically (where the regression happens): seed3's loss does jump alongside
+its reward regression (0.287→0.380), but seed2's reward collapses from -71.9 to -1135.2 while
+`city_1`'s loss barely moves (0.1717→0.1734), and neither `city_4` nor `city_6` show a
+corresponding spike for seed2 either. **No single city's local loss reliably explains the
+holdout-reward collapse** — the regression shows up in the *aggregated* model's behavior without
+a matching spike in any individual client's local training signal.
+
+**Working hypothesis, not yet confirmed:** `masked_head_weighted_average` deliberately does *not*
+smooth every city's Q-head row toward a common average every round — only the rows a city actually
+touched get updated by that city's contribution (that's the whole point of the fix, see §2). Naive
+full-head averaging (`fix_off`) implicitly regularizes the shared head every round, pulling all
+cities' head weights toward each other regardless of use, which trades away peak performance for
+smoother, more scattered results. The masked-head fix removes that regularization, letting the
+head specialize more sharply per city — plausibly enough to reach a genuinely better policy (the
+16-18 peak) — but with less of a stabilizing pull back toward a shared consensus, so one round's
+per-city local updates landing slightly differently in weight-space can knock the *aggregated*
+model off that peak without any individual city's own loss curve showing distress. This is the
+same client-drift-in-weight-space failure mode the plan's `new_ideeas` list already names FedProx
+as a targeted fix for — this investigation is independent evidence for that diagnosis, not a new
+guess.
+
+**Practical implication for §8:** the round-20 comparison between `fix_on` and `fix_off` isn't
+comparing two samples of the same generic artifact (ruling out one of §8's two proposed
+explanations) — the regression is real and fix-specific. That doesn't resolve §8's "ambiguous"
+verdict on its own (fix_on still trades peak for stability, which is a genuine tradeoff either way
+this mechanism is framed), but it does mean the round-20 numbers in §8 are measuring something
+mechanistically connected to the fix, not noise — worth stating as such rather than discounting
+them.
+
+**Not yet done:** confirming the hypothesis directly would mean inspecting the actual Q-head
+weight deltas between rounds 18-20 (do the untouched-row values actually swing more under
+masked-head aggregation than under naive averaging, as the hypothesis predicts?) rather than
+inferring it from eval/loss curves alone.
+
+## 10. §9's own follow-up found a real bug: `--disable_head_fix` never worked under `--parallel`
+
+**2026-08-05, same session, immediately after §9.** Went to confirm §9's hypothesis directly by
+loading `head.4.weight`/`head.4.bias` from consecutive round checkpoints and measuring per-row
+delta norms for `fix_on` vs `fix_off` around rounds 16-20. Result: **row deltas were statistically
+indistinguishable between the two conditions** (both ~0.03-0.09 across all rows, no systematic
+gap) — not what §9's hypothesis predicted. That non-result was the tell.
+
+**Root cause: `ParallelFederatedServer` (`federated/parallel_server.py`) never gated its
+aggregation call on `head_fix` at all.** It accepted a `head_fix` constructor argument, but only
+ever forwarded it into each city worker's local network construction (toggling
+`NeighborAttentionQNetwork` between full attention and a simplified neighbor-mean-pooling
+architecture — an unrelated architectural knob). The actual aggregation line in `run()` called
+`masked_head_weighted_average(...)` **unconditionally**, with no `if self.head_fix` branch
+anywhere in the file. The sequential path (`federated/server.py:323`,
+`aggregate_round(..., use_masked_head=self.use_masked_head, ...)`) has always done this
+correctly — the parallel path was simply missing the equivalent gate.
+
+**Blast radius: every `--disable_head_fix` ablation ever run through `--parallel` — which is all
+of them.** `analyse/run_phase1_ablation.sh` (the project's standard Phase 1 script) passes
+`--parallel` (confirmed, line 54). §1's `fedavg_without_fix_seed1` and §8's entire 3-seed `fix_off`
+condition both used `--parallel`. None of these ever actually ran naive full-head averaging —
+`masked_head_weighted_average` was active in every single "fix off" run this project has produced.
+The only real variable those ablations tested was attention-vs-pooling network architecture, not
+the aggregation mechanism the flag claims to control. **§1 and §8's conclusions about the
+masked-head fix's effect are not evidence about that fix at all** — they're an accidental
+architecture ablation, mislabeled.
+
+**Fix applied** (`federated/parallel_server.py`): store `self.head_fix = bool(head_fix)` in
+`__init__`; the aggregation branch now does
+`masked_head_weighted_average(...) if self.head_fix else weighted_average(...)`, mirroring the
+sequential path exactly.
+
+**Verified mechanically, not just by inspection**, before trusting it: 2-city roster (`city_4`
+action_dim=4, `city_6` action_dim=3 — `city_6` never touches row 3), 1 round, same seed, once with
+the fix on and once off.
+- `fix_on`: aggregated `head.4.weight[3] == city_4`'s local row exactly (100% from the only city
+  that touched it) — correct masked-head behavior.
+- `fix_off`: aggregated `head.4.weight[3] == 0.5*(city_4's row + city_6's row)` exactly — correct
+  naive full-head behavior, and now *actually different* from the fix-on result, which it never
+  was before.
+
+**Status:** the `fix_off` condition of §8's ablation is being rerun correctly now
+(`city_1`+`city_4`+`city_6`, 3 seeds, 20 rounds, otherwise identical config) — `fix_on`'s existing
+data from §7/§8 doesn't need rerunning, since `masked_head_weighted_average` being the unconditional
+default meant `fix_on` runs were always correct. §8's table and its "ambiguous, peak-vs-stability
+tradeoff" conclusion should be treated as **retracted pending the corrected rerun** — not because
+the numbers were wrong, but because they answered a different question than the one asked.
+
+## 11. Phase 1 ablation redone correctly: a real, mechanistically-confirmed effect
+
+**2026-08-05, same session, immediately after §10's fix.** `fix_off` rerun completed (3 seeds, 20
+rounds, `city_1`+`city_4`+`city_6`, aggregation now genuinely disabled per §10's fix).
+
+| seed | condition | mean reward | std reward | best-round reward | best round |
+|---|---|---:|---:|---:|---:|
+| 1 | fix_on  | -2741.2 | 1463.4 |  -120.9 | 18 |
+| 1 | fix_off | -2544.1 |  822.2 |  -971.5 | 11 |
+| 2 | fix_on  | -2575.9 | 1376.5 |   -65.5 | 17 |
+| 2 | fix_off | -2669.5 |  956.4 |  -724.4 | 19 |
+| 3 | fix_on  | -2198.7 | 1490.2 |   -73.8 | 16 |
+| 3 | fix_off | -1728.6 | 1097.0 |  -147.4 | 19 |
+
+**Mean reward across all 20 rounds: still not cleanly separated** (fix_on avg -2505.3, fix_off avg
+-2314.1 — a ~190-point gap, small next to either condition's own std). On this metric alone, still
+"ambiguous" by the plan's own gate categories.
+
+**Best-achievable-round reward: now cleanly, non-overlappingly separated in fix_on's favor.**
+fix_on's best round in every seed falls in a tight band (-120.9 to -65.5). fix_off's best round in
+every seed is markedly worse (-971.5 to -147.4) — **fix_off's best result across all 3 seeds
+(-147.4) is still worse than fix_on's worst best-result (-120.9).** Zero overlap. This is a real
+effect, not noise from 3 samples.
+
+**Q-head weight-delta magnitudes (rounds 16-20, averaged across all 3 seeds and every transition)
+now confirm the mechanism directly — this is the check §9 called for and §10 caught as invalid:**
+
+| head row | who touches it | fix_on mean Δ-norm | fix_off mean Δ-norm | ratio |
+|---|---|---:|---:|---:|
+| 0-2 | all 3 cities | 0.036-0.037 | 0.031-0.033 | ~1.1-1.2x |
+| 3 | `city_1` + `city_4` only | 0.058 | 0.025 | **2.33x** |
+| 4 | `city_1` only | 0.058 | 0.026 | **2.20x** |
+
+Exactly what §9's original (pre-correction) hypothesis predicted, now properly confirmed: rows
+shared by every client move at roughly the same rate under both conditions (~1.1-1.2x), but rows
+touched by fewer clients move **more than twice as fast** under masked-head aggregation — because
+`fix_off` dilutes every round's real update with 1-2 other clients' stale, untouched copies of
+that row, while `fix_on` lets the touching client's full signal through undamped. This directly
+explains the whole pattern: `fix_on`'s specialized rows can converge faster to a better value
+(explaining the sharp, tight 16-18 best-round peak) but are also more exposed to a noisy round's
+update swinging the aggregate model since there's no cross-client averaging to damp it (explaining
+the higher `std_reward` in every seed: 1463/1377/1490 for `fix_on` vs 822/956/1097 for `fix_off`).
+
+**Reading:** this is a real, reproducible, mechanistically-understood tradeoff — not noise, and
+not the same "ambiguous, don't know why" result as the invalid §8 comparison. Masked-head
+aggregation lets the shared head specialize enough to reach a substantially better *achievable*
+policy (confirmed 3/3 seeds, no overlap), at the cost of higher round-to-round variance (confirmed
+3/3 seeds) driven by a directly-measured ~2.2-2.3x faster effective update rate on the exact rows
+the fix targets. Whether this counts as "fix wins" per Phase 1's gate depends on which metric the
+paper cares about: mean-reward says ambiguous, best-achievable-policy says a clear, understood win
+for the fix. Per-city loss (`city_1` checked in detail) still shows no separation between
+conditions in either direction — expected, since loss reflects local TD-error fit, not the
+resulting policy's quality, and isn't the right lens for this particular question.
+
+## 12. §11 partially retracted: 2 more seeds break the "clean win" story
+
+**2026-08-05, same session.** Ran 2 more seeds (4, 5) on both conditions — 5 total each, matching
+the ablation script's original design. §11's "best-achievable-round is cleanly, non-overlappingly
+separated in `fix_on`'s favor" **does not hold up.**
+
+| seed | fix_on mean reward | fix_on best (round) | fix_off mean reward | fix_off best (round) |
+|---|---:|---:|---:|---:|
+| 1 | -2741.2 | -120.9 (18) | -2544.1 | -971.5 (11) |
+| 2 | -2575.9 |  -65.5 (17) | -2669.5 | -724.4 (19) |
+| 3 | -2198.7 |  -73.8 (16) | -1728.6 | -147.4 (19) |
+| 4 | **-3821.7** | **-1936.1 (1)** | -2758.6 | -546.5 (13) |
+| 5 | -2158.0 |  -61.6 (5) | -2712.5 | -490.3 (20) |
+
+`fix_on` seed4 is a genuine outlier: reward gets *worse* from round 1 (-1936) through its worst
+point around round 9-10 (-5061), only partially recovers by round 20 (-3400), and never
+approaches the near-optimal range seeds 1/2/3/5 reach — while `city_1`'s local training loss
+stays completely unremarkable throughout (0.20-0.45, no divergence signal at all). This failure
+mode is **invisible to loss monitoring**; only the holdout-reward curve shows it. seed5 also
+breaks the earlier "best round clusters at 16-18" pattern — its best round is round 5, not the
+16-19 window — confirming that clustering was a 3-seed coincidence, not a structural effect of
+training progress.
+
+**Statistics with 5 seeds:**
+- Mean reward: `fix_on` avg -2699.1 (stdev 603.4) vs `fix_off` avg -2482.6 (stdev 383.7).
+  Difference -216.4 against an approximate standard error of ~320 → **|diff|/SE ≈ 0.68, not
+  distinguishable from noise.** Same conclusion as before, now on firmer statistical footing.
+- Best-round: still favors `fix_on` on the **median** (-73.8 vs -546.5) — 4 of 5 `fix_on` seeds
+  still beat every `fix_off` seed on this metric — but no longer *cleanly, non-overlappingly* so,
+  because of the seed4 outlier.
+
+**What's still true, and doesn't depend on how many seeds we ran:** the Q-head weight-delta
+measurement in §11 (rows touched by fewer clients move ~2.2-2.3x faster under masked-head
+aggregation than under naive averaging) is a structural fact about the two aggregation functions,
+confirmed directly from the actual saved weights — not a claim about outcomes across seeds, so it
+isn't affected by this correction. It explains *why* `fix_on` is higher-variance in both
+directions (better peaks **and** a real chance of a seed like 4 that fails outright), which is a
+more accurate summary than §11's "clear win."
+
+**Corrected reading:** this is the plan's "ambiguous / overlapping distributions" case for Phase 1
+— a real, mechanistically-understood tradeoff (higher ceiling, higher variance, occasional
+outright failure) rather than a clean win or loss. Two new open items worth tracking separately
+from the fix-vs-no-fix question: (a) `fix_on` seed4's failure mode — reward degrading over 20
+rounds of apparently-healthy local training is itself concerning and worth its own look,
+independent of the ablation; (b) this is exactly the "single/few seeds can mislead" lesson the
+project has hit repeatedly (§1's single pre-fix seed, the original run-to-run non-determinism) —
+worth being more conservative about trusting n=3 conclusions going forward, even post-fix.
+
+## 13. Minimal reproduction of seed4's failure: 2 cities is already enough
+
+**2026-08-05, same session, immediately after §12.** Isolated the minimum roster that reproduces
+`fix_on` seed4's failure mode, by reusing exactly the per-city seed that produced it: in that run,
+`--seed 4` on a 3-city roster gives `city_1` seed 4, `city_4` seed 5, `city_6` seed 6 (confirmed
+from the `[parallel] city=... seed=...` log lines; `ParallelFederatedServer` derives
+`city_seed = seed + city_index`, §5). Reran with matching seeds on smaller rosters.
+
+**`city_1` completely alone (seed 4, no federation at all — a single client is a no-op for
+aggregation):** stable and excellent. Converges to near-optimal by round 3 (reward -31.1, waiting
+5.1s) and stays there for nearly the whole 20-round run (mostly -15 to -85 reward, ~2000-2140
+vehicles arriving consistently). Loss trends cleanly downward (0.45 → 0.17-0.33). Round 1's local
+loss (0.445468) matches the 3-city run's round-1 `city_1` loss exactly, confirming per-city seeding
+is deterministic regardless of roster composition — so anything that diverges after round 1 is a
+federation effect, not a fluke of which cities happen to be present.
+
+**`city_1` + `city_4` (seeds 4/5 — the minimal possible federation, 2 clients):** severe,
+sustained oscillation for the *entire* run, not a one-time dip. Swings repeatedly between
+near-optimal (round 4: -27.3, round 6: -25.3, round 12: -29.3, round 17: -30.3) and catastrophic
+(round 2: -2911.3, round 5: **-5369.7**, round 10: -4581.0, round 16: -4943.9) — worse amplitude
+than the original 3-city failure. `city_1`'s local loss trends *upward* over the run (0.45 → 1.01
+at round 19), unlike either the 1-city case (trends down) or the original 3-city case (stays flat
+0.20-0.45) — a third, distinct loss signature for a third roster size.
+
+**Conclusion: the instability requires federation, but not any particular combination or count of
+cities beyond the minimum of two.** `city_1` in isolation is fine; the moment a second city enters
+the picture at all, aggregation-driven instability appears immediately, and 2 cities produces
+*more* violent swings than 3 did. This rules out "something specific about the city_1+city_4+city_6
+combination" and confirms the mechanism is federation/aggregation itself — directly supporting the
+client-drift-in-weight-space diagnosis from §11 (the `new_ideeas` list already names FedProx as a
+targeted fix for exactly this failure mode). Practical upshot: `city_1`+`city_4` (2 cities, not 3)
+is now the cheapest available test bed for any follow-up work on this specific instability — same
+cost as before (`city_1` at 16 intersections is the expensive part either way) but genuinely
+minimal, which matters for isolating causes cleanly.
+
+## 14. FedProx swept across mu and a 3rd city: no stabilizing effect
+
+**2026-08-06.** §13 minimally reproduced seed4's failure and named FedProx (the `mu` proximal-term
+mechanism already implemented in `agents/dqn.py::DQNAgent` — `start_round()` snapshots the
+round-start global weights, `optimize()` adds `mu/2 * ||w - w_global||^2` to the loss, wired up
+via `--fedprox_mu`) as the top-priority candidate fix, on the theory that it directly caps the
+client-drift-in-weight-space mechanism §11 confirmed via weight-delta measurement. Tested it here
+for the first time — every prior run had `fedprox_mu=0.0` (a no-op).
+
+**Setup:** same seed-4 repro as §13, `--parallel`, `fedavg`, `lr=3e-4`, 20 rounds,
+`local_episodes=2`. Four `mu` values on the 2-city roster (`environments_c1_4`:
+`city_1`+`city_4`), plus one `mu` value on the 3-city roster (`environments_c1_4_6`:
+`city_1`+`city_4`+`city_6`) to check whether any stabilizing effect seen would generalize past the
+minimal repro.
+
+| roster | mu | mean reward | best round | worst round |
+|---|---:|---:|---:|---:|
+| 2-city | 0.0 (baseline) | -3095.3 | -168.6 | -5031.3 |
+| 2-city | 0.01 | -3148.9 | -29.0 | -4818.7 |
+| 2-city | 0.03 | -2810.6 | -49.7 | -4301.1 |
+| 2-city | 0.1 | -3483.7 | -1866.0 | -5874.2 |
+| 3-city | 0.0 (from §12) | -3821.7 | -1936.1 | — |
+| 3-city | 0.01 | -3791.9 | -1912.6 | -4762.3 |
+
+**No monotonic dose-response, no stabilization at any tested strength:**
+- `mu=0.01` is statistically indistinguishable from `mu=0.0` on the 2-city roster (mean -3149 vs
+  -3095, within round-to-round noise) — matches the theoretical expectation that 0.01 is a very
+  weak pull toward the round-start weights, but shows the mechanism isn't doing anything even at a
+  level that should be safe.
+- `mu=0.03` is the best of the four (mean -2811), but still swings from -50 to -4301 across the
+  same 20 rounds — nowhere close to resolving the oscillation, and the improvement over baseline
+  is small relative to that same run's own round-to-round spread.
+- `mu=0.1` is clearly *worse* on every metric (mean, best, and worst all worse than baseline) —
+  the classic FedProx failure mode of the proximal term being strong enough to fight useful local
+  adaptation, not just excess drift.
+- **The 3-city generalization check is the clearest negative result.** `mu=0.01` on
+  `city_1`+`city_4`+`city_6` reproduces the §12 `mu=0.0` failure almost exactly (mean -3791.9 vs
+  -3821.7, best -1912.6 vs -1936.1) — if the proximal term were damping client drift at all, this
+  is precisely the case that should have shown it, and it produced no detectable difference from
+  doing nothing.
+
+**Caveat:** all of the above is a single seed (4), deliberately the known-hardest case from §13 —
+suggestive, not a multi-seed statistical result. But it's a *consistent* null across 5 runs and
+two roster sizes with no cherry-picking, not a borderline single-sample call.
+
+**Reading:** FedProx, as implemented, is not the fix for this instability. The code is harmless to
+keep (`mu=0.0` is a true no-op, matching every run before this one) but should not be relied on or
+cited as a stability fix. The instability itself is still open — see `new_ideeas`' next item
+(dueling network head), which targets the same action-indexed-head symptom structurally (a value
+stream that aggregates cleanly regardless of action_dim) rather than penalizing drift after the
+fact.
+
+## 15. Dueling network head: the first intervention that actually helps
+
+**2026-08-06/07.** Implemented the dueling head from `new_ideeas` (`agents/networks.py`:
+`NeighborAttentionQNetwork(dueling=True)` splits the final layer into `value_head` (scalar, no
+action_mask, aggregates cleanly across every city regardless of `action_dim`) + `advantage_head`
+(still action-indexed, still masked-head-aggregated same as the plain head), combined as
+`Q = V + A - mean(A)`. Wired through `DQNAgent`/`--dueling`/both servers; masked-head aggregation
+updated to target `advantage_head.weight`/`.bias` instead of `head.4.weight`/`.bias` when dueling
+is on (falls back to plain averaging otherwise, per `masked_head_weighted_average`'s existing
+"key not found" guard -- verified this doesn't silently happen by checking the key names directly
+before running the real experiment). Same seed-4 repro as sec 14, both rosters.
+
+| roster | condition | mean reward | best round | worst round |
+|---|---|---:|---:|---:|
+| 2-city | baseline (mu=0.0, sec 14) | -3095.3 | -168.6 | -5031.3 |
+| 2-city | dueling | -2281.1 | -40.8 | -4693.8 |
+| 3-city | baseline (mu=0.0, sec 12) | -3821.7 | -1936.1 | — |
+| 3-city | dueling | -2469.4 | -244.2 | -4335.2 |
+
+**Consistent, generalizing improvement on both mean and best-round, on both roster sizes** --
+unlike FedProx (sec 14, no effect at any strength) this is a real, structural effect: ~26% better
+mean and ~5x better best round on 2-city; ~35% better mean and ~8x better best round on 3-city.
+Does not eliminate the oscillation (worst-case rounds are still bad, -4694/-4335), but shifts the
+whole distribution up consistently rather than trading peak for stability the way masked-head
+aggregation itself does (sec 11).
+
+**Caveat:** the 3-city baseline (sec 12) used `eval_episodes=3`; every run in this session
+(sec 14 sweep, this section, sec 16) used `eval_episodes=5` (the code's default, unchanged this
+session) -- more eval episodes generally means a less noisy mean estimate, so that one comparison
+has a minor apples-to-apples asterisk. The 2-city comparison has no such issue (both runs this
+session, same protocol). The 3-city gap (-2469 vs -3822) is far too large to be explained by eval
+noise alone.
+
+**Reading:** the first intervention this session that's a clean, structural win rather than a
+wash or a tradeoff. Worth keeping and building on -- see sec 17 for a natural next step
+(combining this with server-side momentum, sec 16).
+
+## 16. Server-side momentum (FedAvgM-style): modest, mixed benefit
+
+**2026-08-06/07.** Implemented `federated/aggregation.py::apply_server_momentum` -- treats
+`agg_state - global_state_before` as this round's pseudo-gradient and applies it through an
+exponentially-weighted velocity buffer (`velocity = beta*velocity_prev + delta; new_state =
+global_state_before + velocity`) instead of jumping straight to the raw aggregate every round.
+`beta<=0` is an exact no-op (unit-verified). Targets a different symptom than dueling or FedProx:
+the *aggregated* model swinging sharply round to round with no matching spike in any individual
+client's local loss (sec 9), by damping the applied update itself at the server rather than
+anything client-side or architectural. Tested `beta=0.9`, same seed-4 repro, both rosters.
+
+| roster | condition | mean reward | best round | worst round |
+|---|---|---:|---:|---:|
+| 2-city | baseline | -3095.3 | -168.6 | -5031.3 |
+| 2-city | momentum (0.9) | -2826.2 | -819.8 | -4344.7 |
+| 3-city | baseline (sec 12) | -3821.7 | -1936.1 | — |
+| 3-city | momentum (0.9) | -3434.7 | -933.4 | -5416.3 |
+
+**Small, consistent mean improvement on both rosters (~9-10%), but a mixed effect on the
+extremes.** 3-city best round improves ~2x (-933 vs -1936); 2-city best round gets *worse* (-820
+vs -169) -- momentum damps the sharp near-optimal peaks along with the crashes, so it doesn't come
+free. Worst-case on 3-city (-5416) is also worse than baseline, so this run's worst-case isn't
+actually being damped there either, just the mean is pulled up a bit overall.
+
+**Reading:** a real but much weaker effect than dueling (sec 15) -- worth keeping as an available
+knob (default off, `beta=0` no-op) but not a standalone fix. This session's note: the 3-city run
+took an unusual wall-clock span (2026-08-06 18:24 -> 2026-08-07 17:11) because the machine went to
+sleep for ~19h between rounds 17 and 18 (confirmed from `training.log` timestamps) -- the process
+itself resumed cleanly with no errors when the machine woke, this is a wall-clock artifact of the
+host machine, not a training issue.
+
+## 17. Where this leaves things: dueling wins, next candidate is combining it with momentum
+
+Ranking of everything tested against the seed-4 repro this session: **dueling (sec 15) > momentum
+(sec 16) > FedProx (sec 14, no effect) / naive full-head averaging (sec 11-13, trades peak for
+stability but doesn't fix the underlying oscillation)**. Dueling and momentum target different
+mechanisms (architecture vs. server-side update damping) and aren't mutually exclusive -- both
+flags (`--dueling`, `--server_momentum`) can be set on the same run. Combining them is the
+obvious next experiment: does momentum's mild worst-case damping stack with dueling's mean/best
+improvement, or does damping dueling's now-larger, more-useful updates just eat back the gain
+dueling provides on its own? Not yet run.
+
+## 18. Dueling + momentum combined: net-negative interaction, confirmed on both rosters
+
+**2026-08-07/09.** Direct test of §17's open question: `--dueling --server_momentum 0.9`
+together, same seed-4 repro, both rosters (3-city leg interrupted by a ~2-day host-machine sleep
+gap mid-run, same as sec 16 — resumed cleanly, no errors).
+
+| roster | condition | mean reward | best round | worst round |
+|---|---|---:|---:|---:|
+| 2-city | baseline | -3095.3 | -168.6 | -5031.3 |
+| 2-city | dueling alone (sec 15) | -2281.1 | -40.8 | -4693.8 |
+| 2-city | momentum alone (sec 16) | -2826.2 | -819.8 | -4344.7 |
+| 2-city | combined | -3163.7 | -1277.7 | -4621.7 |
+| 3-city | baseline (sec 12) | -3821.7 | -1936.1 | — |
+| 3-city | dueling alone (sec 15) | -2469.4 | -244.2 | -4335.2 |
+| 3-city | momentum alone (sec 16) | -3434.7 | -933.4 | -5416.3 |
+| 3-city | combined | -2777.7 | -1256.3 | -4160.4 |
+
+**Consistent finding across both rosters: combined is always worse than dueling alone on mean and
+best round.** On 2-city the interaction is unambiguously bad — combined loses to *both*
+individual interventions on mean and best, and even to plain baseline. On 3-city the picture is
+more nuanced (combined beats momentum-alone and baseline on mean, and has the mildest worst-case
+of the three non-baseline conditions there), but the one comparison that holds in both cases is
+the one that actually matters for picking a method: **dueling alone always beats
+dueling+momentum, on both mean and best round, on both rosters.** Momentum never adds value on
+top of dueling here, and on the smaller roster actively erases most of dueling's gain.
+
+**Reading, confirms sec 17's hypothesis:** dueling's advantage comes from letting the
+advantage-head rows move fast and undamped (same mechanism sec 11 identified for masked-head
+aggregation generally, now shown to extend to the dueling architecture too) — server-side
+momentum's whole design is to damp exactly that kind of fast movement, so stacking it on top of
+dueling works against the thing that makes dueling effective. **Practical recommendation: use
+`--dueling` alone. Do not combine it with `--server_momentum`** — at best neutral, at worst it
+gives back most of dueling's improvement, with no case observed where it helps.
+
+## 19. Three more `new_ideeas`, alone and combined with dueling: n-step is the new headline result
+
+**2026-08-09/10.** Implemented the remaining `new_ideeas`/Feature-Development candidates —
+n-step returns (`--n_step`, per-intersection sliding-window return accumulation in
+`agents/dqn.py`, bootstraps with `gamma**n`), server-side pseudo-gradient clipping
+(`--pseudo_grad_clip`, `federated/aggregation.py::clip_pseudo_gradient`, threshold 1.5 chosen
+from real round-to-round delta norms measured on an existing dueling checkpoint sequence,
+~1.2-3.3), and an EMA-averaged eval snapshot (`--eval_ema_decay`, evaluation-only, never touches
+what's broadcast to clients). All three default to an exact no-op, unit-tested. 12-run matrix:
+each alone, and each combined with dueling (the sec 15 winner), both rosters, same seed-4
+methodology.
+
+**Full results, both rosters, sorted best-to-worst mean reward:**
+
+| roster | condition | mean | best | worst |
+|---|---|---:|---:|---:|
+| 2-city | **dueling+n_step** | **-1327.5** | **-20.8** | **-3541.2** |
+| 2-city | n_step alone | -2134.0 | -23.3 | -4007.5 |
+| 2-city | dueling alone (sec 15) | -2281.1 | -40.8 | -4693.8 |
+| 2-city | dueling+ema_eval | -2314.7 | -116.9 | -3604.8 |
+| 2-city | dueling+gradclip | -2494.8 | -71.2 | -4858.3 |
+| 2-city | gradclip alone | -2551.3 | -56.6 | -4738.8 |
+| 2-city | momentum alone (sec 16) | -2826.2 | -819.8 | -4344.7 |
+| 2-city | ema_eval alone | -2897.7 | -2336.2 | -3495.3 |
+| 2-city | baseline | -3095.3 | -168.6 | -5031.3 |
+| 2-city | dueling+momentum (sec 18) | -3163.7 | -1277.7 | -4621.7 |
+| 3-city | **dueling+n_step** | **-2300.7** | **-18.2** | **-4074.0** |
+| 3-city | dueling alone (sec 15) | -2469.4 | -244.2 | -4335.2 |
+| 3-city | dueling+gradclip | -2538.3 | -25.3 | -5356.0 |
+| 3-city | ema_eval alone | -2763.0 | -2249.0 | -3678.6 |
+| 3-city | dueling+momentum (sec 18) | -2777.7 | -1256.3 | -4160.4 |
+| 3-city | n_step alone | -2845.8 | -23.0 | -4245.3 |
+| 3-city | dueling+ema_eval | -3064.2 | -2233.2 | -3852.9 |
+| 3-city | momentum alone (sec 16) | -3434.7 | -933.4 | -5416.3 |
+| 3-city | gradclip alone | -3679.2 | -1768.5 | -5086.1 |
+| 3-city | baseline (sec 12) | -3821.7 | -1936.1 | — |
+
+**Headline result: `dueling+n_step` is a genuine, generalizing synergy — #1 on mean AND best
+round on both rosters, not just an average of its two ingredients.** On 2-city its mean
+(-1327.5) beats *both* dueling alone (-2281.1) and n_step alone (-2134.0) by a wide margin, not
+just splits the difference — same qualitative pattern on 3-city (-2300.7 vs -2469.4 / -2845.8).
+Best round on 3-city (-18.2) is the best single number recorded anywhere in this entire
+investigation, across every condition tested. This is the opposite outcome from
+dueling+momentum (sec 18): two mechanisms that stack constructively instead of fighting.
+**Mechanistic read:** n-step returns give a cleaner, less-noisy training signal per transition
+(the credit-assignment problem n-step is designed to fix), while dueling lets the head
+specialize fast per action; the two don't compete for the same "resource" the way momentum's
+damping directly opposes dueling's fast-movement mechanism (sec 18's explanation) — plausible
+they're complementary because one improves what gets learned per step and the other improves how
+fast the network can act on it.
+
+**n-step alone is also the strongest single new-idea result** — better than dueling alone on
+every metric on 2-city, and the best best-round of any single (non-combined) intervention on
+3-city (-23.0). Cheap, no architecture change, and combines the best of anything tested.
+
+**gradclip and ema_eval, alone or combined with dueling, are unconvincing:**
+- `pseudo_grad_clip=1.5` alone helps meaningfully on 2-city but is barely distinguishable from
+  baseline on 3-city — the threshold was calibrated from a 2-city checkpoint sequence and
+  evidently doesn't transfer; a fixed clip norm doesn't generalize across roster sizes the way
+  dueling and n-step's mechanisms do. Combined with dueling: roughly neutral on 2-city, mixed
+  (much better best-round, worse mean/worst) on 3-city — no clean win either way.
+- `eval_ema_decay=0.9` alone does exactly what its mechanism predicts and nothing more: compresses
+  the *reported* variance (far-and-away best worst-case on both rosters, far-and-away worst
+  best-case on both rosters) without changing training at all, since it's evaluation-only by
+  design (see the implementation note in `PROJECT_NEXT_STEPS.md`). Combined with dueling: decent
+  on 2-city (keeps ~dueling's mean, damps the worst-case, doesn't sacrifice best-case nearly as
+  much as ema_eval alone), but net-negative on 3-city (worse mean than either ingredient alone,
+  best-case collapses back to ema_eval-alone levels). Not reliable enough to recommend generally.
+
+**Practical recommendation, updated: use `--dueling --n_step 3` together.** This supersedes the
+sec 15 "use dueling alone" recommendation — n-step wasn't tested yet when that was written, and
+the combination is unambiguously better than dueling alone on every metric, on both rosters
+tested. `--server_momentum` and `--pseudo_grad_clip` combined with dueling remain not
+recommended (sec 18, and gradclip's inconsistency above); `--fedprox_mu` remains not recommended
+(sec 14).
+
+## 20. Phase 1 masked-head ablation redone on `dueling+n_step`, three roster sizes: the fix's
+    benefit shrinks as the roster grows
+
+**2026-08-11/12, run unattended overnight.** Every prior Phase 1 ablation (§1, §8, §11, §12) was
+measured on the noisy pre-dueling/pre-n_step baseline. With §19's validated best config
+(`--dueling --n_step 3`) now established, redid the fix-on vs `--disable_head_fix` comparison on
+top of it — 5 seeds each on the 2-city and 3-city rosters (matching the project's standard 5-seed
+methodology), plus a first-ever look at the full 7-city paper roster (2 seeds, `base_dir
+environments`) since no dueling/n_step data existed there at any seed count. All runs `--parallel`,
+`fedavg`, `lr=3e-4`, 20 rounds, `local_episodes=2`. 2-city fix-on reuses the 5 seeds from §19's
+validation batch; every other condition is fresh.
+
+**Summary (mean/std across seeds):**
+
+| roster | condition | mean reward | std (across seeds) | best-round mean |
+|---|---|---:|---:|---:|
+| 2-city (n=5) | fix-ON | -2030.4 | 515.0 | -43.9 |
+| 2-city (n=5) | fix-OFF | -3004.0 | 374.0 | -906.3 |
+| 3-city (n=5) | fix-ON | -2590.6 | 498.9 | -172.7 |
+| 3-city (n=5) | fix-OFF | -2772.5 | 286.2 | -726.8 |
+| 7-city (n=2) | fix-ON | -7602.8 | 483.3 | -4038.9 |
+| 7-city (n=2) | fix-OFF | -6895.1 | 629.1 | -3762.5 |
+
+**Per-seed numbers (2-city fix-ON reuses §21's 5-seed validation set):**
+
+| roster | condition | seed1 | seed2 | seed3 | seed4 | seed5 |
+|---|---|---:|---:|---:|---:|---:|
+| 2-city | fix-ON mean | -2455.2 | -1667.1 | -1954.8 | -1327.5 | -2747.4 |
+| 2-city | fix-ON best | -13.5 | -18.9 | -142.8 | -20.8 | -23.5 |
+| 2-city | fix-OFF mean | -3399.4 | -2471.7 | -2792.0 | -3455.9 | -2901.2 |
+| 2-city | fix-OFF best | -753.5 | -52.3 | -1333.0 | -2352.4 | -40.2 |
+| 3-city | fix-ON mean | -2729.2 | -3368.2 | -1864.8 | -2300.7 | -2690.2 |
+| 3-city | fix-ON best | -32.8 | -790.1 | -10.2 | -18.2 | -12.0 |
+| 3-city | fix-OFF mean | -2526.2 | -2602.4 | -3163.0 | -3074.4 | -2496.4 |
+| 3-city | fix-OFF best | -750.9 | -1229.0 | -14.7 | -1613.1 | -26.1 |
+| 7-city | fix-ON mean | -7119.5 | -8086.1 | — | — | — |
+| 7-city | fix-ON best | -3125.3 | -4952.5 | — | — | — |
+| 7-city | fix-OFF mean | -6266.0 | -7524.1 | — | — | — |
+| 7-city | fix-OFF best | -1877.2 | -5647.8 | — | — | — |
+
+(3-city fix-ON seed4 reused from §19's matrix, `results/run_2026_08_10-07_16_31`; every other cell
+is a fresh run from this batch, run directories listed in §20's companion notes below.)
+
+**2-city: a real, statistically clean win for the fix, for the first time in this project's
+history.** Mean-reward gap (974) against combined standard error (~285) gives **|diff|/SE = 3.42**
+— compare to §12's final ambiguous read of 0.68 on the pre-dueling/n_step baseline. Best-round
+also wins decisively (-44 vs -906). This is the first time the masked-head fix has shown an
+unambiguous *mean*-reward win, not just a peak-vs-stability tradeoff — strongly suggests the
+ambiguity in every earlier ablation (§8, §11, §12) was substantially the underlying training
+instability adding noise on top of the fix's real effect, now that dueling+n_step has cleaned that
+noise up.
+
+**3-city: mean reward is back to ambiguous (|diff|/SE = 0.71, same order as the old inconclusive
+result), but best-round still wins clearly** (-173 vs -727). This reproduces the *original* §11
+pattern almost exactly (fix reaches a better peak reliably, doesn't move the round-to-round mean
+outside noise) — on a much cleaner baseline than §11 had, which strengthens confidence this
+specific pattern (peak-win, mean-ambiguous) is a real property of the 3-city roster/mechanism
+combination, not just noise from the old instability.
+
+**7-city: fix-off looks numerically better on this data (|diff|/SE = 1.26) — but this is not a
+trustworthy read, only a flag.** n=2 seeds gives essentially no statistical power; a ratio of 1.26
+on 2 samples is not meaningfully different from n=5's noise floor. Checked whether the two runs
+hitting near -10000 (`fixon_seed2`, `fixoff_seed1`) were a reward-clipping/gridlock-ceiling
+artifact — they are not: `fixon_seed2` spends nearly the *entire* 20-round run in the -5000 to
+-10000 band (not a one-round spike), and `fixoff_seed1`'s -10012.6 is only its first round, which
+then recovers substantially (down to -1877 by round 5). Real signal, just very noisy and far from
+converged — 20 rounds is evidently nowhere near enough for the full 7-city roster the way it is
+for 2-3 cities. Absolute reward scale here (-6000 to -10000 range throughout) also dwarfs the
+2-city/3-city runs' typical range, consistent with CLAUDE.md's note that 7-city Phase 1 needs its
+full standard treatment (5 seeds, likely more rounds) before trusting any number from it.
+
+**Reading:** the masked-head fix's benefit appears to shrink as roster size grows — clean mean-
+reward win at 2 cities, peak-only win at 3 cities, unclear-to-negative at 7 (on statistically thin
+data). This is a genuinely interesting pattern worth reporting either way it resolves: possibly the
+row-sparsity mechanism the fix targets (§2, §9) matters more when action-space heterogeneity is
+concentrated across fewer clients, and gets diluted/complicated as more, more-varied clients enter
+the aggregation. **Not yet a basis for a paper claim at 7-city** — needs 3+ more seeds (bringing it
+to the standard 5) and likely more rounds before the 7-city number can be trusted at all. The
+2-city and 3-city results, by contrast, are on solid footing (5 seeds each, matching project
+standard) and are ready to report as-is.
+
+**Run directories (for re-derivation):**
+`2city_fixoff`: seed1 `run_2026_08_11-10_23_10_1199787`, seed2 `..._1199786`, seed3 `..._1199788`,
+seed4 `run_2026_08_11-11_52_39_1220777`, seed5 `run_2026_08_11-11_55_34_1224641`.
+`3city_fixon`: seed1 `run_2026_08_11-13_21_10_1250573`, seed2 `..._1250574`, seed3
+`run_2026_08_11-15_16_22_1280250`, seed5 `run_2026_08_11-15_16_27_1280445` (seed4 per above).
+`3city_fixoff`: seed1 `run_2026_08_11-17_10_58_1312435`, seed2 `..._1312436`, seed3
+`run_2026_08_11-18_38_24_1339061`, seed4 `run_2026_08_11-18_38_30_1339260`, seed5
+`run_2026_08_11-19_23_58_1358493`. `7city_fixon`: seed1 `run_2026_08_11-20_46_18_1384725`, seed2
+`run_2026_08_11-22_54_47_1419099`. `7city_fixoff`: seed1 `run_2026_08_12-01_03_53_1448113`, seed2
+`run_2026_08_12-02_44_57_1472126`. All under `results/`.
+
+## 21. `dueling+n_step` 5-seed validation (2-city): holds up, no seed4-style outlier
+
+**2026-08-10, run between §19 and §20, written up here for completeness.** Before trusting
+`dueling+n_step` as the new recommended config (§19 found it on a single seed, 4 — deliberately
+the known-hardest case per §13, but still one sample), validated it across 5 seeds on the 2-city
+roster (`environments_c1_4`), same 20-round/`fedavg`/`lr=3e-4` methodology throughout. Seed 4
+reused from §19's matrix (`results/run_2026_08_10-05_37_47`, mean -1327.5); seeds 1/2/3/5 run
+fresh.
+
+| seed | mean reward | best round | worst round |
+|---|---:|---:|---:|
+| 1 | -2455.2 | -13.5 | -5440.3 |
+| 2 | -1667.1 | -18.9 | -4787.1 |
+| 3 | -1954.8 | -142.8 | -4265.1 |
+| 4 | -1327.5 | -20.8 | -3541.2 |
+| 5 | -2747.4 | -23.5 | -5003.3 |
+
+**Mean across 5 seeds: -2030.4 (std 515.0).** Every seed individually beats the single-seed
+baseline (-3095.3), dueling-alone (-2281.1), and n_step-alone (-2134.0) numbers from §15/§19 —
+no seed behaves like §12's seed4 outlier that reversed the FedProx-era ablation's conclusion.
+Confirms this is a genuine, seed-robust result, not a lucky draw — the number this doc and
+`PROJECT_NEXT_STEPS.md` cite as `dueling+n_step`'s validated performance. This 5-seed set is also
+what §20's Phase 1 re-ablation's 2-city fix-ON arm reuses directly (no need to rerun it there).
+
+## 22. Infrastructure: concurrent batch runner (`analyse/run_concurrent_batch.sh`) — a real but
+    more modest speedup than first measured, plus a real bug caught and fixed
+
+**2026-08-10/11.** Investigated whether training was leaving CPU/RAM headroom unused. Measured
+(single job running): each city worker uses only ~13-15% of one core (SUMO/libsumo per-tick
+stepping is the bottleneck, not CPU/PyTorch compute) and ~2.5-3.5GB RAM per run — on a 12-core/
+15GB-RAM dev machine, both facts said an idle-time win was available by running multiple
+independent jobs (seed sweeps, flag ablations) concurrently instead of the sequential-only pattern
+every earlier batch in this doc used.
+
+**Real bug found and fixed while wiring this up:** `experiments/federated_training.py::main()`
+computed `run_dir` as `results/run_<timestamp>` with only second-granularity timestamps. Two
+processes launched within the same wall-clock second (exactly what a batch script does) computed
+the *identical* directory string; `os.makedirs(run_dir, exist_ok=True)` then let the second
+process silently write into the first's directory — interleaved checkpoints/logs/history from two
+different seeds merged into one folder, no error, no warning. Caught this by accident (three
+concurrently-launched seed runs collided; two of the three failed with a
+`RuntimeError: Parent directory .../clients does not exist` from the third process's directory
+having been deleted out from under them) before it could silently corrupt a real result. **Fix:**
+suffix `run_dir` with `os.getpid()` and make directory creation strict (`exist_ok=False`), so a
+collision fails loudly instead of merging data. Verified with a real 2-process concurrent launch
+(two `federated_training` processes started in the same second correctly got distinct
+`run_dir`s) before trusting the mechanism on any real experiment.
+
+**Speedup — measured end-to-end, not estimated.** Batch: seeds 1/2/3 concurrent (3-way) + seed 5
+solo (trailing, once a slot freed), all `dueling+n_step` 2-city, `MAX_CONCURRENT=3`.
+
+| | duration | pace |
+|---|---:|---:|
+| seed1 (concurrent) | 161.6 min | 8.08 min/round |
+| seed3 (concurrent) | 160.9 min | 8.04 min/round |
+| seed2 (concurrent) | 158.4 min | 7.92 min/round |
+| seed5 (solo, trailing) | 100.6 min | 5.03 min/round |
+
+Solo pace (5.03 min/round) matches every prior solo run in this doc almost exactly — confirms the
+concurrent runs' slowdown (~8.0 min/round, **~60% slower per run**) is real per-run contention, not
+a measurement artifact. An early same-batch sample (first ~2 rounds only) had suggested only ~20%
+slowdown — contention evidently worsens as a run progresses, plausibly from growing replay-buffer
+memory pressure across the 3 concurrent processes. **Net result over the whole 4-job batch: 259
+min actual wall-clock vs. ~400 min estimated if run fully sequentially at the solo baseline — a
+real ~1.5x speedup**, meaningfully better than sequential despite the per-run tax, but well short of
+the near-linear speedup the idle-CPU/RAM-headroom framing alone would have predicted.
+
+**Resulting artifact:** `analyse/run_concurrent_batch.sh` (persisted in the repo, not scratchpad;
+documented in `CLAUDE.md` under "Common commands") is now the project's default way to run any
+multi-run batch — `MAX_CONCURRENT=3` default, override per-machine/per-roster-size. Every batch
+from §19's 5-seed validation onward that used it is noted as such; every batch through §18 predates
+it and ran strictly sequentially.
+
+## 23. 7-city Phase 1 ablation brought to 5 seeds: the fix's mean-reward benefit doesn't just
+    shrink with roster size, it vanishes — but the best-round win survives at every scale tested
+
+**2026-08-13.** Ran the 3 remaining seeds per arm (seeds 3/4/5, fix-on and fix-off, 6 runs total)
+flagged as the standing next action in §20/item 6 above, `--dueling --n_step 3`, 7-city roster
+(`base_dir environments`), `--parallel fedavg lr=3e-4`, 20 rounds. Used
+`analyse/run_concurrent_batch.sh` at `MAX_CONCURRENT=2` (not the originally-planned 1) — real-time
+`top`/`ps` monitoring during the first job showed the 6 city-worker processes are bursty (heavy
+during backprop, idle during SUMO/libsumo per-tick stepping), not steadily CPU-bound the way §22's
+`MAX_CONCURRENT=1` recommendation for 7-city assumed; load average stayed around 4-5 of 12 cores
+with 2 concurrent 7-city jobs running. RAM was the tighter constraint (~9GB/15.8GB used with 2 jobs
+active, 12 city workers total) but never hit swap. Net result: all 6 runs finished in ~7h wall-clock
+(11:59 → 19:00) rather than the ~12h sequential estimate — a real, measured speedup, consistent with
+§22's general finding that concurrency helps even when a single job looks compute-heavy on paper.
+
+**Per-seed numbers (new seeds 3/4/5; seeds 1/2 from §20, reused not rerun):**
+
+| condition | seed1 | seed2 | seed3 | seed4 | seed5 |
+|---|---:|---:|---:|---:|---:|
+| fix-ON mean | -7119.5 | -8086.1 | -7052.6 | -5330.2 | -7003.5 |
+| fix-ON best | -3125.3 | -4952.5 | -1404.0 | -409.9 | -1018.4 |
+| fix-OFF mean | -6266.0 | -7524.1 | -7855.9 | -6375.4 | -7137.0 |
+| fix-OFF best | -1877.2 | -5647.8 | -4927.3 | -3399.6 | -3670.1 |
+
+**Full 5-seed summary:**
+
+| condition | mean reward | std (across seeds) | best-round mean |
+|---|---:|---:|---:|
+| fix-ON | -6918.4 | 889.0 | -2182.0 |
+| fix-OFF | -7031.7 | 624.5 | -3904.4 |
+
+**Mean reward: no signal at all, |diff|/SE = 0.23** — weaker than even 3-city's already-ambiguous
+0.71 (§20), and a long way from 2-city's clean 3.42. The 2-seed read that triggered this batch
+(fix-off looking *better*, |diff|/SE=1.26, §20) does not survive more data — it was noise, as
+flagged at the time. With the full 5 seeds the direction is back to fix-on nominally ahead (-6918
+vs -7032) but the gap is small relative to the per-seed spread on both arms; this is a genuine null
+result on mean reward at 7-city, not a coin-flip that happens to have landed near zero.
+
+**Best-round: fix-on still wins clearly, gap 1722 (-2182 vs -3904).** This is the third roster size
+in a row (2-city, 3-city, 7-city) where the fix reaches a meaningfully better peak, even as its
+effect on the round-to-round mean disappears. In relative terms the peak win *also* shrinks with
+scale — roughly 95% better at 2-city, 76% at 3-city, 44% at 7-city (comparing each roster's fix-on
+vs fix-off best-round mean) — but it never crosses over to a wash or a loss at any scale tested.
+
+**Reading — this resolves §20's open question and sharpens the paper's honest framing.** The
+masked-head fix's benefit on *mean* reward monotonically shrinks with roster size (3.42 → 0.71 →
+0.23) and is genuinely gone by 7 cities, not just harder to see. But its benefit on *best achieved
+policy* is real and persists at every roster size tested, shrinking in magnitude but never
+disappearing. The honest claim this data supports: **the masked-head fix reliably helps a
+federated run reach a better peak policy, at any roster size tested, but its effect on
+average/expected round-to-round performance is roster-size-dependent and not distinguishable from
+noise at the full 7-city scale.** This is a substantive, reportable finding on its own — a
+conditional result, not a clean "fix wins," consistent with the plan's own guidance (`PROJECT_NEXT_STEPS.md`
+Phase 1 decision gate) for treating this as legitimate rather than something to keep chasing more
+seeds to reverse. All three roster sizes (2/3/7-city) now have the standard 5 seeds per arm — no
+roster in the Phase 1 ablation needs more data to be trustworthy.
+
+**Run directories (new seeds 3/4/5 only; seeds 1/2 listed in §20):**
+`fixon7_seed3` `run_2026_08_13-12_01_38_3778`, `fixon7_seed4` `run_2026_08_13-12_01_38_3779`,
+`fixon7_seed5` `run_2026_08_13-14_37_48_33224`, `fixoff7_seed3` `run_2026_08_13-14_38_01_33418`,
+`fixoff7_seed4` `run_2026_08_13-16_36_52_54700`, `fixoff7_seed5` `run_2026_08_13-17_07_13_59988`.
+All under `results/`. Batch log: `results/phase1_7city_seeds345.log`.
+
+## 24. Major bug found while starting Phase 2: the `fixed_time` rule-based baseline never actually
+    ran fixed-time control — every `fixed_time` number in this project's history is invalid
+
+**2026-08-13.** Picked up item 5 from "Open questions" (`baseline_max_pressure`'s implausible
+`reward=-0.34, waiting_time=2.9s` numbers, flagged since §1, 7-city, never investigated) while
+Phase 2's 7-city strategy-comparison batch was being scoped. Reproduced cheaply via
+`--baseline_controller max_pressure` (no training needed, ~15s). Then compared against
+`--baseline_controller fixed_time` under the *exact same* code path (same holdout city, same
+episode count) rather than cross-referencing old numbers from a different run configuration —
+`fixed_time` came back `reward=-9995.52, waiting_time=1900.21s, arrived=241`, i.e. near-total
+gridlock, a ~4-order-of-magnitude gap from `max_pressure`. Both numbers individually matched
+historical citations (§1's `baseline_fixed_time`: reward -9996), so this wasn't a fluke of this
+session — it's what the project has been reporting all along.
+
+**Root cause (three-layer bug, traced with a debug call-counter, not guesswork):**
+`HoldoutEvaluator._evaluate_policy` (`federated/evaluator.py`) toggles rule-based-baseline mode via
+`if hasattr(env, "fixed_ts"): env.fixed_ts = (policy_name == "fixed_time")` — this is meant to make
+the underlying `sumo_rl.SumoEnvironment` skip applying any external action and let SUMO run its own
+native default signal-timing program, which is what "fixed-time control" is supposed to mean.
+Three independent bugs combined to make this toggle a complete no-op on the real pipeline:
+1. **`MultiAgentFederatedWrapper`, `ActionMaskPadder`, `CommDropoutWrapper`, and
+   `RewardShapingWrapper`** (`environments/federated_env.py`, `federated/comm_dropout.py`) each
+   wrap the raw SUMO env and each define `__getattr__` to delegate attribute *reads* down to
+   `self.env` — but none of them delegates attribute *writes*. `env.fixed_ts = True` on any of
+   these wrapper objects therefore just creates a new same-named instance attribute on the
+   wrapper's own `__dict__`, shadowing all future reads (so `hasattr`/`getattr` on the wrapper
+   look correct) while never reaching the real `SumoEnvironment` object underneath. The holdout
+   evaluator's env is `CommDropoutWrapper(ActionMaskPadder(MultiAgentFederatedWrapper(raw_env)))`
+   (see `make_holdout_evaluator`'s `build_holdout_env` closure) — three layers deep, so this bug
+   fired at every layer simultaneously, and the flag never once reached `raw_env.fixed_ts`.
+2. Even had the flag reached the raw env, `sumo_rl.environment.env.SumoEnvironment.step()`'s
+   multi-agent branch (used by this entire federated pipeline; the single-agent branch is legacy)
+   applied actions unconditionally — `if self.traffic_signals[ts].time_to_act: self._apply_actions(...)`
+   — with no `if not self.fixed_ts:` guard, unlike the single-agent branch a few lines above it
+   which has one. Multi-agent `fixed_ts` was silently a dead flag at the environment level too.
+3. Net effect: for `policy_name == "fixed_time"`, `HoldoutEvaluator._policy_action`'s fallback
+   (`return int(valid[0])`, i.e. "always the first valid action") was the *only* thing determining
+   behavior — a "never switch off the first phase" degenerate policy, not real fixed-time signal
+   timing. This produces exactly the catastrophic gridlock numbers on record.
+
+**Fix:** added a `fixed_ts` `@property` (get + set, forwarding to `self.env.fixed_ts`) to all four
+wrapper classes, and added the missing `if not self.fixed_ts:` guard around the multi-agent
+action-application loop in `SumoEnvironment.step()`, mirroring the existing single-agent guard.
+Verified with a debug call-counter on `_apply_actions` that it now fires exactly 0 times across a
+full 720-step fixed-time episode (was 11520 = 16 ts × 720 steps before the fix), and that a
+manually-driven probe env shows the SUMO traffic light actually cycling through many distinct
+phase indices under `fixed_ts=True`, not frozen on one. Confirmed the fix doesn't touch the
+trained-model path: `fixed_ts` defaults to `False`, the new guard's `if not self.fixed_ts` branch
+still applies actions exactly as before, and a 1-round real training smoke test
+(`environments_c1_4`, `--dueling --n_step 3`) completed normally with healthy varied action
+distributions after the fix. (Note: `pytest tests/` has 3 pre-existing failures unrelated to this
+fix — they import `sumo_rl` from a different, stale checkout at
+`/mnt/c/Users/Deea/SUMO/SUMO_Reinforcement_learning_traffic` that this machine also has installed
+editable, not this repo's local `sumo_rl/`; confirmed by the traceback's file paths. Pre-existing
+environment quirk, not something this session introduced or fixed.)
+
+**Numbers, same holdout city / episode count, before vs. after the fix:**
+
+| controller | reward (before → after) | waiting_time (before → after) | arrived (before → after) |
+|---|---:|---:|---:|
+| `fixed_time` | -9995.52 → **-2.73** | 1900.21s → **6.97s** | 241 → **1439** |
+| `max_pressure` | -0.34 (unaffected — this controller's own logic was always correct) | 2.91s | 1462 |
+
+**Why this matters far beyond fixing one number.** Real fixed-time control on this network turns
+out to be *good* — nearly matching `max_pressure`, not four orders of magnitude worse. Every
+`fixed_time` citation anywhere in this project's history (§1's Phase 1 rule-based reference,
+Phase 3's planned "trained policies should beat fixed-time" sanity floor) was measuring the broken
+degenerate policy, not real fixed-time control, and needs to be treated as invalid, not just
+imprecise. **More importantly: with a correct `fixed_time` number now available, the current
+7-city trained federated DQN (§23: mean reward -6918.4, best-round -2182.0) is dramatically
+*worse* than both rule-based baselines** (`fixed_time` -2.73, `max_pressure` -0.34) **on this same
+holdout city.** This was structurally invisible before today, since the only baseline comparison
+point was itself broken in a way that made the DQN look relatively less bad than it apparently is.
+This is a significant, previously-hidden finding that argues for treating "does the trained policy
+even beat simple rule-based control" as a live open question requiring its own investigation
+before sinking more compute into aggregation-strategy comparisons that implicitly assume the
+trained model is already in a competitive regime.
+
+**Not yet done:** the `fixed_time`/`max_pressure` numbers above are single-episode, non-seeded
+(deterministic eval, `deterministic_eval=True` means episodes only vary if `eval_seed_base` offset
+changes, and neither rule-based controller has any stochastic component, so std=0.0 here is
+expected, not a bug) — fine for confirming the bug and its fix, not yet run with proper multi-seed
+rigor or folded into a full baseline table. Also not yet checked: whether this same bug affected
+any *other* code path relying on `fixed_ts` (grep shows only the evaluator uses it), or whether the
+2-city/3-city Phase 1 rosters would show the same DQN-loses-to-baseline pattern (not yet measured
+there).
+
+## 25. Multi-seed follow-up on §24: the DQN-loses-to-baseline finding is real and seed-robust on
+    7-city, and the picture is different (and more nuanced) at 2-city
+
+**2026-08-13, same session as §24.** Varying `--eval_sumo_seed` (1-5) *does* perturb the
+deterministic rule-based controllers slightly (confirms SUMO's own seed affects something even
+though the route file's vehicle demand is otherwise deterministic — small but real spread, not
+identical runs), so this is a legitimate multi-seed check, not 5 copies of the same number.
+
+**7-city holdout (`city_5_holdout`, the real paper holdout), 5 seeds each:**
+
+| controller | mean reward | std |
+|---|---:|---:|
+| `fixed_time` | -2.250 | 0.505 |
+| `max_pressure` | -0.044 | 0.016 |
+| trained DQN (§23, 5 seeds) | -6918.4 | 889.0 |
+
+Gap is enormous and the baselines' variance is tiny relative to it — this is not a noisy read. **On
+7-city, the trained DQN does not beat either rule-based baseline, not even close, at any seed
+tested, mean or best-round** (DQN best-round -2182.0 is still ~550x worse than `fixed_time`'s worst
+seed).
+
+**2-city (`environments_c1_4`) — important methodological caveat first:** the baseline-controller
+path's holdout-city selection (`make_holdout_evaluator` in `experiments/federated_training.py`)
+falls back to a *compatible* city when the true `city_5_holdout`'s action space is wider than the
+roster's global action_dim — for the 2-city roster (`city_1`+`city_4`, global action_dim capped at
+5) it silently evaluates on `city_1` instead, logged as `"Using 'city_1' as evaluation city ...
+(compatibility fallback)"`. **`city_1` is one of the 2-city roster's own *training* cities, not a
+held-out one** — this fallback affects the *trained* model's own per-round eval during real 2-city
+training runs too (worth independently confirming this is really what §19/§20/§21's 2-city numbers
+were evaluated against, since "holdout" in this project's vocabulary may not mean what it's assumed
+to mean for the smaller rosters — flagging as a new open item, not yet confirmed).
+
+With that caveat, on `city_1` as the eval city: `fixed_time` reward=-563.77, `max_pressure`
+reward=-256.93 (single seed only, not yet a 5-seed check). Compare against the 2-city trained DQN's
+own 5-seed numbers on this same fallback city (§21): **mean -2030.4 (worse than both baselines,
+same direction as 7-city) but best-round -43.9 (better than both baselines — the opposite of
+7-city).**
+
+**Reading:** the roster-size pattern from §20/§23 (masked-head fix's benefit shrinking with scale)
+now has a companion pattern for absolute competitiveness against simple heuristics: **at 2-city,
+the trained DQN's peak performance can beat simple rule-based control even though its average
+performance can't (consistent with a policy that's still unstable round-to-round but capable of
+good policies); at 7-city, the DQN does not beat rule-based control even at its best round out of
+20 — it isn't just noisier, it's uniformly worse.** This is consistent with (though not proof of)
+a scaling/sample-efficiency problem — 20 rounds may simply be far short of enough for a 7-city,
+16-way-heterogeneous-action-space shared policy to reach competence, whereas 2 cities is a much
+easier learning problem. Not yet root-caused further (e.g. not checked: does more rounds close the
+gap on 7-city, or is there a structural ceiling).
+
+**Open item (1) confirmed, not just suspected:** checked `results/run_2026_08_10-02_20_32/training.log`
+(a real 2-city `environments_c1_4` training run, not just the baseline-controller probe) —
+`WARNING | Holdout evaluator city is incompatible (dims_match=True, holdout_action_dim=8,
+global_action_dim=5). Falling back to a compatible city from base dirs.` followed by `Using
+'city_1' as evaluation city for this run (compatibility fallback).` **Every 2-city (and, unverified
+but structurally identical, likely every 3-city) result anywhere in this document — §6 onward, all
+of §15/§16/§18/§19/§20/§21's dueling/n_step/momentum/masked-head validations on the 2-city roster —
+was evaluated in-distribution on `city_1`, one of the 2-city roster's own training cities, not a
+genuinely unseen holdout.** This does **not** invalidate the fix-on/fix-off or config ablation
+*comparisons* themselves (both arms of every such comparison used the identical fallback city, so
+the relative read is still fair) — but any framing of those results as "generalizes to an unseen
+city" is incorrect and should be corrected to "evaluated in-distribution on a training city" until
+this is fixed (e.g. by capping the global action_dim padding differently, or accepting the
+holdout's wider action space and padding other cities up to it instead of down). `CLAUDE.md`'s
+architecture section states city_5_holdout is "auto-excluded from training and reserved for
+HoldoutEvaluator" without this caveat — needs updating.
+
+**Remaining open items:** (2) 3-city roster's fallback eval city and DQN-vs-baseline comparison not
+yet run. (3) whether more training rounds closes the 7-city gap is untested — the current 20-round
+budget may simply be too short for this roster size, independent of anything the
+aggregation-strategy comparison is testing. (4) whether the 7-city roster itself (which does use
+the true `city_5_holdout`, action_dim=8 matching) is the only trustworthy "real holdout" data in
+this entire document — worth an explicit audit of which past results used a true holdout vs. the
+`city_1` fallback before writing the paper's evaluation-methodology section.
+
+## 26. Mechanism dig on §25's 7-city gap: not a collapsed/degenerate policy, not a confidence
+    problem — reward decomposition points at residual end-of-episode congestion, cause still open
+
+**2026-08-13, zero new training compute — reused existing checkpoints.** Before spending hours on
+longer 7-city runs, loaded the actual best-ever 7-city checkpoint on disk (`fixon7_seed4` from
+§23/§25, `results/run_2026_08_13-12_01_38_3779/global_round_014.pth`, round 14's -409.9 was that
+run's best of 20) and re-ran it through the exact same `HoldoutEvaluator` path used in training, to
+directly inspect what the policy is actually doing rather than only looking at the scalar reward.
+
+**Ruled out: policy collapse.** Action distribution across all 16 intersections is diverse (e.g.
+`A0: {4: 198, 0: 436, 7: 1, 5: 71, 1: 14}`) — not stuck on one action like §24's pre-fix bug. Vehicle
+throughput is close to the heuristics': 1384 arrived vs. `max_pressure`'s 1462 / `fixed_time`'s
+~1439-1441 on the same city. The policy is functioning, not broken.
+
+**Ruled out (surprisingly): low Q-value confidence as the scale-specific cause.** Hypothesis going
+in: 7-city's shared network sees more context diversity per round, so maybe its Q-values are less
+differentiated (smaller top1-vs-top2 gap) than a 2-city model's, i.e. it hasn't learned confident
+preferences yet. Tested by loading the single best 2-city checkpoint on disk too
+(`results/run_2026_08_10-17_05_38_1001848/global_round_008.pth`, round 8, -13.5, the best 2-city
+result recorded anywhere in this document) through the identical inspection. **Result: 7-city's
+Q-gap mean (0.140) is actually slightly *higher* (more confident) than 2-city's best checkpoint
+(0.096), not lower.** Whatever separates 2-city's near-heuristic-beating performance from 7-city's
+catastrophic gap, it is not "the network hasn't learned to be confident yet."
+
+**What the numbers actually show:** the reward function is a telescoping sum of per-step waiting-time
+*decreases* (§25's derivation), so a bad total-episode reward means the policy leaves a lot of
+accumulated waiting time unresolved by episode end, not that it fails to move vehicles at all.
+7-city trained: waiting_time=426s, stopped=81 vs. `max_pressure`'s waiting_time=2.9s, stopped~0-1 —
+despite near-equal arrival counts. **Reading: the policy handles steady-state throughput
+reasonably but is far worse than the heuristics at draining queues down to zero rather than merely
+keeping them from exploding** — a qualitatively different failure mode than gridlock, more like
+"good enough to avoid collapse, not good enough to be efficient."
+
+**Not yet resolved — two live hypotheses, not yet distinguished:** (a) **aggregation dilution**:
+7-city's FedAvg step blends gradients from 6 heterogeneous clients every round instead of 2,
+plausibly making each round's *net* movement noisier/slower to converge even though each city still
+gets the same `local_episodes=2` of local training — consistent with §20/§23's independent finding
+that the masked-head fix's own benefit shrinks with roster size, a second data point for "more
+clients per round makes aggregation-based learning slower/noisier in this codebase," not proof by
+itself. (b) **genuine undertraining**: `fixon7_seed4`'s full 20-round reward trace oscillates
+without a visible convergence trend (round1 -10068, round6 -632, round9 -988, round14 -410 [best],
+round20 -7746) — consistent with a run that simply hasn't reached a stable basin yet, not with one
+that converged to a ceiling and stayed there. Distinguishing (a) from (b) needs an actual longer
+run (the "test more rounds" experiment from the fork this section was written instead of running) —
+this section's zero-cost analysis narrows *what* to look for once that run exists (does the
+oscillation dampen, and does the residual-waiting/queue-clearing gap specifically shrink) but
+cannot resolve the fork on its own.
+
+## Open questions / next steps
+
+1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
+   real multi-seed run in §6.** Parallel workers were never seeded; fixed and verified
+   deterministic 2026-08-04, then verified on a real 3-seed/20-round run: per-city training loss
+   is now consistently well-behaved across seeds (§6). Runs from before the fix (everything in
+   §3, and the `no_federation_vs_federated_comparison.md` A/B pair) should still be read as "one
+   sample from an unseeded process," not as reproducible results.
+1b. **New from §6: holdout-reward volatility persists even with the fix**, but the 2-city cheap
+   roster used to test this has a scale mismatch (train on 3+7-intersection cities, eval on a
+   16-intersection holdout) that's a plausible full explanation on its own. Before concluding
+   there's a second, distinct instability source: rerun the same multi-seed check with a roster
+   whose training cities are closer in scale to the holdout (e.g. swap in city_3 or city_7
+   alongside city_4/city_6), or evaluate against a smaller holdout that's actually representative
+   of what a 2-small-city model was trained for.
+2. ~~**Validate the city_1 swap.**~~ **Done properly — see §7.** The `no_federation_vs_federated_comparison.md`
+   run predated the seeding fix; §7's 3-seed/20-round run with the fix in place is the real
+   answer: city_1's persistent-high-loss failure mode is gone, confirmed across 3 seeds.
+2b. **Round-20-style reward regression — mechanism confirmed (weight deltas), but "clusters at
+   16-18" was a small-sample artifact.** §12 found seed5's best round is round 5, not 16-19 —
+   fix_on can swing to a near-optimal *or* a badly-degraded policy at any point in training, not
+   specifically at "the end." The ~2.2-2.3x-faster-movement-on-specialized-rows mechanism (§11,
+   still valid) explains the *volatility*, not a specific "always regresses near round 20" claim,
+   which should be dropped.
+3. ~~**Phase 1 masked-head ablation.**~~ **Done with 5 seeds — see §11 (3 seeds) then §12
+   (correction with 2 more). Final result: ambiguous on mean reward** (not statistically
+   distinguishable, |diff|/SE≈0.68), **with a real, mechanistically-understood volatility
+   tradeoff**: masked-head aggregation usually reaches a better peak (better median best-round,
+   4/5 seeds) but has a real chance of an outright failure fix_off never produces (seed4). Not a
+   basis for "fix wins" in a paper claim — report as a genuine conditional/negative result per the
+   plan's own guidance for this decision-gate outcome, rather than scaling to Phase 2 or running
+   further seeds on this same question. `fix_on` seed4's specific failure (reward degrades over 20
+   rounds despite healthy-looking local loss) is a new, separate open item — see below.
+3b. ~~**`fix_on` seed4's failure mode.**~~ **Minimally reproduced and localized to federation
+   itself — see §13.** `city_1` alone (same seed) is stable and near-optimal; `city_1`+`city_4` (2
+   cities, the minimum possible federation) reproduces severe instability immediately, more
+   violently than the original 3-city case. Confirms the cause is aggregation/client-drift, not
+   something specific to `city_1`'s own training or to the particular 3-city combination. `city_1`
+   +`city_4` is now the standing cheap test bed for any fix aimed at this (e.g. FedProx below).
+4. ~~**FedProx proximal term.**~~ **Tested 2026-08-06 — negative result, see [§14](#14-fedprox-swept-across-mu-and-a-3rd-city-no-stabilizing-effect).**
+   Swept mu in {0, 0.01, 0.03, 0.1} plus a 3-city generalization check; no stabilizing effect at
+   any strength, mu=0.1 measurably worse. Not the fix.
+   ~~**Dueling network head.**~~ **Tested 2026-08-06/07 — clean, generalizing win, see
+   [§15](#15-dueling-network-head-the-first-intervention-that-actually-helps).** ~26-35% better
+   mean reward, 5-8x better best round, on both the 2-city and 3-city rosters. The first
+   intervention this session that's a structural win rather than a wash or tradeoff.
+   ~~**Server-side momentum.**~~ **Tested 2026-08-06/07 — modest, mixed benefit, see
+   [§16](#16-server-side-momentum-fedavgm-style-modest-mixed-benefit).** ~9-10% better mean on
+   both rosters, but damps peaks along with crashes (worse best-round on 2-city). Weaker than
+   dueling.
+   ~~**Dueling + momentum combined.**~~ **Tested 2026-08-07/09 — net-negative, see
+   [§18](#18-dueling--momentum-combined-net-negative-interaction-confirmed-on-both-rosters).**
+   Dueling alone always beats dueling+momentum on mean and best round, on both rosters. A hard
+   CLI check now blocks this combination (`experiments/federated_training.py`).
+   ~~**n-step returns, pseudo-gradient clipping, EMA eval snapshot.**~~ **All tested 2026-08-09/10,
+   alone and combined with dueling — see
+   [§19](#19-three-more-new_ideeas-alone-and-combined-with-dueling-n-step-is-the-new-headline-result).**
+   **`dueling+n_step` is the new best-known config** — a genuine synergy, #1 on mean and best
+   round on both rosters, superseding "use dueling alone." gradclip and ema_eval (alone or with
+   dueling) are unconvincing — gradclip's fixed threshold doesn't transfer across roster sizes,
+   ema_eval only compresses reported variance without improving training (by design — it's
+   eval-only). **Current recommendation: `--dueling --n_step 3`.**
+5. ~~**`baseline_max_pressure`'s implausible numbers**~~ **Investigated — see
+   [§24](#24-major-bug-found-while-starting-phase-2-the-fixed_time-rule-based-baseline-never-actually-ran-fixed-time-control--every-fixed_time-number-in-this-projects-historyis-invalid).**
+   `max_pressure` itself was fine; `fixed_time` was the actually-broken one (three-layer
+   attribute-forwarding + missing multi-agent guard bug), and fixing it revealed the DQN currently
+   loses to both rule-based baselines on 7-city holdout. Bigger finding than the original flag.
+6. ~~**Bring 7-city Phase 1 ablation from 2 to 5 seeds.**~~ **Done — see
+   [§23](#23-7-city-phase-1-ablation-brought-to-5-seeds-the-fixs-mean-reward-benefit-doesnt-just-shrink-with-roster-size-it-vanishes--but-the-best-round-win-survives-at-every-scale-tested).**
+   Mean-reward benefit is fully gone at 7-city (|diff|/SE=0.23); best-round win persists (gap 1722,
+   fix-on still clearly better). All three roster sizes now have 5 seeds each — Phase 1 is
+   complete, no more seeds needed on this question. (§22's `MAX_CONCURRENT=1` caution for 7-city
+   turned out to be conservative — §23 ran this batch at `MAX_CONCURRENT=2` successfully, ~7h vs
+   the ~12h sequential estimate.)
+7. **NEW, most important open item: does the trained federated DQN actually beat simple rule-based
+   control?** §24 found `fixed_time` (-2.73) and `max_pressure` (-0.34) both dramatically
+   outperform the 7-city trained DQN (mean -6918.4, best-round -2182.0) on the same holdout city,
+   once `fixed_time` was measuring real fixed-time control instead of a broken degenerate policy.
+   This was invisible before today. Needs: (a) multi-seed rule-based baseline numbers (currently
+   single-episode, deterministic, §24 flagged this as not yet done), (b) the same check on
+   2-city/3-city rosters, (c) a decision on whether this blocks/reshapes Phase 2's strategy
+   comparison — comparing aggregation strategies against each other is less interesting if none of
+   them currently beat a simple heuristic. Don't scale up Phase 2 compute assuming the trained
+   model is competitive until this is checked.

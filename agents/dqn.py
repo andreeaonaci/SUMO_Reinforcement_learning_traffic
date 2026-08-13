@@ -35,13 +35,20 @@ class ReplayBuffer:
     def __init__(self, capacity: int = 10000):
         self.buffer = deque(maxlen=capacity)
 
-    def add(self, obs: Observation, action: int, reward: float, next_obs: Observation, done: bool):
-        self.buffer.append((obs, int(action), float(reward), next_obs, float(done)))
+    def add(self, obs: Observation, action: int, reward: float, next_obs: Observation, done: bool,
+            n: int = 1):
+        """``n`` = number of environment steps this transition's ``reward``
+        already spans (n-step returns, see DQNAgent's ``n_step``). Defaults
+        to 1 (plain 1-step TD), which is byte-for-byte what every caller
+        used before n-step support was added -- ``optimize()`` uses
+        ``gamma**n`` as the bootstrap discount, and ``gamma**1 == gamma``
+        exactly, so n_step=1 (the default) is a true no-op."""
+        self.buffer.append((obs, int(action), float(reward), next_obs, float(done), int(n)))
 
     def sample(self, batch_size: int):
         batch = random.sample(self.buffer, min(batch_size, len(self.buffer)))
-        obs, actions, rewards, next_obs, dones = zip(*batch)
-        return obs, actions, rewards, next_obs, dones
+        obs, actions, rewards, next_obs, dones, ns = zip(*batch)
+        return obs, actions, rewards, next_obs, dones, ns
 
     def __len__(self):
         return len(self.buffer)
@@ -112,6 +119,9 @@ class DQNAgent:
         min_lr: float = 1e-6,
         head_fix: bool = True,
         tau: float = 0.005,
+        mu: float = 0.0,
+        dueling: bool = False,
+        n_step: int = 1,
     ):
         self.own_dim = own_dim
         self.neighbor_dim = neighbor_dim
@@ -128,6 +138,7 @@ class DQNAgent:
             n_heads=n_heads,
             n_hops=n_hops,
             head_fix=head_fix,
+            dueling=dueling,
         )
         self.q = NeighborAttentionQNetwork(**net_kwargs).to(self.device)
         self.q_target = NeighborAttentionQNetwork(**net_kwargs).to(self.device)
@@ -164,6 +175,36 @@ class DQNAgent:
         # loss blow-up (a few large-magnitude congestion rewards were
         # dominating the squared-error gradient). Set to None to disable.
         self.reward_clip = reward_clip
+        # FedProx proximal term: penalizes local weights drifting from the
+        # global weights this client started the round from, mu/2 *
+        # ||w - w_global||^2 added directly to the training loss (see
+        # optimize()). 0 = disabled, exactly recovers plain FedAvg local
+        # training. The reference snapshot is taken in load_state_dict(),
+        # which is called with the broadcast global weights at the start
+        # of every federated round -- so "global" always means "what this
+        # client received this round," not the very first round's weights.
+        self.mu = mu
+        if self.mu > 0:
+            logger.warning(
+                "FedProx proximal term is ENABLED (mu=%.4g). Swept 2026-08-06 across "
+                "mu in {0.01, 0.03, 0.1} on the seed-4 divergence repro (both the 2-city "
+                "and 3-city rosters) and found NO stabilizing effect at any value tested "
+                "-- mu=0.1 was measurably worse on every metric (mean/best/worst reward). "
+                "See fidings/divergence_investigation.md sec 14 before trusting this run's "
+                "results as evidence the proximal term helps.",
+                self.mu,
+            )
+        self._global_params: Optional[List["torch.Tensor"]] = None
+        # n-step returns: instead of bootstrapping off a 1-step TD target,
+        # accumulate n consecutive (clipped) rewards per intersection before
+        # pushing a transition, and bootstrap with gamma**n instead of
+        # gamma. 1 = disabled (default) -- every transition stored has n=1,
+        # and gamma**1 == gamma exactly, so this is a true no-op, not just a
+        # numerically-small change. See train()/_flush_nstep() for the
+        # per-intersection accumulation (each intersection needs its own
+        # sliding window since actions/rewards differ per ts_id).
+        self.n_step = max(1, int(n_step))
+        self._nstep_buffers: Dict[str, "deque"] = {}
         logger.info(
             "own_dim=%d neighbor_dim=%d action_dim=%d k_max=%d eps_decay=%.0f",
             self.own_dim, self.neighbor_dim, self.action_dim, self.k_max, self.eps_decay,
@@ -178,6 +219,16 @@ class DQNAgent:
         valid = np.nonzero(action_mask > 0.5)[0]
         return valid
 
+    def _random_valid_action(self, action_mask: np.ndarray) -> int:
+        """Uniformly random action among the valid ones (falls back to any
+        action index if the mask is empty). Draws exactly one
+        ``random.choice`` call, shared by every explore-branch call site so
+        the RNG usage stays in one place."""
+        valid = self._valid_actions(action_mask)
+        if len(valid) == 0:
+            valid = np.arange(self.action_dim)
+        return int(random.choice(valid))
+
     def _current_epsilon(self) -> float:
         return self.eps_end + (self.eps_start - self.eps_end) * math.exp(
             -1.0 * self.steps_done / self.eps_decay
@@ -188,23 +239,74 @@ class DQNAgent:
         return self._current_epsilon()
 
     def _greedy_action(self, obs: Observation) -> int:
+        return self._greedy_action_batch([obs])[0]
+
+    def _greedy_action_batch(self, obs_list: List[Observation]) -> List[int]:
+        """Greedy (exploit) action for each observation, one batched forward
+        pass covering however many observations are passed in (i.e.
+        however many intersections a city actually has that tick, not a
+        fixed constant) -- ``_greedy_action`` is just this called with a
+        list of one.
+
+        Ties are broken uniformly at random rather than always taking the
+        lowest index. Early in training (or on a symmetric network where
+        two actions are genuinely equivalent) Q-values for different
+        actions can be numerically indistinguishable; ``argmax`` always
+        resolves that to the lowest index, which silently produces a "the
+        model always picks action 0" pattern that looks like a learned
+        policy but is actually just tie-break bias. One ``np.random.choice``
+        draw per observation, in list order -- same numpy-RNG call sequence
+        a per-observation loop would produce, just with the network forward
+        pass batched.
+        """
         with torch.no_grad():
-            own, neighbors, neighbor_mask, hop_dist, action_mask = _collate([obs], self.device)
+            own, neighbors, neighbor_mask, hop_dist, action_mask = _collate(obs_list, self.device)
             q = self.q(own, neighbors, neighbor_mask, hop_dist)
             q = _mask_q(q, action_mask)
-            q_np = q.squeeze(0).cpu().numpy()
-            # Break ties randomly instead of always taking the lowest
-            # index. Early in training (or on a symmetric network where
-            # two actions are genuinely equivalent) Q-values for different
-            # actions can be numerically indistinguishable; torch.argmax
-            # always resolves that to the lowest index, which silently
-            # produces a "the model always picks action 0" pattern that
-            # looks like a learned policy but is actually just tie-break
-            # bias. Ties within a small tolerance are resolved uniformly
-            # at random instead.
-            max_q = np.max(q_np)
-            tied = np.flatnonzero(np.isclose(q_np, max_q, atol=1e-4))
-            return int(np.random.choice(tied))
+            q_np = q.cpu().numpy()
+
+        actions = []
+        for row in q_np:
+            max_q = np.max(row)
+            tied = np.flatnonzero(np.isclose(row, max_q, atol=1e-4))
+            actions.append(int(np.random.choice(tied)))
+        return actions
+
+    def act_batch(
+        self,
+        obs_dict: Dict[str, Observation],
+        eps: Optional[float] = None,
+        explore: bool = True,
+    ) -> Dict[str, int]:
+        """Batched, per-tick action selection across every intersection in
+        ``obs_dict`` -- same explore-vs-greedy decision, independently per
+        intersection, in the same iteration order, drawing from the same
+        two RNG streams (``random`` for the explore coin-flip and the
+        uniform choice among valid actions, ``np.random`` for greedy
+        tie-breaking) that calling ``act()`` once per intersection would.
+        The only thing that changes is that every greedy intersection's Q
+        lookup this tick happens in one batched forward pass instead of
+        one forward pass each.
+        """
+        if explore and eps is None:
+            eps = self._current_epsilon()
+
+        actions: Dict[str, int] = {}
+        greedy_ts_ids: List[str] = []
+        greedy_obs: List[Observation] = []
+
+        for ts_id, obs in obs_dict.items():
+            if explore and random.random() < eps:
+                actions[ts_id] = self._random_valid_action(obs["action_mask"])
+            else:
+                greedy_ts_ids.append(ts_id)
+                greedy_obs.append(obs)
+
+        if greedy_obs:
+            for ts_id, a in zip(greedy_ts_ids, self._greedy_action_batch(greedy_obs)):
+                actions[ts_id] = a
+
+        return actions
 
     def q_values(self, obs: Observation) -> np.ndarray:
         """Masked Q-values for a single observation (invalid actions are
@@ -226,10 +328,7 @@ class DQNAgent:
         # city, which desyncs the exploration schedule across the very
         # cities that get FedAvg'd together every round.
         if random.random() < eps:
-            valid = self._valid_actions(obs["action_mask"])
-            if len(valid) == 0:
-                valid = np.arange(self.action_dim)
-            return int(random.choice(valid))
+            return self._random_valid_action(obs["action_mask"])
         return self._greedy_action(obs)
 
     def act(self, obs: Observation, explore: bool = True, eps: Optional[float] = None) -> int:
@@ -245,10 +344,55 @@ class DQNAgent:
     # Replay + optimization
     # ------------------------------------------------------------------
 
-    def remember(self, obs: Observation, action: int, reward: float, next_obs: Observation, done: bool) -> None:
+    def remember(self, obs: Observation, action: int, reward: float, next_obs: Observation, done: bool,
+                 n: int = 1) -> None:
         if self.reward_clip is not None:
             reward = float(np.clip(reward, -self.reward_clip, self.reward_clip))
-        self.replay.add(obs, action, reward, next_obs, done)
+        self.replay.add(obs, action, reward, next_obs, done, n)
+
+    def _clip_reward(self, r: float) -> float:
+        if self.reward_clip is not None:
+            return float(np.clip(r, -self.reward_clip, self.reward_clip))
+        return r
+
+    def _remember_step(self, ts_id: str, obs: Observation, action: int, reward: float,
+                        next_obs: Observation, done: bool) -> None:
+        """Per-intersection dispatch used by ``train()``'s tick loop: plain
+        1-step ``remember()`` when ``n_step<=1`` (the default, unchanged
+        behavior), or push into that intersection's n-step sliding-window
+        accumulator otherwise. Each intersection gets its own window since
+        actions/rewards differ per ``ts_id`` even though they share one
+        pooled replay buffer (see ReplayBuffer's docstring)."""
+        if self.n_step <= 1:
+            self.remember(obs, action, reward, next_obs, done)
+            return
+        r = self._clip_reward(reward)
+        buf = self._nstep_buffers.setdefault(ts_id, deque())
+        buf.append((obs, action, r))
+        if len(buf) >= self.n_step:
+            self._flush_nstep(buf, next_obs, done)
+        if done:
+            # Episode over for this intersection -- drain the rest of the
+            # window too, each remaining entry getting a shorter-than-n
+            # return over whatever ticks are actually left. Standard n-step
+            # practice: don't bootstrap across an episode boundary, and
+            # don't invent extra transitions past it either.
+            while buf:
+                self._flush_nstep(buf, next_obs, done)
+
+    def _flush_nstep(self, buf: "deque", next_obs: Observation, done: bool) -> None:
+        """Pop the oldest entry in an n-step window, compute its return over
+        whatever rewards currently sit in the window (already clipped
+        per-tick by ``_clip_reward``, so the sum is bounded and doesn't need
+        clipping again), and push the resulting multi-step transition into
+        the shared replay buffer with n = window length at flush time."""
+        obs0, action0, _ = buf[0]
+        n = len(buf)
+        ret = 0.0
+        for i, (_, _, r) in enumerate(buf):
+            ret += (self.gamma ** i) * r
+        self.replay.add(obs0, action0, ret, next_obs, done, n)
+        buf.popleft()
 
     def train_step(self) -> Optional[float]:
         return self.optimize()
@@ -257,7 +401,7 @@ class DQNAgent:
         if len(self.replay) < max(4, self.batch_size):
             return None
 
-        obs, actions, rewards, next_obs, dones = self.replay.sample(self.batch_size)
+        obs, actions, rewards, next_obs, dones, ns = self.replay.sample(self.batch_size)
 
         own, neighbors, neighbor_mask, hop_dist, action_mask = _collate(obs, self.device)
         n_own, n_neighbors, n_neighbor_mask, n_hop_dist, n_action_mask = _collate(next_obs, self.device)
@@ -265,6 +409,12 @@ class DQNAgent:
         actions_t = torch.tensor(actions, dtype=torch.int64, device=self.device).unsqueeze(1)
         rewards_t = torch.tensor(rewards, dtype=torch.float32, device=self.device).unsqueeze(1)
         dones_t = torch.tensor(dones, dtype=torch.float32, device=self.device).unsqueeze(1)
+        # gamma**n per-sample bootstrap discount -- n=1 for every sample
+        # (the n_step<=1 default) makes this exactly `self.gamma`, so
+        # optimize()'s math is byte-identical to before n-step support
+        # existed unless n_step>1 is actually requested.
+        ns_t = torch.tensor(ns, dtype=torch.float32, device=self.device).unsqueeze(1)
+        discount_t = torch.full_like(ns_t, self.gamma).pow(ns_t)
 
         q_values = self.q(own, neighbors, neighbor_mask, hop_dist)
         q_taken = q_values.gather(1, actions_t)
@@ -279,7 +429,7 @@ class DQNAgent:
             next_q_target = self.q_target(n_own, n_neighbors, n_neighbor_mask, n_hop_dist).gather(
                 1, next_actions
             )
-            expected = rewards_t + (1.0 - dones_t) * self.gamma * next_q_target
+            expected = rewards_t + (1.0 - dones_t) * discount_t * next_q_target
 
         # Huber loss instead of MSE: MSE squares the TD-error, so a single
         # large-magnitude transition (e.g. a congestion spike) can
@@ -288,6 +438,25 @@ class DQNAgent:
         # past `delta`, so outliers contribute a bounded gradient instead
         # of an exploding one.
         loss = nn.functional.smooth_l1_loss(q_taken, expected, beta=1.0)
+
+        # FedProx proximal term: penalizes this client's weights drifting
+        # from the global weights it started the round from. Directly
+        # targets client drift in weight-space -- confirmed as a real,
+        # reproducible cause of federated instability (city_1 alone trains
+        # cleanly; the same seed federated with just one other city swings
+        # wildly between near-optimal and catastrophic every few rounds --
+        # see fidings/divergence_investigation.md §13). mu=0 recovers
+        # plain local training exactly (no-op, not just numerically small).
+        if self.mu > 0 and self._global_params is not None:
+            # Fused multi-tensor ops instead of a Python loop doing one
+            # subtract+pow+sum (and one kernel launch) per parameter tensor
+            # -- this runs every optimize() call, i.e. every gradient step,
+            # so the per-tensor Python/kernel-launch overhead isn't free.
+            diffs = torch._foreach_sub(list(self.q.parameters()), self._global_params)
+            norms = torch._foreach_norm(diffs, 2)
+            prox_term = sum(n.pow(2) for n in norms)
+            loss = loss + (self.mu / 2.0) * prox_term
+
         self.optimizer.zero_grad()
         loss.backward()
         nn.utils.clip_grad_norm_(self.q.parameters(), 10.0)
@@ -340,6 +509,19 @@ class DQNAgent:
         self.q.load_state_dict(state)
         self.q_target.load_state_dict(state)
 
+    def start_round(self, global_state: Dict[str, "torch.Tensor"]) -> None:
+        """Sync to the broadcast global weights and anchor FedProx's
+        proximal reference there, in one call.
+
+        Deliberately separate from plain `load_state_dict()`: that method
+        is used elsewhere (e.g. checkpoint restore) where resetting the
+        FedProx reference point would be a surprising side effect, not an
+        intended "a new federated round is starting" signal.
+        """
+        self.load_state_dict(global_state)
+        if self.mu > 0:
+            self._global_params = [p.detach().clone() for p in self.q.parameters()]
+
     # ------------------------------------------------------------------
     # Training loop -- multi-agent aware
     # ------------------------------------------------------------------
@@ -374,6 +556,10 @@ class DQNAgent:
             if not isinstance(obs_dict, dict):
                 # Backward-compat: single-agent env returning a flat obs.
                 obs_dict = {"__single__": obs_dict}
+            # Fresh n-step windows each episode -- ticks from a finished
+            # episode should never bleed a bootstrap target into the next
+            # one. A no-op when n_step<=1 (buffers stay unused).
+            self._nstep_buffers = {}
 
             done = False
             ep_steps = 0
@@ -384,7 +570,7 @@ class DQNAgent:
                 # intersection -- see _current_epsilon's docstring for
                 # why this must NOT be per-intersection.
                 eps = self._current_epsilon()
-                actions = {ts_id: self.act(o, explore=True, eps=eps) for ts_id, o in obs_dict.items()}
+                actions = self.act_batch(obs_dict, eps=eps, explore=True)
                 self.steps_done += 1
                 action_counts.update(actions.values())
 
@@ -400,7 +586,7 @@ class DQNAgent:
                     r = rewards.get(ts_id, 0.0)
                     no = next_obs_dict.get(ts_id, o)
                     d = dones.get(ts_id, dones.get("__all__", False))
-                    self.remember(o, actions[ts_id], r, no, d)
+                    self._remember_step(ts_id, o, actions[ts_id], r, no, d)
 
                 loss = self.optimize()
                 if loss is not None:

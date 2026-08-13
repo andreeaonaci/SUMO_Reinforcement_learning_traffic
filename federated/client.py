@@ -93,7 +93,7 @@ class FederatedClient:
         )
 
         # Sync weights only -- keep replay buffer + epsilon schedule alive.
-        self._agent.load_state_dict(global_state)
+        self._agent.start_round(global_state)
         eps_start = self._agent.current_epsilon()
 
         try:

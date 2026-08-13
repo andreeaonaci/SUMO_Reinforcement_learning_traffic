@@ -1,0 +1,15 @@
+❯ if you find any improvemnts or you have some SOTA ideeas that can be implemented here with not tu much effort i'm leasning
+
+Good places to invest effort here, roughly in order of bang-for-buck given what we already know is broken:
+
+1. FedProx proximal term (biggest fit, cheapest to add) — add μ/2 · ||w_local - w_global||² to each client's local loss during optimize(), where w_global is snapshotted at the start of the round. This is the standard fix for exactly the failure mode we're seeing: highly non-IID clients (your cities range from 1 to 16 intersections — >Reddit's own definition of client heterogeneity) drift apart during local training and fight each other on aggregation. It directly caps that drift instead of just cleaning up after it. ~10 lines in DQNAgent.optimize() plus one snapshot at round start.
+
+2. Dueling network head (directly complements the masked-head aggregation work we already did) — split the final layer into V(s) (scalar) + A(s,a) (per-action advantage), combine as Q = V + A - mean(A). The state-value stream V(s) needs no action mask and aggregates cleanly across every city every round regardless of its action_dim — right now the entire head is action-indexed, so a lot of the shared signal gets diluted through the row-by-row masked averaging. Small architecture change in agents/networks.py, no change to the training loop.
+
+3. n-step returns (good domain fit) — traffic signal choices affect waiting time several ticks later, but the Bellman target is currently 1-step. Accumulating a 3-5 step return before storing the transition is a well-known Rainbow-DQN component and is cheap (just changes what gets pushed into the replay buffer).
+
+4. Server-side pseudo-gradient clipping — cheap insurance: clip the norm of agg_state - global_state_before before applying it, so one bad round can't blow up the global model regardless of what's happening client-side. A few lines next to where compute_pseudo_gradient is already called.
+
+My pick if you want just one: FedProx, since it targets the client-drift problem at its root rather than papering over symptoms, and it's genuinely a few lines.
+
+I'd hold off implementing any of these until the verification run confirms the current fix actually resolved the divergence — otherwise we won't know which change gets credit for what. Once that lands clean, say the word and I'll wire in whichever you want.

@@ -5,7 +5,7 @@ means adding a new weighting scheme never touches this file.
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 
@@ -189,6 +189,170 @@ def masked_head_weighted_average(
     agg[head_weight_key] = new_head_w
     agg[head_bias_key] = new_head_b
     return agg
+
+
+def _state_delta(
+    a: Dict[str, torch.Tensor], b: Dict[str, torch.Tensor]
+) -> Dict[str, torch.Tensor]:
+    """``a - b``, elementwise, float-cast -- shared by every server-side
+    update-shaping helper below (momentum, gradient clipping), all of which
+    reason about ``agg_state - global_state_before`` as "this round's
+    pseudo-gradient"."""
+    return {k: a[k].float() - b[k].float() for k in a}
+
+
+def head_key_names(dueling: bool) -> Tuple[str, str]:
+    """State-dict key names for the action-indexed Q-head that
+    ``masked_head_weighted_average`` should target: ``"advantage_head.*"``
+    under the dueling architecture (``agents/networks.py`` splits the final
+    layer into ``value_head``/``advantage_head``), ``"head.4.*"`` for the
+    plain single-Linear head otherwise. Getting this wrong makes
+    masked-head aggregation silently no-op (falls through to plain
+    averaging) because the configured key doesn't exist in the state dict.
+    """
+    if dueling:
+        return "advantage_head.weight", "advantage_head.bias"
+    return "head.4.weight", "head.4.bias"
+
+
+def shape_server_update(
+    agg_state: Dict[str, torch.Tensor],
+    global_state_before: Dict[str, torch.Tensor],
+    pseudo_grad_clip: float,
+    server_momentum: float,
+    momentum_buffer: Optional[Dict[str, torch.Tensor]],
+) -> Tuple[Dict[str, torch.Tensor], Optional[Dict[str, torch.Tensor]]]:
+    """Apply the optional server-side update-shaping pipeline in the
+    documented order: pseudo-gradient clipping first, then FedAvgM-style
+    momentum, so the velocity buffer only ever accumulates already-bounded
+    deltas rather than an occasional huge spike. Both stages are
+    individually exact no-ops at their default (0) value -- see
+    ``clip_pseudo_gradient``/``apply_server_momentum``. Returns
+    ``(new_agg_state, new_momentum_buffer)``; thread the buffer back in as
+    ``momentum_buffer`` next round.
+    """
+    if pseudo_grad_clip > 0.0:
+        agg_state = clip_pseudo_gradient(agg_state, global_state_before, pseudo_grad_clip)
+    if server_momentum > 0.0:
+        agg_state, momentum_buffer = apply_server_momentum(
+            agg_state, global_state_before, momentum_buffer, server_momentum
+        )
+    return agg_state, momentum_buffer
+
+
+def update_eval_ema(
+    eval_ema_state: Optional[Dict[str, torch.Tensor]],
+    agg_state: Dict[str, torch.Tensor],
+    eval_ema_decay: float,
+) -> Dict[str, torch.Tensor]:
+    """EMA-update the eval-only snapshot used by ``--eval_ema_decay``:
+    ``None`` (cold start, round 1) just clones this round's aggregate;
+    afterward, standard exponential smoothing. Only meaningful to call when
+    ``eval_ema_decay > 0`` -- callers should skip calling this entirely
+    when it's disabled, matching every other optional mechanism's
+    0-is-off convention, since there'd be nothing meaningful to return.
+    """
+    if eval_ema_state is None:
+        return {k: v.clone() for k, v in agg_state.items()}
+    return {
+        k: eval_ema_decay * eval_ema_state[k] + (1.0 - eval_ema_decay) * agg_state[k].float()
+        for k in agg_state
+    }
+
+
+def evaluate_with_optional_ema(
+    evaluator: Any,
+    global_model: Any,
+    eval_ema_decay: float,
+    eval_ema_state: Optional[Dict[str, torch.Tensor]],
+) -> Dict[str, Any]:
+    """Evaluate ``global_model``, transparently swapping in the slowly-
+    averaged ``--eval_ema_decay`` snapshot first if one is available --
+    purely a reporting-side smoothing; the real weights are restored
+    immediately after, so this never touches what gets broadcast to
+    clients next round. Falls back to a plain evaluation when EMA is
+    disabled or not yet warmed up (``eval_ema_state is None`` on round 1).
+    """
+    if eval_ema_decay > 0.0 and eval_ema_state is not None:
+        real_state = global_model.state_dict()
+        global_model.load_state_dict(eval_ema_state)
+        metrics = evaluator.evaluate(global_model)
+        global_model.load_state_dict(real_state)
+        return metrics
+    return evaluator.evaluate(global_model)
+
+
+def apply_server_momentum(
+    agg_state: Dict[str, torch.Tensor],
+    global_state_before: Dict[str, torch.Tensor],
+    momentum_buffer: Optional[Dict[str, torch.Tensor]],
+    beta: float,
+) -> Tuple[Dict[str, torch.Tensor], Optional[Dict[str, torch.Tensor]]]:
+    """FedAvgM-style server-side momentum on this round's aggregated update.
+
+    Treats ``agg_state - global_state_before`` as this round's pseudo-
+    gradient and applies it through an exponentially-weighted velocity
+    buffer instead of directly:
+
+        velocity  = beta * velocity_prev + (agg_state - global_state_before)
+        new_state = global_state_before + velocity
+
+    Targets a different symptom than the masked-head fix or FedProx: the
+    *aggregated* global model swinging sharply round to round even when no
+    individual client's local loss shows distress (see
+    fidings/divergence_investigation.md sec 9) -- damping the applied update
+    itself, at the server, rather than anything client-side.
+
+    ``beta<=0`` is an exact no-op (returns ``agg_state`` unchanged, buffer
+    reset to None) -- matches every other optional mechanism in this
+    codebase (``mu``, ``dueling``, ``head_fix``) defaulting to "recovers
+    plain FedAvg" at its off-value.
+
+    Returns ``(new_state, new_momentum_buffer)`` -- the buffer must be
+    threaded back in as ``momentum_buffer`` on the next round's call so
+    velocity actually persists/accumulates across rounds.
+    """
+    if beta <= 0.0:
+        return agg_state, None
+    delta = _state_delta(agg_state, global_state_before)
+    new_buffer = {
+        k: beta * momentum_buffer[k] + v if momentum_buffer is not None and k in momentum_buffer else v
+        for k, v in delta.items()
+    }
+    new_state = {k: global_state_before[k].float() + new_buffer[k] for k in agg_state}
+    return new_state, new_buffer
+
+
+def clip_pseudo_gradient(
+    agg_state: Dict[str, torch.Tensor],
+    global_state_before: Dict[str, torch.Tensor],
+    max_norm: float,
+) -> Dict[str, torch.Tensor]:
+    """Cap the total L2 norm of this round's applied update
+    (``agg_state - global_state_before``) at ``max_norm``, rescaling the
+    whole delta uniformly (not per-tensor) if it's over the cap -- same
+    style as ``torch.nn.utils.clip_grad_norm_`` but applied to the
+    server-side aggregated update instead of a client's local gradient.
+
+    Cheap insurance against one bad round moving the global model an
+    outsized amount, independent of whatever's happening client-side.
+    Composable with ``apply_server_momentum`` -- apply this first so the
+    velocity buffer only ever accumulates already-bounded deltas, not an
+    occasional huge spike.
+
+    ``max_norm<=0`` is an exact no-op (returns ``agg_state`` unchanged) --
+    matches every other optional mechanism in this codebase (``mu``,
+    ``dueling``, ``server_momentum``) defaulting to "recovers plain FedAvg"
+    at its off-value.
+    """
+    if max_norm <= 0.0:
+        return agg_state
+    delta = _state_delta(agg_state, global_state_before)
+    total_norm = torch.sqrt(sum((v ** 2).sum() for v in delta.values()))
+    if total_norm <= max_norm:
+        return agg_state
+    scale = max_norm / (total_norm + 1e-12)
+    return {k: global_state_before[k].float() + v * scale for k, v in delta.items()}
 
 
 def fed_avg(updates: List[Tuple[Dict[str, torch.Tensor], int]]) -> Dict[str, torch.Tensor]:

@@ -14,11 +14,8 @@ import json
 import logging
 import os
 import pprint
-import random
 import sys
 import yaml
-
-import numpy as np
 
 try:
     from pyfiglet import Figlet
@@ -37,7 +34,7 @@ from federated.evaluator import HoldoutEvaluator
 from federated.comm_dropout import CommDropoutWrapper
 from environments.federated_env import build_federated_env, ActionMaskPadder
 from agents.dqn import DQNAgent
-from federated.utils import compute_eps_decay
+from federated.utils import compute_eps_decay, set_seed
 
 run_dir = None
 logger = logging.getLogger(__name__)
@@ -59,7 +56,8 @@ def steps_per_episode_from_cfg(cfg: dict) -> int:
 
 
 def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: bool = True,
-                tau: float = 0.005, target_update: int = 200):
+                tau: float = 0.005, target_update: int = 200, mu: float = 0.0,
+                dueling: bool = False, n_step: int = 1):
     """Single place that constructs a DQNAgent with the computed eps_decay."""
     return DQNAgent(
         own_dim=own_dim,
@@ -70,6 +68,9 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
         head_fix=head_fix,
         tau=tau,
         target_update=target_update,
+        mu=mu,
+        dueling=dueling,
+        n_step=n_step,
     )
 
 
@@ -87,6 +88,9 @@ def load_clients(
     head_fix: bool = True,
     tau: float = 0.005,
     target_update: int = 200,
+    mu: float = 0.0,
+    dueling: bool = False,
+    n_step: int = 1,
 ) -> tuple:
     """Build one FederatedClient per city directory.
 
@@ -157,10 +161,11 @@ def load_clients(
             _own=own_dim, _nbr=neighbor_dim, _k=k_max,
             _act=action_dim, _eps=eps_decay,
             _head_fix=head_fix,
-            _tau=tau, _tu=target_update,
+            _tau=tau, _tu=target_update, _mu=mu, _dueling=dueling, _n_step=n_step,
         ):
             return _make_agent(_own, _nbr, _k, _act, _eps, head_fix=_head_fix,
-                               tau=_tau, target_update=_tu)
+                               tau=_tau, target_update=_tu, mu=_mu, dueling=_dueling,
+                               n_step=_n_step)
 
         clients.append(
             FederatedClient(
@@ -369,29 +374,23 @@ def make_holdout_evaluator(
 # Entry point
 # ---------------------------------------------------------------------------
 
-def set_seed(seed: int | None) -> None:
-    if seed is None:
-        return
-    random.seed(seed)
-    np.random.seed(seed)
-    try:
-        import torch
-        torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(seed)
-    except Exception:
-        pass
-
 
 def main(args):
     global run_dir
 
     set_seed(args.seed)
 
+    # PID suffix: without it, two processes launched within the same
+    # wall-clock second (e.g. several concurrent runs kicked off by a
+    # batch script) compute the identical run_dir string. `exist_ok=True`
+    # below would then silently let the second process write into the
+    # first's directory -- interleaved checkpoints/logs/history from two
+    # different seeds in one folder, no error, no warning. The PID makes
+    # collisions require literal PID reuse (not a real risk in practice).
     timestamp = datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
-    run_dir = os.path.join("results", f"run_{timestamp}")
+    run_dir = os.path.join("results", f"run_{timestamp}_{os.getpid()}")
     os.makedirs("results", exist_ok=True)
-    os.makedirs(run_dir, exist_ok=True)
+    os.makedirs(run_dir, exist_ok=False)
 
     log_file = os.path.join(run_dir, "training.log")
     logging.basicConfig(
@@ -499,6 +498,9 @@ def main(args):
             own_dim, neighbor_dim, k_max, action_dim, eps_decay,
             head_fix=not args.disable_head_fix,
             tau=args.tau, target_update=args.target_update,
+            mu=args.fedprox_mu,
+            dueling=args.dueling,
+            n_step=args.n_step,
         )
         evaluator = make_holdout_evaluator(
             base,
@@ -548,6 +550,13 @@ def main(args):
             fedavg_blend=args.fedavg_blend,
             tau=args.tau,
             target_update=args.target_update,
+            seed=args.seed,
+            mu=args.fedprox_mu,
+            dueling=args.dueling,
+            server_momentum=args.server_momentum,
+            n_step=args.n_step,
+            pseudo_grad_clip=args.pseudo_grad_clip,
+            eval_ema_decay=args.eval_ema_decay,
         )
         history = server.run(rounds=args.rounds, eval_every=args.eval_every)
 
@@ -564,6 +573,9 @@ def main(args):
             head_fix=not args.disable_head_fix,
             tau=args.tau,
             target_update=args.target_update,
+            mu=args.fedprox_mu,
+            dueling=args.dueling,
+            n_step=args.n_step,
         )
         own_dim, neighbor_dim, k_max = obs_dims
 
@@ -578,6 +590,9 @@ def main(args):
             own_dim, neighbor_dim, k_max, action_dim, eps_decay,
             head_fix=not args.disable_head_fix,
             tau=args.tau, target_update=args.target_update,
+            mu=args.fedprox_mu,
+            dueling=args.dueling,
+            n_step=args.n_step,
         )
         evaluator = make_holdout_evaluator(
             base,
@@ -603,6 +618,10 @@ def main(args):
             use_masked_head=not args.disable_head_fix,
             no_federation=args.no_federation,
             fedavg_blend=args.fedavg_blend,
+            dueling=args.dueling,
+            server_momentum=args.server_momentum,
+            pseudo_grad_clip=args.pseudo_grad_clip,
+            eval_ema_decay=args.eval_ema_decay,
         )
         history = server.run(rounds=args.rounds, eval_every=args.eval_every)
 
@@ -667,6 +686,51 @@ if __name__ == "__main__":
                              "--target_update steps; 0.005 = smooth update every step (default).")
     parser.add_argument("--target_update", type=int, default=200,
                         help="Hard target-network sync interval (steps). Only used when --tau 0.")
+    parser.add_argument("--fedprox_mu", type=float, default=0.0,
+                        help="FedProx proximal-term coefficient. Adds mu/2 * ||w - w_global||^2 "
+                             "to each client's local training loss, penalizing drift from the "
+                             "weights it started the round from. Swept 2026-08-06: no mu value "
+                             "stabilized the seed-4 repro, mu=0.1 was measurably worse -- see "
+                             "fidings/divergence_investigation.md sec 14. Not recommended; kept "
+                             "for reference. 0 = disabled (default, exactly recovers plain local "
+                             "training).")
+    parser.add_argument("--dueling", action="store_true",
+                        help="Dueling Q-head: split the final layer into V(s) (scalar, no "
+                             "action_mask, aggregates cleanly across every city regardless of "
+                             "action_dim) + A(s,a) (action-indexed, still masked-head-aggregated "
+                             "same as the plain head), combined as Q = V + A - mean(A). Targets "
+                             "the same action-indexed-head client-drift symptom as FedProx did, "
+                             "structurally instead of via a loss penalty -- see "
+                             "fidings/divergence_investigation.md sec 14. Default off (plain "
+                             "single Linear head, unchanged behavior).")
+    parser.add_argument("--server_momentum", type=float, default=0.0,
+                        help="FedAvgM-style server-side momentum (0-1, typically ~0.9). Applies "
+                             "this round's aggregated update through an exponentially-weighted "
+                             "velocity buffer (velocity = beta*velocity_prev + (agg - global); "
+                             "global += velocity) instead of jumping straight to the raw "
+                             "aggregate. Targets the aggregated-model-level oscillation itself "
+                             "(see fidings/divergence_investigation.md sec 9) rather than "
+                             "anything client-side. 0 = disabled (default, exactly recovers "
+                             "plain FedAvg).")
+    parser.add_argument("--n_step", type=int, default=1,
+                        help="n-step returns: accumulate n consecutive (clipped) rewards per "
+                             "intersection before pushing a replay transition, bootstrapping "
+                             "with gamma**n instead of gamma. 1 = disabled (default, exactly "
+                             "recovers plain 1-step TD).")
+    parser.add_argument("--pseudo_grad_clip", type=float, default=0.0,
+                        help="Cap the total L2 norm of each round's aggregated update "
+                             "(agg_state - global_state_before) at this value, rescaling "
+                             "uniformly if over the cap. Cheap insurance against one bad round "
+                             "moving the global model an outsized amount. Applied before "
+                             "--server_momentum if both are set. 0 = disabled (default, exact "
+                             "no-op).")
+    parser.add_argument("--eval_ema_decay", type=float, default=0.0,
+                        help="Evaluate (and report) a slowly-averaged EMA snapshot of the "
+                             "global model each round instead of the raw just-aggregated "
+                             "weights (eval_state = decay*eval_state + (1-decay)*global_state). "
+                             "Purely a reporting-side smoothing -- never touches what's "
+                             "broadcast to clients next round. 0 = disabled (default, exact "
+                             "no-op, evaluates raw weights same as before).")
     parser.add_argument("--fedavg_blend", type=float, default=1.0,
                         help="FedAvg blending: 1.0 = fully replace global with aggregated (default). "
                              "0.7 = 70%% aggregated + 30%% previous global weights, preventing "
@@ -698,4 +762,21 @@ if __name__ == "__main__":
         help="Fixed SUMO seed for evaluation env so round-to-round comparisons use a deterministic scenario.",
     )
     args = parser.parse_args()
+    if args.dueling and args.server_momentum > 0.0:
+        # Measured net-negative interaction, not a theoretical concern: dueling
+        # alone beat dueling+server_momentum on both mean AND best-round reward,
+        # on both the 2-city and 3-city seed-4 repro rosters -- server-side
+        # momentum damps exactly the fast, undamped advantage-head movement that
+        # makes dueling effective on its own. See
+        # fidings/divergence_investigation.md sec 18 before overriding this.
+        parser.error(
+            "--dueling and --server_momentum are both set, but this combination "
+            "was tested (fidings/divergence_investigation.md sec 18) and is "
+            "net-negative -- dueling alone beats dueling+momentum on mean and "
+            "best-round reward on every roster tested. Use --dueling by itself, "
+            "or --server_momentum by itself (weaker but non-negative). If you "
+            "have new evidence this combination helps in some other setting, "
+            "update sec 18 and remove/relax this check rather than silently "
+            "bypassing it."
+        )
     main(args)

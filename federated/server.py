@@ -12,7 +12,13 @@ from typing import Any, Dict, List, Optional
 
 import torch
 
-from federated.aggregation import aggregate_round
+from federated.aggregation import (
+    aggregate_round,
+    evaluate_with_optional_ema,
+    head_key_names,
+    shape_server_update,
+    update_eval_ema,
+)
 from federated.aggregation_strategies import (
     BaseAggregationStrategy,
     ClusteredFedAvgStrategy,
@@ -38,6 +44,10 @@ class FederatedServer:
         use_masked_head: bool = True,
         no_federation: bool = False,
         fedavg_blend: float = 1.0,
+        dueling: bool = False,
+        server_momentum: float = 0.0,
+        pseudo_grad_clip: float = 0.0,
+        eval_ema_decay: float = 0.0,
     ):
         self.global_model = global_model
         self.clients = clients
@@ -46,6 +56,12 @@ class FederatedServer:
         self.use_masked_head = use_masked_head
         self.no_federation = bool(no_federation)
         self.fedavg_blend = float(max(0.0, min(1.0, fedavg_blend)))
+        self._head_weight_key, self._head_bias_key = head_key_names(dueling)
+        self.server_momentum = float(server_momentum)
+        self._momentum_buffer: Optional[Dict[str, torch.Tensor]] = None
+        self.pseudo_grad_clip = float(pseudo_grad_clip)
+        self.eval_ema_decay = float(eval_ema_decay)
+        self._eval_ema_state: Optional[Dict[str, torch.Tensor]] = None
 
         self.strategy: BaseAggregationStrategy = build_aggregation_strategy(
             aggregation_strategy, aggregation_config
@@ -321,6 +337,8 @@ class FederatedServer:
                     base_weights=[weights[cid] for cid in ordered_ids],
                     action_counts=[client_action_counts.get(cid) for cid in ordered_ids],
                     use_masked_head=self.use_masked_head,
+                    head_weight_key=self._head_weight_key,
+                    head_bias_key=self._head_bias_key,
                     previous_global_state=global_state_before,
                 )
 
@@ -332,7 +350,16 @@ class FederatedServer:
                         for k in agg_state
                     }
 
+                agg_state, self._momentum_buffer = shape_server_update(
+                    agg_state, global_state_before,
+                    self.pseudo_grad_clip, self.server_momentum, self._momentum_buffer,
+                )
+
                 self.global_model.load_state_dict(agg_state)
+                if self.eval_ema_decay > 0.0:
+                    self._eval_ema_state = update_eval_ema(
+                        self._eval_ema_state, agg_state, self.eval_ema_decay
+                    )
 
             # Update the federation's own trajectory.
             new_global_gradient = self.strategy.compute_pseudo_gradient(
@@ -380,7 +407,10 @@ class FederatedServer:
                         metrics, per_model = self._evaluate_multiple_models(eval_named_states)
                         history.setdefault("eval_per_model", []).append(per_model)
                     else:
-                        metrics = self.evaluator.evaluate(self.global_model)
+                        metrics = evaluate_with_optional_ema(
+                            self.evaluator, self.global_model,
+                            self.eval_ema_decay, self._eval_ema_state,
+                        )
 
                     history["eval_reward"].append(metrics["mean_reward"])
                     history["eval_reward_std"].append(metrics.get("std_reward"))

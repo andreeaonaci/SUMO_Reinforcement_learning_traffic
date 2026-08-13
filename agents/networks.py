@@ -71,12 +71,14 @@ class NeighborAttentionQNetwork(nn.Module):
         n_heads: int = 4,
         n_hops: int = 4,
         head_fix: bool = True,
+        dueling: bool = False,
     ):
         super().__init__()
         self.k_max = k_max
         self.d_model = d_model
         self.n_hops = n_hops
         self.head_fix = head_fix
+        self.dueling = dueling
 
         self.own_encoder = nn.Sequential(
             nn.Linear(own_dim, d_model),
@@ -111,13 +113,32 @@ class NeighborAttentionQNetwork(nn.Module):
         # degenerate all-masked softmax.
         self.no_neighbor_token = nn.Parameter(torch.zeros(1, 1, d_model))
 
+        # Trunk shared by both the plain and dueling heads. Kept as a
+        # 4-element Sequential (Linear, ReLU, Linear, ReLU) so the plain
+        # (non-dueling) path can still append a single final Linear at
+        # index 4 and keep the "head.4.weight"/"head.4.bias" key names
+        # `federated/aggregation.py::masked_head_weighted_average` already
+        # looks for by default -- no aggregation-side change needed unless
+        # dueling is actually turned on.
         self.head = nn.Sequential(
             nn.Linear(d_model * 2, d_model),
             nn.ReLU(),
             nn.Linear(d_model, d_model),
             nn.ReLU(),
-            nn.Linear(d_model, action_dim),
         )
+
+        if self.dueling:
+            # V(s): one scalar per intersection, no action_mask involved --
+            # every client updates every element of this every step, so
+            # (unlike the fully action-indexed plain head) it aggregates
+            # cleanly with an ordinary weighted average across cities of
+            # any action_dim. A(s,a): the actual action-indexed stream,
+            # still exactly action_dim wide -- masked-head aggregation
+            # (see federated/aggregation.py) still applies to this one.
+            self.value_head = nn.Linear(d_model, 1)
+            self.advantage_head = nn.Linear(d_model, action_dim)
+        else:
+            self.head.append(nn.Linear(d_model, action_dim))
 
         if not self.head_fix:
             self.pool_head = nn.Sequential(
@@ -125,6 +146,16 @@ class NeighborAttentionQNetwork(nn.Module):
                 nn.ReLU(),
                 nn.Linear(d_model, d_model),
             )
+
+    def _q_from_features(self, combined: torch.Tensor) -> torch.Tensor:
+        """Shared trunk -> Q-values, either straight through the plain head
+        or combined dueling-style (Q = V + A - mean(A)) if ``dueling``."""
+        feat = self.head(combined)
+        if not self.dueling:
+            return feat
+        value = self.value_head(feat)
+        advantage = self.advantage_head(feat)
+        return value + (advantage - advantage.mean(dim=-1, keepdim=True))
 
     def forward(
         self,
@@ -145,7 +176,7 @@ class NeighborAttentionQNetwork(nn.Module):
             nbr_pool = nbr_pool / nbr_count
             nbr_pool = self.pool_head(nbr_pool)
             combined = torch.cat([own_emb, nbr_pool], dim=-1)
-            return self.head(combined)
+            return self._q_from_features(combined)
 
         if hop_dist is not None:
             hop_dist = hop_dist.clamp(0, self.n_hops)
@@ -178,4 +209,4 @@ class NeighborAttentionQNetwork(nn.Module):
         attn_out = self.attn_norm(attn_out + own_emb)  # residual
 
         combined = torch.cat([own_emb, attn_out], dim=-1)
-        return self.head(combined)
+        return self._q_from_features(combined)

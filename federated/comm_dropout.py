@@ -28,8 +28,10 @@ from typing import Optional
 import random
 import numpy as np
 
+from environments.federated_env import FixedTsForwardingMixin
 
-class CommDropoutWrapper:
+
+class CommDropoutWrapper(FixedTsForwardingMixin):
     """Wraps an environment so training sees lossy inter-intersection communication."""
 
     def __init__(

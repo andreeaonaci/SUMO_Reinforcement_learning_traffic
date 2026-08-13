@@ -427,8 +427,10 @@ class SumoEnvironment(gym.Env):
             for ts, act in action.items():
                 if ts not in self.ts_ids:
                     raise KeyError(f"Unknown traffic signal id: {ts}")
-                if self.traffic_signals[ts].time_to_act:
-                    self._apply_actions({ts: act})
+            if not self.fixed_ts:
+                for ts, act in action.items():
+                    if self.traffic_signals[ts].time_to_act:
+                        self._apply_actions({ts: act})
 
         if not self.fixed_ts:
             self._run_steps()

@@ -35,13 +35,22 @@ fed by queue messages instead of direct method calls.
 import logging
 import multiprocessing as mp
 import os
+import random
 import sys
 import json
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
 import torch
 
-from federated.aggregation import masked_head_weighted_average, weighted_average
+from federated.aggregation import (
+    aggregate_round,
+    evaluate_with_optional_ema,
+    head_key_names,
+    shape_server_update,
+    update_eval_ema,
+    weighted_average,
+)
 from federated.aggregation_strategies import (
     BaseAggregationStrategy,
     ClusteredFedAvgStrategy,
@@ -52,6 +61,7 @@ from federated.aggregation_strategies import (
 from federated.comm_dropout import CommDropoutWrapper
 from environments.federated_env import build_federated_env, ActionMaskPadder
 from agents.dqn import DQNAgent
+from federated.utils import set_seed
 
 logger = logging.getLogger(__name__)
 
@@ -73,9 +83,13 @@ def _client_worker(
     head_fix: bool,
     tau: float,
     target_update: int,
+    mu: float,
+    dueling: bool,
+    n_step: int,
     log_file: str,
     in_queue: "mp.Queue",
     out_queue: "mp.Queue",
+    seed: Optional[int] = None,
 ):
     """Runs inside its own process for the ENTIRE training run.
 
@@ -87,6 +101,18 @@ def _client_worker(
     ``agent.train()`` returns ``(state_dict, n_samples, mean_loss)`` --
     all three are sent back so the server can build a ``ClientRoundInfo``
     for strategies that need a loss signal (ema_loss, ema_alignment, ...).
+
+    Seeding note: ``mp.get_context("spawn")`` starts a brand-new
+    interpreter per worker -- it does NOT inherit the main process's
+    ``random``/``numpy``/``torch`` global RNG state, so the top-level
+    ``set_seed(args.seed)`` call in ``experiments/federated_training.py``
+    never reaches here. Without the explicit seeding below, every worker's
+    epsilon-greedy exploration (``agents/dqn.py``'s ``random.random()``/
+    ``random.choice()``), replay-buffer minibatch sampling
+    (``random.sample()``), and comm-dropout pattern are seeded from OS
+    entropy at process start -- different every run regardless of
+    ``--seed``. This was the primary source of the run-to-run
+    non-determinism documented in ``fidings/divergence_investigation.md``.
     """
     logging.basicConfig(
         level=logging.INFO,
@@ -97,15 +123,35 @@ def _client_worker(
         ],
         force=True,
     )
+    # Each city already gets its own OS process for parallelism -- torch's
+    # default intra-op thread pool (one per process, sized to all visible
+    # cores) is redundant on top of that and actively harmful: N cities
+    # each spawning e.g. 6 BLAS threads on a 12-core box means 6x more
+    # threads than cores the moment more than ~2 workers train at once,
+    # thrashing on context switches instead of doing useful work. Pin each
+    # worker to a single thread so the OS scheduler just runs N processes
+    # on N cores directly.
+    torch.set_num_threads(1)
+    torch.set_num_interop_threads(1)
+    set_seed(seed)
     try:
         env = build_federated_env(cfg)
-        env = CommDropoutWrapper(ActionMaskPadder(env, action_dim), **comm_dropout_cfg)
+        dropout_cfg = dict(comm_dropout_cfg)
+        # Offset by a large prime rather than reusing `seed` verbatim: the
+        # comm-dropout RNG (its own random.Random/np.random.RandomState
+        # instance, see CommDropoutWrapper) and the global random/np.random
+        # state seeded by set_seed() above are otherwise handed the exact
+        # same integer, so they'd produce identical -- not just
+        # independent-looking -- pseudorandom sequences.
+        dropout_cfg.setdefault("seed", None if seed is None else seed + 1_000_003)
+        env = CommDropoutWrapper(ActionMaskPadder(env, action_dim), **dropout_cfg)
         agent = DQNAgent(
             own_dim=own_dim, neighbor_dim=neighbor_dim, k_max=k_max,
             action_dim=action_dim, eps_decay=eps_decay,
             lr=lr, lr_decay=lr_decay, min_lr=min_lr,
             head_fix=head_fix,
             tau=tau, target_update=target_update,
+            mu=mu, dueling=dueling, n_step=n_step,
         )
 
         while True:
@@ -114,7 +160,7 @@ def _client_worker(
                 break
 
             _, global_state = msg
-            agent.load_state_dict(global_state)
+            agent.start_round(global_state)
             try:
                 eps_start = agent.current_epsilon()
                 state_dict, n_samples, mean_loss, action_counts = agent.train(
@@ -190,6 +236,13 @@ class ParallelFederatedServer:
         fedavg_blend: float = 1.0,
         tau: float = 0.005,
         target_update: int = 200,
+        seed: Optional[int] = None,
+        mu: float = 0.0,
+        dueling: bool = False,
+        server_momentum: float = 0.0,
+        n_step: int = 1,
+        pseudo_grad_clip: float = 0.0,
+        eval_ema_decay: float = 0.0,
     ):
         self.global_model = global_model
         self.evaluator = evaluator
@@ -197,7 +250,18 @@ class ParallelFederatedServer:
         self.log_file = log_file or os.path.join(checkpoint_dir, "training.log")
         self.client_checkpoint_every = client_checkpoint_every
         self.no_federation = bool(no_federation)
+        self.head_fix = bool(head_fix)
         self.fedavg_blend = float(max(0.0, min(1.0, fedavg_blend)))
+        self._head_weight_key, self._head_bias_key = head_key_names(dueling)
+        self.server_momentum = float(server_momentum)
+        self._momentum_buffer: Optional[Dict[str, torch.Tensor]] = None
+        self.pseudo_grad_clip = float(pseudo_grad_clip)
+        # Eval-only EMA snapshot: smooths what gets evaluated/reported each
+        # round without touching what's actually broadcast to clients next
+        # round (that always stays the raw aggregated state -- see the
+        # eval-time swap in run() below). 0 = disabled, exact no-op.
+        self.eval_ema_decay = float(eval_ema_decay)
+        self._eval_ema_state: Optional[Dict[str, torch.Tensor]] = None
         os.makedirs(os.path.join(checkpoint_dir, "clients"), exist_ok=True)
         self.strategy = build_aggregation_strategy(
             aggregation_strategy, aggregation_config
@@ -226,8 +290,13 @@ class ParallelFederatedServer:
 
         per_city_lr = per_city_lr or {}
         self.processes = []
-        for name, cfg in city_configs:
+        for idx, (name, cfg) in enumerate(city_configs):
             city_lr = per_city_lr.get(name, default_lr)
+            # Distinct-but-deterministic per-city seed: same --seed always
+            # reproduces the same run, but cities don't all explore/sample
+            # identically (see _client_worker's docstring for why this is
+            # needed at all under spawn-based multiprocessing).
+            city_seed = None if seed is None else seed + idx
             p = ctx.Process(
                 target=_client_worker,
                 args=(
@@ -236,14 +305,16 @@ class ParallelFederatedServer:
                     city_lr, lr_decay, min_lr,
                     head_fix,
                     tau, target_update,
+                    mu, dueling, n_step,
                     self.log_file,
                     self.in_queues[name], self.out_queue,
+                    city_seed,
                 ),
                 daemon=True,
             )
             p.start()
             self.processes.append(p)
-            logger.info("[parallel] city='%s' lr=%.2e lr_decay=%.4f", name, city_lr, lr_decay)
+            logger.info("[parallel] city='%s' lr=%.2e lr_decay=%.4f seed=%s", name, city_lr, lr_decay, city_seed)
 
         logger.info("Started %d parallel city worker processes.", len(self.processes))
 
@@ -445,10 +516,24 @@ class ParallelFederatedServer:
                 else:
                     weights = self.strategy.compute_weights(infos)
                     ordered_ids = [info.client_id for info in infos]
-                    agg_state = masked_head_weighted_average(
-                        [client_states[cid] for cid in ordered_ids],
-                        [weights[cid] for cid in ordered_ids],
-                        [client_action_counts.get(cid) for cid in ordered_ids],
+                    # `use_masked_head=self.head_fix` is what makes
+                    # `--disable_head_fix` actually disable masked-head
+                    # aggregation -- this branch used to call
+                    # masked_head_weighted_average unconditionally, so the
+                    # flag never worked under `--parallel` (it only changed
+                    # the local network's neighbor-processing architecture,
+                    # via head_fix threaded into _client_worker). Reusing
+                    # aggregate_round() here instead of reimplementing the
+                    # dispatch also keeps this in sync with the sequential
+                    # path (federated/server.py), which already calls it the
+                    # same way via `use_masked_head=self.use_masked_head`.
+                    agg_state = aggregate_round(
+                        state_dicts=[client_states[cid] for cid in ordered_ids],
+                        base_weights=[weights[cid] for cid in ordered_ids],
+                        action_counts=[client_action_counts.get(cid) for cid in ordered_ids],
+                        use_masked_head=self.head_fix,
+                        head_weight_key=self._head_weight_key,
+                        head_bias_key=self._head_bias_key,
                         previous_global_state=global_state_before,
                     )
                     if self.fedavg_blend < 1.0:
@@ -458,7 +543,15 @@ class ParallelFederatedServer:
                             k: b * agg_state[k].float() + (1.0 - b) * prev_state[k].float()
                             for k in agg_state
                         }
+                    agg_state, self._momentum_buffer = shape_server_update(
+                        agg_state, global_state_before,
+                        self.pseudo_grad_clip, self.server_momentum, self._momentum_buffer,
+                    )
                     self.global_model.load_state_dict(agg_state)
+                    if self.eval_ema_decay > 0.0:
+                        self._eval_ema_state = update_eval_ema(
+                            self._eval_ema_state, agg_state, self.eval_ema_decay
+                        )
 
                 new_global_gradient = self.strategy.compute_pseudo_gradient(
                     agg_state, global_state_before
@@ -487,7 +580,10 @@ class ParallelFederatedServer:
                             metrics, per_model = self._evaluate_multiple_models(eval_named_states)
                             history.setdefault("eval_per_model", []).append(per_model)
                         else:
-                            metrics = self.evaluator.evaluate(self.global_model)
+                            metrics = evaluate_with_optional_ema(
+                                self.evaluator, self.global_model,
+                                self.eval_ema_decay, self._eval_ema_state,
+                            )
                         history["eval_reward"].append(metrics["mean_reward"])
                         history["eval_reward_std"].append(metrics.get("std_reward"))
                         history["eval_reward_episodes"].append(metrics.get("per_episode_reward"))
