@@ -386,7 +386,7 @@ risk destabilizing what's already working. Rank roughly by effort-to-value:
   `--server_momentum`.**
 - **EMA-averaged eval snapshot.** Implemented and tested 2026-08-09/10
   (`--eval_ema_decay`, see `federated/server.py` and
-`federated/parallel_server.py`'s eval-time state-swap). Scoped to
+`federated/parallel_server.py`'s eval-time state-swap). Scoped to 
   evaluation only (not checkpoint files) — maintains a separate EMA copy
   of the aggregated weights, temporarily swapped in for the evaluator call
   and swapped back out immediately after, so training/broadcast is

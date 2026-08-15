@@ -10,10 +10,12 @@ per-topology code or models.
 """
 import argparse
 from datetime import datetime
+import glob
 import json
 import logging
 import os
 import pprint
+import re
 import sys
 import yaml
 
@@ -53,6 +55,34 @@ DEFAULT_COMM_DROPOUT = dict(
 def steps_per_episode_from_cfg(cfg: dict) -> int:
     """Ticks per episode = num_seconds / delta_time."""
     return int(cfg.get("num_seconds", 3600) // cfg.get("delta_time", 5))
+
+
+def resolve_resume(resume_arg: str) -> tuple:
+    """Resolve --resume into (run_dir, checkpoint_path, completed_round).
+
+    Accepts either a run directory (picks its latest global_round_*.pth) or
+    a direct path to one checkpoint file. Only the global model weights and
+    the round number are recoverable from a checkpoint -- each worker's
+    replay buffer, optimizer momentum, and epsilon step counter live only
+    in that worker's now-gone process memory and are NOT restored; the
+    resumed run's workers rebuild those from scratch (epsilon's step
+    counter is approximated instead of reset, see init_steps_done below).
+    """
+    if os.path.isdir(resume_arg):
+        run_dir = resume_arg
+        ckpts = sorted(glob.glob(os.path.join(run_dir, "global_round_*.pth")))
+        if not ckpts:
+            raise ValueError(f"--resume: no global_round_*.pth checkpoints found in {resume_arg}")
+        ckpt_path = ckpts[-1]
+    else:
+        ckpt_path = resume_arg
+        run_dir = os.path.dirname(ckpt_path) or "."
+
+    m = re.search(r"global_round_(\d+)\.pth$", os.path.basename(ckpt_path))
+    if not m:
+        raise ValueError(f"--resume: could not parse a round number out of checkpoint path {ckpt_path}")
+    completed_round = int(m.group(1))
+    return run_dir, ckpt_path, completed_round
 
 
 def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: bool = True,
@@ -380,18 +410,34 @@ def main(args):
 
     set_seed(args.seed)
 
-    # PID suffix: without it, two processes launched within the same
-    # wall-clock second (e.g. several concurrent runs kicked off by a
-    # batch script) compute the identical run_dir string. `exist_ok=True`
-    # below would then silently let the second process write into the
-    # first's directory -- interleaved checkpoints/logs/history from two
-    # different seeds in one folder, no error, no warning. The PID makes
-    # collisions require literal PID reuse (not a real risk in practice).
-    timestamp = datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
-    run_dir = os.path.join("results", f"run_{timestamp}_{os.getpid()}")
-    os.makedirs("results", exist_ok=True)
-    os.makedirs(run_dir, exist_ok=False)
+    if args.resume and not args.parallel:
+        raise ValueError("--resume is only supported with --parallel (the sequential path "
+                          "rebuilds clients/state each round and has no matching restore).")
+    if args.resume and args.baseline_controller != "none":
+        raise ValueError("--resume doesn't apply to --baseline_controller runs "
+                          "(no training rounds/checkpoints to resume).")
 
+    resume_ckpt_path = None
+    resume_completed_round = 0
+    if args.resume:
+        run_dir, resume_ckpt_path, resume_completed_round = resolve_resume(args.resume)
+        os.makedirs(run_dir, exist_ok=True)
+    else:
+        # PID suffix: without it, two processes launched within the same
+        # wall-clock second (e.g. several concurrent runs kicked off by a
+        # batch script) compute the identical run_dir string. `exist_ok=True`
+        # below would then silently let the second process write into the
+        # first's directory -- interleaved checkpoints/logs/history from two
+        # different seeds in one folder, no error, no warning. The PID makes
+        # collisions require literal PID reuse (not a real risk in practice).
+        timestamp = datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
+        run_dir = os.path.join("results", f"run_{timestamp}_{os.getpid()}")
+        os.makedirs("results", exist_ok=True)
+        os.makedirs(run_dir, exist_ok=False)
+
+    # logging.FileHandler defaults to append mode, so re-pointing it at an
+    # existing run_dir's log on --resume naturally continues the same file
+    # rather than overwriting it.
     log_file = os.path.join(run_dir, "training.log")
     logging.basicConfig(
         level=logging.INFO,
@@ -412,6 +458,11 @@ def main(args):
         args.eval_episodes,
         args.rounds,
     )
+    if args.resume:
+        logger.info(
+            "Resuming from %s (completed round %d) -- continuing to round %d in %s",
+            resume_ckpt_path, resume_completed_round, args.rounds, run_dir,
+        )
 
     if args.no_federation and args.aggregation_strategy != "fedavg":
         logger.warning(
@@ -502,6 +553,29 @@ def main(args):
             dueling=args.dueling,
             n_step=args.n_step,
         )
+
+        start_round = 1
+        init_steps_done = 0
+        initial_history = None
+        if args.resume:
+            global_model.load(resume_ckpt_path)
+            start_round = resume_completed_round + 1
+            # Approximation, not an exact replay: assumes every completed
+            # round ran the same step count (local_episodes * steps_per_ep),
+            # which holds unless an episode terminated early. Close enough
+            # to pick epsilon back up mid-decay instead of restarting
+            # exploration at eps_start on a model that's already learned.
+            init_steps_done = resume_completed_round * args.local_episodes * steps_per_ep
+            history_path = os.path.join(run_dir, "federated_history.json")
+            if os.path.exists(history_path):
+                with open(history_path) as f:
+                    initial_history = json.load(f)
+            logger.info(
+                "[parallel] Resume: start_round=%d init_steps_done=%d prior_history_rounds=%d",
+                start_round, init_steps_done,
+                len(initial_history["round"]) if initial_history else 0,
+            )
+
         evaluator = make_holdout_evaluator(
             base,
             obs_dims,
@@ -557,8 +631,14 @@ def main(args):
             n_step=args.n_step,
             pseudo_grad_clip=args.pseudo_grad_clip,
             eval_ema_decay=args.eval_ema_decay,
+            init_steps_done=init_steps_done,
         )
-        history = server.run(rounds=args.rounds, eval_every=args.eval_every)
+        history = server.run(
+            rounds=args.rounds,
+            eval_every=args.eval_every,
+            start_round=start_round,
+            initial_history=initial_history,
+        )
 
         if evaluator:
             evaluator.close()
@@ -649,6 +729,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--rounds",               type=int,   default=10)
     parser.add_argument("--seed",                 type=int,   default=None)
+    parser.add_argument(
+        "--resume", type=str, default=None,
+        help="Continue an interrupted --parallel run instead of starting fresh. Pass either a "
+             "run_dir (its latest global_round_*.pth is used) or a direct checkpoint path. "
+             "Restores global model weights and the round counter, and approximates each "
+             "worker's epsilon step count so exploration doesn't restart from eps_start -- but "
+             "NOT each worker's replay buffer or optimizer momentum, which only ever lived in "
+             "the killed process's memory. --rounds must be the original run's target total "
+             "(e.g. the same --rounds 40), not a remaining-rounds count.",
+    )
     parser.add_argument("--local_episodes",        type=int,   default=1)
     parser.add_argument("--eval_every",            type=int,   default=1)
     parser.add_argument("--eval_episodes",         type=int,   default=5)

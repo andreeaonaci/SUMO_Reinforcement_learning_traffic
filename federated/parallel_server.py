@@ -90,6 +90,7 @@ def _client_worker(
     in_queue: "mp.Queue",
     out_queue: "mp.Queue",
     seed: Optional[int] = None,
+    init_steps_done: int = 0,
 ):
     """Runs inside its own process for the ENTIRE training run.
 
@@ -152,6 +153,7 @@ def _client_worker(
             head_fix=head_fix,
             tau=tau, target_update=target_update,
             mu=mu, dueling=dueling, n_step=n_step,
+            init_steps_done=init_steps_done,
         )
 
         while True:
@@ -243,6 +245,7 @@ class ParallelFederatedServer:
         n_step: int = 1,
         pseudo_grad_clip: float = 0.0,
         eval_ema_decay: float = 0.0,
+        init_steps_done: int = 0,
     ):
         self.global_model = global_model
         self.evaluator = evaluator
@@ -308,7 +311,7 @@ class ParallelFederatedServer:
                     mu, dueling, n_step,
                     self.log_file,
                     self.in_queues[name], self.out_queue,
-                    city_seed,
+                    city_seed, init_steps_done,
                 ),
                 daemon=True,
             )
@@ -375,8 +378,19 @@ class ParallelFederatedServer:
             json.dump(history, f, indent=2)
         os.replace(tmp_path, history_path)
 
-    def run(self, rounds: int, eval_every: int = 1) -> Dict[str, Any]:
-        history: Dict[str, list] = {
+    def run(
+        self,
+        rounds: int,
+        eval_every: int = 1,
+        start_round: int = 1,
+        initial_history: Optional[Dict[str, list]] = None,
+    ) -> Dict[str, Any]:
+        # On a fresh run start_round=1 and initial_history=None -- identical
+        # to the old always-empty-dict behavior. On --resume, the caller
+        # passes the previous run's federated_history.json (already loaded)
+        # so newly-completed rounds get appended to the same lists instead
+        # of the history starting over from round 1.
+        history: Dict[str, list] = initial_history if initial_history is not None else {
             "round": [], "client_samples": [], "eval_reward": [],
             "round_eps_start": [], "round_eps_end": [],
             "eval_reward_std": [], "eval_reward_episodes": [],
@@ -387,13 +401,17 @@ class ParallelFederatedServer:
             "eval_mode": [], "cluster_assignments": [],
         }
 
+        # self.global_model already carries the resumed checkpoint's weights
+        # when start_round > 1 (loaded by the caller before constructing this
+        # server), so cloning it here into every client's starting state is
+        # correct in both the fresh-run and resumed-run case.
         base_global_state = self._clone_state_dict(self.global_model.state_dict())
         per_client_state: Dict[str, Dict[str, torch.Tensor]] = {
             name: self._clone_state_dict(base_global_state) for name in self.names
         }
 
         try:
-            for r in range(1, rounds + 1):
+            for r in range(start_round, rounds + 1):
                 logger.info("=== Federated round %d / %d (parallel) ===", r, rounds)
                 global_state_before = self.global_model.state_dict()
 

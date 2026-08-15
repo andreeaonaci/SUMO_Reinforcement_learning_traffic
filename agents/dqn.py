@@ -122,6 +122,7 @@ class DQNAgent:
         mu: float = 0.0,
         dueling: bool = False,
         n_step: int = 1,
+        init_steps_done: int = 0,
     ):
         self.own_dim = own_dim
         self.neighbor_dim = neighbor_dim
@@ -166,7 +167,10 @@ class DQNAgent:
         self.eps_start = 1.0
         self.eps_end = 0.05
         self.eps_decay = eps_decay
-        self.steps_done = 0
+        # Starts at 0 for a fresh agent; a resumed run passes the step count
+        # the schedule would have reached by the resume round, so epsilon
+        # picks up mid-decay instead of restarting at eps_start.
+        self.steps_done = init_steps_done
         self.target_update = target_update
         self.tau = tau          # 0 = legacy hard copy; >0 = Polyak soft update every step
         self.learn_steps = 0
