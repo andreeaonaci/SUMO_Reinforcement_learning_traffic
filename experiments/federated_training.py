@@ -121,8 +121,13 @@ def load_clients(
     mu: float = 0.0,
     dueling: bool = False,
     n_step: int = 1,
+    reward_shaping: dict | None = None,
 ) -> tuple:
     """Build one FederatedClient per city directory.
+
+    Args:
+        reward_shaping: see resolve_city_configs_and_dims -- same semantics
+            (applied to every city unless it defines its own block).
 
     Returns:
         clients     list of FederatedClient
@@ -142,6 +147,8 @@ def load_clients(
             continue
         with open(cfg_path) as f:
             cfg = yaml.safe_load(f)
+        if reward_shaping and "reward_shaping" not in cfg:
+            cfg["reward_shaping"] = reward_shaping
         env = build_federated_env(cfg)
         city_envs.append((name, env, cfg))
 
@@ -214,11 +221,17 @@ def load_clients(
 # Dim resolution  (parallel path — workers build their own envs)
 # ---------------------------------------------------------------------------
 
-def resolve_city_configs_and_dims(base_dir: str) -> tuple:
+def resolve_city_configs_and_dims(base_dir: str, reward_shaping: dict | None = None) -> tuple:
     """Read dims and raw configs for the parallel path.
 
     Workers receive the raw cfg dict and build their own SUMO env inside
     their own process — a live SUMO env can't cross a process boundary.
+
+    Args:
+        reward_shaping: if given, applied uniformly to every city's cfg
+            UNLESS that city's own config.yaml already sets its own
+            `reward_shaping` block (per-city config always wins). See
+            --reward_shaping_wait_weight / --reward_shaping_stopped_weight.
 
     Returns:
         city_configs      list of (name, cfg)
@@ -238,6 +251,8 @@ def resolve_city_configs_and_dims(base_dir: str) -> tuple:
             continue
         with open(cfg_path) as f:
             cfg = yaml.safe_load(f)
+        if reward_shaping and "reward_shaping" not in cfg:
+            cfg["reward_shaping"] = reward_shaping
         if first_cfg is None:
             first_cfg = cfg
         env = build_federated_env(cfg)
@@ -262,6 +277,65 @@ def resolve_city_configs_and_dims(base_dir: str) -> tuple:
     steps_per_episode = steps_per_episode_from_cfg(first_cfg)
 
     return city_configs, (own_dim, neighbor_dim, k_max), action_dim, steps_per_episode
+
+
+def maybe_pad_action_dim_to_true_holdout(
+    action_dim: int,
+    base_dir: str,
+    holdout_base_dir: str | None = None,
+) -> int:
+    """Widen ``action_dim`` to cover ``city_5_holdout``'s own action space,
+    if requested via ``--pad_to_true_holdout``.
+
+    Without this, a reduced roster (e.g. ``environments_c1_4``) builds its
+    shared Q-head only as wide as its OWN training cities' max action_dim
+    (5 for city_1+city_4) -- narrower than city_5_holdout's 8, so
+    ``make_holdout_evaluator`` always falls back to evaluating in-distribution
+    on one of the roster's own training cities instead of the true holdout
+    (confirmed for every 2-/3-city result in this project's history --
+    fidings/divergence_investigation.md sec 25/29). Padding the head width
+    up-front here means the model always has enough output rows to be
+    evaluated against the real holdout; the extra rows a small roster's
+    cities never touch are simply always 0 in their action_mask, same
+    mechanism ActionMaskPadder already uses for cross-city width differences.
+
+    Uses the same base-dir search order as make_holdout_evaluator (base_dir,
+    then holdout_base_dir, then "environments") so this padding decision and
+    the evaluator's own compatibility check are always looking at the same
+    candidate holdout config.
+    """
+    candidate_base_dirs = [base_dir]
+    if holdout_base_dir and holdout_base_dir not in candidate_base_dirs:
+        candidate_base_dirs.append(holdout_base_dir)
+    if "environments" not in candidate_base_dirs:
+        candidate_base_dirs.append("environments")
+
+    for candidate in candidate_base_dirs:
+        cfg_path = os.path.join(candidate, "city_5_holdout", "config.yaml")
+        if not os.path.exists(cfg_path):
+            continue
+        with open(cfg_path) as f:
+            holdout_cfg = yaml.safe_load(f)
+        env = build_federated_env(holdout_cfg)
+        try:
+            holdout_action_dim = env.max_action_dim
+        finally:
+            env.close()
+        if holdout_action_dim > action_dim:
+            logger.info(
+                "--pad_to_true_holdout: widening action_dim %d -> %d so this "
+                "roster's shared Q-head can be evaluated against the true "
+                "city_5_holdout instead of falling back to a training city.",
+                action_dim, holdout_action_dim,
+            )
+        return max(action_dim, holdout_action_dim)
+
+    logger.warning(
+        "--pad_to_true_holdout was set but no city_5_holdout config was "
+        "found under any of %s -- action_dim left unchanged.",
+        candidate_base_dirs,
+    )
+    return action_dim
 
 
 # ---------------------------------------------------------------------------
@@ -313,11 +387,13 @@ def make_holdout_evaluator(
 
     selected_cfg = None
     selected_name = None
+    preferred_holdout_action_dim = None
 
     # First preference: true holdout city if compatible.
     if preferred_cfg is not None:
         env = build_federated_env(preferred_cfg)
         try:
+            preferred_holdout_action_dim = env.max_action_dim
             dims_match = (
                 env.own_dim == own_dim
                 and env.neighbor_dim == neighbor_dim
@@ -370,9 +446,38 @@ def make_holdout_evaluator(
         )
         return None
 
-    if selected_name != "city_5_holdout":
-        logger.info(
-            "Using '%s' as evaluation city for this run (compatibility fallback).",
+    is_true_holdout = selected_name == "city_5_holdout"
+
+    if not is_true_holdout:
+        # LOUD, not just a log line easy to scroll past: this run's eval
+        # numbers are in-distribution on one of its own training cities, not
+        # a genuine holdout -- every past 2-/3-city result in this project's
+        # history got this wrong silently (fidings/divergence_investigation.md
+        # sec 25/29). Printed directly to stdout (in addition to the logger
+        # call below) so it can't be missed even with logging turned down,
+        # and stamped into every eval result via HoldoutEvaluator's
+        # eval_city_name/is_true_holdout fields so federated_history.json
+        # itself is self-describing without needing to grep a log.
+        holdout_width_str = (
+            str(preferred_holdout_action_dim) if preferred_holdout_action_dim is not None else "?"
+        )
+        print(
+            "\n" + "!" * 78 + "\n"
+            f"!!! NOT A TRUE HOLDOUT: evaluating on '{selected_name}', one of this "
+            "roster's own\n"
+            "!!! training cities, because city_5_holdout's action space "
+            f"(width {holdout_width_str}) doesn't fit this "
+            f"roster's action_dim={action_dim}.\n"
+            "!!! Results are in-distribution, not evidence of generalization "
+            "to an unseen city.\n"
+            "!!! Fix: pass --pad_to_true_holdout, or use a roster whose global "
+            "action_dim already\n"
+            "!!! covers city_5_holdout (the full 7-city 'environments' roster "
+            "does).\n" + "!" * 78 + "\n"
+        )
+        logger.warning(
+            "Using '%s' as evaluation city for this run (compatibility fallback, "
+            "NOT the true holdout).",
             selected_name,
         )
     elif preferred_cfg_path and not preferred_cfg_path.startswith(base_dir):
@@ -397,6 +502,8 @@ def make_holdout_evaluator(
         eval_seed_base=int(eval_sumo_seed),
         deterministic_eval=True,
         rebuild_env_each_evaluate=True,
+        eval_city_name=selected_name,
+        is_true_holdout=is_true_holdout,
     )
 
 
@@ -470,13 +577,25 @@ def main(args):
             args.aggregation_strategy,
         )
 
+    if args.pad_to_true_holdout and not args.parallel and args.baseline_controller == "none":
+        raise ValueError(
+            "--pad_to_true_holdout is only supported with --parallel (or "
+            "--baseline_controller). The sequential path's load_clients() "
+            "builds each client's action-padded env internally using its own "
+            "action_dim before this flag could widen it, so clients and the "
+            "global model/evaluator would end up mismatched -- use --parallel, "
+            "which is the real-training path anyway (see CLAUDE.md)."
+        )
+
     if args.base_dir is not None:
         base = args.base_dir
     else:
-        base = "environments" 
+        base = "environments"
 
     if args.baseline_controller != "none":
         city_configs, obs_dims, action_dim, _steps_per_ep = resolve_city_configs_and_dims(base)
+        if args.pad_to_true_holdout:
+            action_dim = maybe_pad_action_dim_to_true_holdout(action_dim, base, args.eval_base_dir)
         evaluator = make_holdout_evaluator(
             base,
             obs_dims,
@@ -509,6 +628,8 @@ def main(args):
             "eval_action_counts": [metrics.get("action_counts")],
             "eval_q_gaps": [metrics.get("q_gaps")],
             "eval_mode": [f"baseline_{args.baseline_controller}"],
+            "eval_city_name": [metrics.get("eval_city_name")],
+            "is_true_holdout": [metrics.get("is_true_holdout")],
             "cluster_assignments": [None],
             "baseline_controller": args.baseline_controller,
             "baseline_only": True,
@@ -529,8 +650,20 @@ def main(args):
         logger.info("Baseline-only history saved to %s", history_path)
         return
 
+    reward_shaping_cfg = None
+    if args.reward_shaping_wait_weight != 0.0 or args.reward_shaping_stopped_weight != 0.0:
+        reward_shaping_cfg = {
+            "wait_weight": args.reward_shaping_wait_weight,
+            "stopped_weight": args.reward_shaping_stopped_weight,
+        }
+        logger.info("Reward shaping (training only, not eval): %s", reward_shaping_cfg)
+
     if args.parallel:
-        city_configs, obs_dims, action_dim, steps_per_ep = resolve_city_configs_and_dims(base)
+        city_configs, obs_dims, action_dim, steps_per_ep = resolve_city_configs_and_dims(
+            base, reward_shaping=reward_shaping_cfg
+        )
+        if args.pad_to_true_holdout:
+            action_dim = maybe_pad_action_dim_to_true_holdout(action_dim, base, args.eval_base_dir)
         own_dim, neighbor_dim, k_max = obs_dims
 
         eps_decay = compute_eps_decay(
@@ -656,6 +789,7 @@ def main(args):
             mu=args.fedprox_mu,
             dueling=args.dueling,
             n_step=args.n_step,
+            reward_shaping=reward_shaping_cfg,
         )
         own_dim, neighbor_dim, k_max = obs_dims
 
@@ -850,6 +984,33 @@ if __name__ == "__main__":
         type=int,
         default=12345,
         help="Fixed SUMO seed for evaluation env so round-to-round comparisons use a deterministic scenario.",
+    )
+    parser.add_argument(
+        "--reward_shaping_wait_weight", type=float, default=0.0,
+        help="Subtract wait_weight * {ts}_accumulated_waiting_time from each intersection's "
+             "training reward (applied to every city unless it sets its own reward_shaping "
+             "block). Motivated by fidings/divergence_investigation.md sec 26: the trained "
+             "7-city policy handles steady-state throughput reasonably but is far worse than "
+             "fixed_time/max_pressure at draining queues to zero by episode end -- the base "
+             "reward signal apparently doesn't penalize residual waiting time enough for that "
+             "to be learned. Training-only: NOT applied during holdout evaluation, so eval "
+             "numbers stay comparable to fixed_time/max_pressure and to unshaped runs. 0.0 "
+             "(default) is an exact no-op.",
+    )
+    parser.add_argument(
+        "--reward_shaping_stopped_weight", type=float, default=0.0,
+        help="Subtract stopped_weight * {ts}_stopped (queue length) from each intersection's "
+             "training reward. See --reward_shaping_wait_weight. 0.0 (default) is an exact "
+             "no-op.",
+    )
+    parser.add_argument(
+        "--pad_to_true_holdout", action="store_true",
+        help="Widen this roster's shared Q-head to cover city_5_holdout's action space, "
+             "so a reduced roster (e.g. environments_c1_4) can be evaluated against the "
+             "real holdout instead of always falling back to one of its own training "
+             "cities (see fidings/divergence_investigation.md sec 25/29). Default off, "
+             "since every existing 2-/3-city result was produced without it and turning "
+             "it on changes the trained model's architecture width, not just evaluation.",
     )
     args = parser.parse_args()
     if args.dueling and args.server_momentum > 0.0:

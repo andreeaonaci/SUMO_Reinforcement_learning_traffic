@@ -24,6 +24,8 @@ class HoldoutEvaluator:
         eval_seed_base: int = 12345,
         deterministic_eval: bool = True,
         rebuild_env_each_evaluate: bool = True,
+        eval_city_name: str = "unknown",
+        is_true_holdout: bool = False,
     ):
         self.env_builder = env_builder
         self.episodes = max(1, episodes)
@@ -33,6 +35,17 @@ class HoldoutEvaluator:
         self.eval_seed_base = int(eval_seed_base)
         self.deterministic_eval = bool(deterministic_eval)
         self.rebuild_env_each_evaluate = bool(rebuild_env_each_evaluate)
+        # Which city this evaluator actually runs on, and whether that's the
+        # real held-out city or a compatibility-fallback training city --
+        # stamped into every result dict below (see evaluate()/
+        # evaluate_controller()) so federated_history.json is self-describing
+        # about eval validity without needing to grep a log line for it (see
+        # fidings/divergence_investigation.md sec 25/29 for the incident this
+        # is a response to: every 2-/3-city result silently evaluated
+        # in-distribution on a training city, indistinguishable from a real
+        # holdout result unless you went looking in the log).
+        self.eval_city_name = eval_city_name
+        self.is_true_holdout = bool(is_true_holdout)
         self._env = None
         self._round_robin_offset = {}
         self.last_summary = {}
@@ -328,6 +341,8 @@ class HoldoutEvaluator:
 
         summary = {}
         trained_result = self._evaluate_policy("trained", model=model, seed_offset=0, episode_count=self.episodes)
+        trained_result["eval_city_name"] = self.eval_city_name
+        trained_result["is_true_holdout"] = self.is_true_holdout
         summary["trained"] = trained_result
 
         if self.include_baselines:
@@ -360,6 +375,8 @@ class HoldoutEvaluator:
             seed_offset=0,
             episode_count=self.episodes,
         )
+        result["eval_city_name"] = self.eval_city_name
+        result["is_true_holdout"] = self.is_true_holdout
         summary = {controller_name: result}
         self.last_summary = summary
         self._persist_summary(summary)

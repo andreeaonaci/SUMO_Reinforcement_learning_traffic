@@ -367,6 +367,8 @@ class ParallelFederatedServer:
             "mean_arrived": self._mean(arrived),
             "action_counts": None,
             "q_gaps": None,
+            "eval_city_name": self.evaluator.eval_city_name,
+            "is_true_holdout": self.evaluator.is_true_holdout,
         }
         aggregate["eval_per_model"] = per_model
         return aggregate, per_model
@@ -399,6 +401,7 @@ class ParallelFederatedServer:
             "eval_arrived": [],
             "eval_action_counts": [], "eval_q_gaps": [],
             "eval_mode": [], "cluster_assignments": [],
+            "eval_city_name": [], "is_true_holdout": [],
         }
 
         # self.global_model already carries the resumed checkpoint's weights
@@ -614,6 +617,8 @@ class ParallelFederatedServer:
                         history["eval_arrived"].append(metrics.get("mean_arrived"))
                         history["eval_action_counts"].append(metrics.get("action_counts"))
                         history["eval_q_gaps"].append(metrics.get("q_gaps"))
+                        history.setdefault("eval_city_name", []).append(metrics.get("eval_city_name"))
+                        history.setdefault("is_true_holdout", []).append(metrics.get("is_true_holdout"))
                         logger.info(
                             "Round %d | reward mean=%.4f std=%.4f | waiting_time mean=%.2fs std=%.2f | stopped mean=%.1f std=%.1f",
                             r,
@@ -637,6 +642,8 @@ class ParallelFederatedServer:
                         history["eval_arrived"].append(None)
                         history["eval_action_counts"].append(None)
                         history["eval_q_gaps"].append(None)
+                        history.setdefault("eval_city_name", []).append(None)
+                        history.setdefault("is_true_holdout", []).append(None)
 
                     self._atomic_save_history(history)
                     logger.info(
