@@ -1616,6 +1616,104 @@ All 17 `run_dir`s are currently untracked local output (`results/` is not commit
 only on this machine as of this writeup; the tables in §30/§31 are the durable record if the
 directories are ever cleaned up.
 
+## 32. §28's weight-divergence/gradient-conflict diagnostic, finally run: negative result — simple
+    weight-space metrics don't predict the round-to-round reward swings
+
+**2026-08-16.** §28 flagged "diagnose *why* federated aggregation destabilizes a shared policy
+(e.g. per-round weight-divergence/gradient-conflict measurements across cities)" as the
+recommended next step, ahead of guessing at more hyperparameters. Built `diagnostics/
+weight_divergence.py` (new, reusable — takes any `run_dir` and two city names) and ran it against
+checkpoints already on disk from §30/§31's runs (no new training needed — every round's
+per-client and global `.pth` are saved by `parallel_server.py` regardless of this ablation).
+
+**Method, extending §11's precedent (which measured per-row Q-head delta magnitude between
+fix_on/fix_off) to whole-network and to cross-city *direction*, not just magnitude:** for each
+round r, `delta_city = flatten(client_round_r) - flatten(global_round_(r-1))` for both cities,
+then `||delta_city_1||`, `||delta_city_4||`, and `cos_sim(delta_city_1, delta_city_4)` (negative =
+the two cities' updates pull the shared model in different directions that round — direct evidence
+of the aggregation "dilution/conflict" §26/§28 hypothesized but never measured directly). Correlated
+against that round's actual reward change (`eval_reward[r] - eval_reward[r-1]`), on 3 runs (19
+rounds each) spanning both a crash-prone seed and a comparatively stable one:
+
+| run | mean cos_sim (whole-net) | corr(cos_sim, d_reward) | corr(max_client_norm, \|d_reward\|) |
+|---|---:|---:|---:|
+| `C_clean_attention_s2` (late crash, round 20: -2732) | -0.077 (18/19 rounds negative) | -0.224 | -0.424 |
+| `C_clean_attention_s1` (comparatively stable) | -0.082 (18/19 rounds negative) | -0.138 | -0.455 |
+| `C_clean_attention` seed3 (§30's original) | -0.062 (16/19 rounds negative) | -0.051 | +0.108 |
+
+**No reproducible predictive signal.** Correlations are weak (|r|<0.45) and, critically, **flip
+sign across runs** for `max_client_norm` (-0.424, -0.455, **+0.108**) — the opposite of a
+consistent "bigger/more-conflicting update this round → worse reward this round" story. Restricting
+to just the dueling output heads (`advantage_head`+`value_head`, the layer §11 found the real
+effect in for the masked-head question) doesn't recover a signal either — correlations stay weak
+and sign-flip the same way (`cos_sim` vs `d_reward`: +0.140, -0.223, +0.031 across the same three
+runs).
+
+**One real, if secondary, structural finding survives:** whole-network cross-city cosine similarity
+is consistently mildly negative (mean -0.06 to -0.08, negative in 16-18 of 19 rounds in every run
+tested) — `city_1` and `city_4`'s updates are persistently, mildly opposed, not aligned, as a
+constant background feature of this 2-city federation. Restricted to just the output heads, that
+conflict mostly disappears (mean -0.02 to +0.05) — **the cross-city tension concentrates in the
+shared backbone (attention + encoder layers used identically by both cities' different traffic
+patterns), not in the task-specific output head.** This is real and consistent across all three
+runs, but it's a constant, not a crash predictor: it doesn't spike before a bad round or relax
+before a good one, so it explains *that* the cities are in tension, not *when* that tension turns
+into a reward collapse.
+
+**Reading:** this rules out the most obvious next hypothesis rather than confirming it. The
+instability documented since §3 is not visible as an unusual weight-space event in the round that
+precedes it — whatever drives a good round into a catastrophic one isn't "the clients disagreed
+more than usual" or "the aggregated model moved further than usual" at the level of raw parameter
+deltas. That pushes the likely mechanism toward something downstream of the weights themselves:
+e.g. a small, unremarkable weight change flipping the greedy action at one or two pivotal
+intersections/states (where SUMO's traffic dynamics could amplify a tiny policy change into a large
+queue/waiting-time cascade), or eval-episode noise itself (few episodes, single SUMO seed per
+round) rather than a genuine policy regression at all. Neither is tested here. **Caveat:** 19
+autocorrelated samples per run is a small, non-independent sample for a correlation claim — the
+sign-flipping across just 3 runs is itself the main evidence (a real effect should show *some*
+directional consistency), not a formal power calculation. `diagnostics/weight_divergence.py` is
+reusable if a future session wants to extend this to more runs/seeds or a different key filter.
+
+## 33. §32's hypothesis (b) tested and rejected: the crashes are real, reproducible policy
+    failures, not eval noise — they survive 6x more episodes almost unchanged
+
+**2026-08-16.** §32 flagged eval-episode/SUMO-seed noise as the cheaper of two remaining
+hypotheses to check. Built `diagnostics/reeval_checkpoint.py` (new, reusable — loads any
+`global_round_NNN.pth` into a fresh `DQNAgent` and re-runs the same `HoldoutEvaluator` pipeline a
+real training run uses, just with more episodes) and re-evaluated three checkpoints from
+`C_clean_attention_s2` (§30/§31's run with the clearest late-run crash) at 30 episodes instead of
+training's default 5 — 30 distinct SUMO seeds (`eval_seed_base + episode_index`) instead of 5:
+
+| round | original (5 ep) | re-eval mean (30 ep) | re-eval std | episode pattern | verdict |
+|---|---:|---:|---:|---|---|
+| 10 ("good") | -8.70 | -42.16 | 188.17 | 29/30 excellent (-51 to +5), 1/30 catastrophic (-1036.76) | real good policy, one rare tail-risk episode |
+| 16 ("crashed") | -3470.15 | -3389.13 | 672.84 | 1/30 good (-101.02), 29/30 bad (-2900 to -4189) | **real regression, survives averaging almost unchanged** |
+| 20 ("crashed", the worst) | -4089.59 | -4094.58 | 301.45 | 0/30 good, all 30/30 uniformly bad (-3350 to -4677, tight) | **real, robustly consistent policy collapse** |
+
+**Hypothesis (b) is rejected.** If the training-time crashes were 5-episode sampling flukes, more
+episodes/seeds should have pulled rounds 16 and 20 back toward round-10-like numbers. Instead both
+reproduce their original bad reward almost exactly (-3470→-3389, -4089→-4095) with 6x the sample
+size — round 20 especially, where every single one of 30 different SUMO seeds lands in a narrow
+bad band (std only 301, the tightest of the three). These are genuine policy failures, not
+measurement artifacts.
+
+**Secondary finding, not previously visible from 5-episode evals:** even round 10's *good* policy
+has a real tail-risk failure mode — 1 in 30 seeds still produces a -1036 catastrophe despite 29
+excellent episodes. The training-time 5-episode eval was likely just lucky not to sample it (or
+similar rare bad seeds) in most rounds; this is a real, if rare, robustness gap in even the
+best-performing checkpoints, and 5-episode training-time evals systematically under-sample it.
+
+**Narrows the open mechanism question from §32 to hypothesis (a) alone** (a small weight change
+flipping the greedy action at a handful of pivotal intersections/states, amplified by SUMO's
+traffic dynamics into a large, durable queue/waiting-time regime) — or some other still-untested
+weight/policy-level mechanism, but specifically *not* eval measurement noise. A natural next check
+(not done here): compare round 16/20's action distributions (already logged per-episode by the
+evaluator) against round 10's to see whether the bad rounds show a qualitatively different
+(narrower, more degenerate) policy at specific intersections, extending §26's "not a collapsed
+policy" mechanism dig — done there for a different run/roster (7-city) and not yet checked on this
+2-city case. `diagnostics/reeval_checkpoint.py` is reusable for that or any other checkpoint
+re-evaluation.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
@@ -1709,7 +1807,29 @@ directories are ever cleaned up.
    on best-round (all |diff|/SE ≤ 0.73). Two real, narrower signals survived: C beats `fixed_time`
    on best-round (|diff|/SE=2.97) but not `max_pressure`; B is significantly *worse* than
    `max_pressure` on final-round (|diff|/SE=2.28). The code split (`--disable_head_fix` vs
-   `--disable_neighbor_attention`) is still uncommitted and still confirmed functionally real (C
+   `--disable_neighbor_attention`, committed in `23c38c1`) is confirmed functionally real (C
    and D produce visibly different trajectories) — that part of §30 holds even though the
    attention-vs-pooling performance conclusion doesn't. Not run at 3-city/7-city — deprioritized,
    the 2-city signal is too weak to justify the compute right now.
+9. **NEW from §32: weight-divergence/gradient-conflict is ruled out as the mechanism, not
+   confirmed as it.** §28 flagged this as the priority diagnostic before trying more
+   hyperparameters; run against 3 existing runs' checkpoints (`diagnostics/weight_divergence.py`,
+   new and reusable). Neither cross-city cosine similarity nor weight-delta magnitude predicts a
+   round's reward swing — correlations are weak and flip sign across runs, both whole-network and
+   head-only. One real but non-predictive structural finding: the two cities' updates are
+   persistently mildly opposed in the shared backbone (mean cos_sim -0.06 to -0.08, negative in
+   16-18/19 rounds every run) but not in the output head (-0.02 to +0.05) — a constant background
+   tension, not a crash signal. Since the obvious weight-space explanation is ruled out, the next
+   candidate mechanisms are downstream of the weights: (a) small weight changes flipping the greedy
+   action at a handful of pivotal intersections, amplified by SUMO's traffic dynamics into large
+   queue swings, or (b) eval-episode/SUMO-seed noise being mistaken for policy regression in the
+   first place.
+   ~~(b)~~ **Rejected — see
+   [§33](#33-32s-hypothesis-b-tested-and-rejected-the-crashes-are-real-reproducible-policy-failures-not-eval-noise--they-survive-6x-more-episodes-almost-unchanged).**
+   Re-evaluated 3 checkpoints (1 "good" round, 2 "crashed" rounds) at 30 episodes instead of 5;
+   both crashed rounds reproduced their bad reward almost exactly (round 20: -4089→-4095 mean,
+   every one of 30 different SUMO seeds landing in the same narrow bad band). Genuine policy
+   failures, not sampling noise. (a) — action-flip-at-pivotal-intersections, amplified by SUMO
+   dynamics — is now the standing untested hypothesis; comparing action distributions between a
+   "good" and "crashed" round's checkpoints (already logged by the evaluator, just not yet
+   compared) is the natural next step.
