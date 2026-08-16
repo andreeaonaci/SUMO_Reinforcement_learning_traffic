@@ -77,6 +77,22 @@ def main():
         print(f"min={min(rewards):.2f}  max={max(rewards):.2f}")
         print(f"per_episode_reward={[round(r,2) for r in rewards]}")
 
+    # Per-episode Q(top1)-Q(top2) gap (mean and min across intersections that
+    # episode) alongside that episode's reward -- tests whether "bad" episodes
+    # are ones where the greedy policy was making close-call (near-tied)
+    # decisions more often, i.e. whether pure argmax is fragile at small gaps.
+    q_gaps = result.get("q_gaps")
+    if q_gaps and rewards:
+        print("episode  reward     mean_gap    min_gap   n_ts")
+        for i, (r, gaps) in enumerate(zip(rewards, q_gaps)):
+            vals = list(gaps.values())
+            if vals:
+                mean_gap = sum(vals) / len(vals)
+                min_gap = min(vals)
+            else:
+                mean_gap = min_gap = float("nan")
+            print(f"{i:7d}  {r:9.2f}  {mean_gap:9.4f}  {min_gap:9.4f}  {len(vals):4d}")
+
 
 if __name__ == "__main__":
     main()

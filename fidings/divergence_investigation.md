@@ -1714,6 +1714,136 @@ policy" mechanism dig — done there for a different run/roster (7-city) and not
 2-city case. `diagnostics/reeval_checkpoint.py` is reusable for that or any other checkpoint
 re-evaluation.
 
+## 34. §33's action-flip hypothesis (a), tested via Q-gap: crashed rounds show a genuinely
+    degenerate, near seed-independent policy — and it's confidence, not uncertainty, that's the
+    signature of the failure
+
+**2026-08-16.** User's question prompted this: is pure-argmax ("greedy") action selection fragile
+when the top-2 Q-values are close, and would a softmax-style tie-break help? This maps directly
+onto the Q-gap diagnostic the evaluator already computes (`|Q(top1)-Q(top2)|` per intersection per
+episode, the same metric `diagnostics/q_gap_trend.py` was originally built around) — extended
+`diagnostics/reeval_checkpoint.py` to surface it per-episode alongside reward, and re-ran the same
+three checkpoints from §33 (round 10 "good", round 16 "crashed, one escape", round 20 "worst
+crash", 30 episodes each = 30 different SUMO seeds per checkpoint).
+
+**Round 16 is a smoking gun for a genuinely degenerate policy, not an eval-noise or tie-break
+artifact:** 18 of its 30 episodes produced the *identical* reward, -3421.65 to two decimal places,
+across 30 *different* SUMO seeds. A policy actually responding to different randomized traffic
+cannot produce byte-identical outcomes across different seeds — this is direct evidence the
+network locked into a fixed action sequence that ignores its own (seed-varying) observations most
+of the time. Round 20 shows the same signature, weaker: 13/30 episodes identical (-4079.94).
+
+**Q-gap correlates strongly with this — but in the opposite direction from the hypothesis under
+test:**
+
+| checkpoint | mean_gap range | corr(mean_gap, reward) | corr(min_gap, reward) | identical-reward episodes |
+|---|---|---:|---:|---|
+| round 10 (good) | 0.196-0.265 | -0.511 | -0.389 | 0/30 (all 30 distinct) |
+| round 16 (crashed, 1 escape) | 0.145-0.990 | -0.565 | **-0.884** | 18/30 at -3421.65 |
+| round 20 (worst crash) | 0.859-1.393 (uniformly high) | +0.360 | -0.060 | 13/30 at -4079.94 |
+
+Within round 16 — the one checkpoint whose episodes actually span a wide gap range (0.14 to 0.99)
+— **higher confidence (bigger gap) predicts worse reward, and the rare low-gap episodes are the
+ones that escape the bad loop** (episode 11: gap 0.145, reward -101.02, the best result in the
+whole run). Round 20 shows no informative variation to test against: every one of its 30 episodes
+sits in the high-gap band (no escape valve sampled at all), consistent with a more completely
+locked-in failure. Round 10's healthy policy has no degenerate repeats and stays in a narrow,
+comparatively low-gap band throughout (0.20-0.27) — a different, more responsive regime.
+
+**Reading:** not "near-ties cause fragile flip-flopping" (the hypothesis under test) but close to
+the inverse — **the network gets *confidently* locked into a bad, repeating action loop, and
+moments of relative uncertainty are what let it escape.** This is a genuinely new mechanism finding
+for §32/§33's open question, more specific than "action-flip amplified by SUMO dynamics": it's not
+that any small weight perturbation flips a coin-toss decision, it's that the aggregated policy can
+collapse into ignoring its own inputs and repeating one confident, wrong action regardless of
+traffic state. This doesn't contradict §26 (which found "not a collapsed/degenerate policy" on a
+7-city run) — different roster, different run; the two findings just haven't been reconciled and
+may reflect a roster-size-dependent difference in how the instability manifests.
+
+**Practical implication for beating the rule-based baselines (ties back to the earlier "how do we
+raise reward" question):** the fix implied here is close to what was originally proposed (softmax
+tie-breaking) but for a different reason — not to arbitrate close calls more carefully, but to give
+a confidently-locked-in-bad policy an escape hatch. Softmax or light epsilon-greedy action
+selection at eval/deployment time, instead of pure argmax, is a concrete, cheap, untested next
+experiment: re-run `diagnostics/reeval_checkpoint.py`-style evaluation on round 16's checkpoint
+with stochastic instead of greedy action selection and see whether it reliably avoids the -3421.65
+attractor. Not yet implemented — `HoldoutEvaluator._policy_action`'s `"trained"` branch currently
+hardcodes `model.act(obs, explore=False)` (federated/evaluator.py:132), so this would need either a
+temporary explore=True/temperature-based variant or a new policy_name branch.
+
+## 35. Literature/tooling check: how does this project's reward, loss, and action-selection compare
+    to RESCO (the benchmark its own city configs are drawn from) and the standard SOTA baselines?
+
+**2026-08-16.** Not an experimental result from this repo — a sourced comparison against external
+code/papers, prompted by §34's finding and the standing "how do we beat the rule-based baselines"
+question. This project's `environments/*` city configs are literally RESCO's benchmark maps
+(cologne3, ingolstadt7, grid4x4, arterial4x4 — see CLAUDE.md), so RESCO
+(`github.com/Pi-Star-Lab/RESCO`, NeurIPS 2021 Datasets & Benchmarks) is the most direct comparison
+available, fetched and read directly (not from memory) for this write-up. CoLight and PressLight
+are well-established published baselines cited from prior knowledge, not re-verified against
+source here.
+
+**Reward function — this project trains against a reward RESCO doesn't even offer, and never tries
+the one the literature argues is best-motivated.** This project uses `sumo_rl`'s default
+`diff-waiting-time` (change in accumulated per-lane waiting time between consecutive steps, /100 —
+inherited unchanged from the upstream `sumo-rl` package; no city config overrides `reward_fn`).
+RESCO's `mdp_options/rewards.py` offers a different menu: `wait` (raw negative total wait, not
+differenced), `wait_norm` (same, clipped to ±4 after /224 — RESCO's own defensive scaling, in the
+same spirit as this project's `reward_clip=10.0`), `pressure` (entering-queued minus
+exiting-queued — the reward MPLight actually trains against), `phase_queue`, `coslight` (a weighted
+combination), and `oracle_delay` (privileged full-network vehicle time-loss, not realistic for
+deployment). **PressLight (Wei et al., KDD'19) and MPLight both train against the `pressure`
+reward specifically because it's provably connected to max-pressure control theory** — pressure-
+based reward is argued in the literature to correlate with throughput maximization in a way
+delta-waiting-time isn't. This project already has `pressure`/`max_pressure` wired in as a
+*rule-based eval baseline controller* (`--baseline_controller max_pressure`) but has never used it
+as the *training reward* for the DQN. That's a concrete, cheap, untested experiment: swap
+`reward_fn` to a pressure-style signal (or add `sumo_rl`'s built-in `pressure`/`_pressure_reward`,
+already implemented in `sumo_rl/environment/traffic_signal.py`) and see whether it changes the
+crash dynamics documented in §3-§34, not just final performance.
+
+**Action selection — this project's pure-argmax-at-eval convention is the field standard, not a
+project-specific choice.** RESCO's PFRL-based `DQNAgent` (used by both IDQN and MPLight) uses
+`LinearDecayEpsilonGreedy` during training and falls straight to `batch_argmax` (pure greedy) once
+`self.training` is `False` (`resco_benchmark/agents/action_value/pfrl_dqn.py`) — exactly this
+project's train-with-epsilon / eval-with-argmax split. **This means §34's "confidently locked into
+a bad repeating action" failure mode is a real vulnerability of the standard convention shared
+across this whole line of work, not a quirk of this codebase** — and a softmax/stochastic
+eval-time policy (§34's proposed next step) would be a genuine departure from the field standard,
+not "catching up" to something RESCO/MPLight/IDQN already do differently.
+
+**Loss function — same family (Huber/TD), different optimizer for a documented reason.** RESCO's
+`DQNAgent` uses PFRL's standard `DQN` class (Huber/smooth-L1 TD loss, PFRL's default) with plain
+`torch.optim.Adam`. This project also uses Huber loss (already noted in CLAUDE.md's Phase 0 audit)
+but uses `AdamW` instead of Adam — not an oversight, a deliberate fix from earlier in this project
+(commit `dfadab5`) for a specific bug where plain Adam's weight-decay term slowly decayed masked-out
+(never-gradient-touched) Q-head rows toward zero. Same loss family as the standard tooling; the
+optimizer choice is a project-specific, tested correction, not a divergence from convention.
+
+**Coordination architecture — this project is a genuine hybrid, not a reproduction of any one
+baseline, and its central premise (cross-*city* weight sharing) has no direct RESCO/CoLight
+analog.** RESCO's `IDQN` is fully independent per-intersection agents with zero sharing (closest
+analog in this project: `--no_federation` combined with `--disable_neighbor_attention`). RESCO's
+`MPLight` is one shared network *within a city* using the FRAP architecture (explicit phase-pair
+competition embeddings, heterogeneous per-signal action spaces handled via `pair_to_act_map`/
+`reverse_valid` index remapping). CoLight (Wei et al., CIKM'19 — not in RESCO's default agent set,
+but the standard neighbor-attention baseline in the field) uses an index-free graph attention
+network shared across intersections *within a city*, architecturally the closest published relative
+to this project's own `NeighborAttentionQNetwork`. **None of RESCO's algorithms, MPLight, or
+CoLight share one policy's weights *across different cities/maps*** — RESCO evaluates each
+algorithm separately per scenario (Cologne, Ingolstadt, Grid4x4, ...), it does not do cross-map
+federation. This project's actual central premise — one shared foundation-model policy federated
+across topologically-different cities, with `action_mask`/`neighbor_mask` (not FRAP's phase-pair
+structure) as the topology-generalization mechanism — has no direct equivalent in any of the three
+comparisons above. The instability this whole document has been chasing since §3 is, in that sense,
+a cost of doing something none of these established baselines attempt.
+
+**Sources:** [RESCO GitHub](https://github.com/Pi-Star-Lab/RESCO), specifically
+[`mdp_options/rewards.py`](https://github.com/Pi-Star-Lab/RESCO/blob/main/resco_benchmark/mdp_options/rewards.py)
+and [`agents/action_value/pfrl_dqn.py`](https://github.com/Pi-Star-Lab/RESCO/blob/main/resco_benchmark/agents/action_value/pfrl_dqn.py)
+(fetched and read directly, 2026-08-16); RESCO paper (Ault & Sharon, NeurIPS 2021 Datasets &
+Benchmarks); PressLight (Wei et al., KDD 2019); CoLight (Wei et al., CIKM 2019, arXiv:1905.05717).
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
@@ -1829,7 +1959,24 @@ re-evaluation.
    Re-evaluated 3 checkpoints (1 "good" round, 2 "crashed" rounds) at 30 episodes instead of 5;
    both crashed rounds reproduced their bad reward almost exactly (round 20: -4089→-4095 mean,
    every one of 30 different SUMO seeds landing in the same narrow bad band). Genuine policy
-   failures, not sampling noise. (a) — action-flip-at-pivotal-intersections, amplified by SUMO
-   dynamics — is now the standing untested hypothesis; comparing action distributions between a
-   "good" and "crashed" round's checkpoints (already logged by the evaluator, just not yet
-   compared) is the natural next step.
+   failures, not sampling noise.
+   ~~(a)~~ **Refined and substantiated via Q-gap, not action-distribution diffing — see
+   [§34](#34-33s-action-flip-hypothesis-a-tested-via-q-gap-crashed-rounds-show-a-genuinely-degenerate-near-seed-independent-policy--and-its-confidence-not-uncertainty-thats-the-signature-of-the-failure).**
+   Crashed-round checkpoints show a genuinely degenerate policy (18/30 and 13/30 episodes producing
+   byte-identical rewards across 30 *different* SUMO seeds), and `min_gap` correlates -0.884 with
+   reward within the one checkpoint whose episodes span a real gap range — the network gets
+   confidently locked into a bad repeating action, and rare low-confidence episodes are what let it
+   escape. **New standing next step:** test whether softmax/stochastic action selection at
+   eval/deployment time (instead of pure argmax) reliably breaks this lock-in — untested, needs a
+   new evaluator policy branch (`federated/evaluator.py:132` currently hardcodes
+   `explore=False`).
+10. **NEW from §35: two concrete, cheap, literature-motivated experiments this project has never
+    run.** (a) Train against `sumo_rl`'s built-in `pressure` reward instead of the default
+    `diff-waiting-time` — PressLight/MPLight both train against pressure specifically because it's
+    theoretically tied to throughput maximization (max-pressure control theory), and this project
+    currently only uses pressure as a rule-based eval baseline, never as the training signal. (b)
+    Softmax/stochastic eval-time action selection (already flagged in item 9/§34) — a genuine
+    departure from RESCO/MPLight/IDQN's shared pure-argmax convention, not something borrowed from
+    an existing baseline. Neither is run yet; (a) is the more novel, less-tested-anywhere-in-this-
+    doc direction and would need its own multi-seed validation before trusting a result, same as
+    every other intervention in this file.
