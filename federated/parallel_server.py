@@ -80,7 +80,7 @@ def _client_worker(
     lr: float,
     lr_decay: float,
     min_lr: float,
-    head_fix: bool,
+    neighbor_attention: bool,
     tau: float,
     target_update: int,
     mu: float,
@@ -150,7 +150,7 @@ def _client_worker(
             own_dim=own_dim, neighbor_dim=neighbor_dim, k_max=k_max,
             action_dim=action_dim, eps_decay=eps_decay,
             lr=lr, lr_decay=lr_decay, min_lr=min_lr,
-            head_fix=head_fix,
+            head_fix=neighbor_attention,
             tau=tau, target_update=target_update,
             mu=mu, dueling=dueling, n_step=n_step,
             init_steps_done=init_steps_done,
@@ -234,6 +234,7 @@ class ParallelFederatedServer:
         min_lr: float = 1e-6,
         per_city_lr: Optional[Dict[str, float]] = None,
         head_fix: bool = True,
+        neighbor_attention: bool = True,
         no_federation: bool = False,
         fedavg_blend: float = 1.0,
         tau: float = 0.005,
@@ -253,7 +254,17 @@ class ParallelFederatedServer:
         self.log_file = log_file or os.path.join(checkpoint_dir, "training.log")
         self.client_checkpoint_every = client_checkpoint_every
         self.no_federation = bool(no_federation)
+        # self.head_fix: aggregation-time only (masked-head weighted average
+        # across heterogeneous action-space widths, see use_masked_head
+        # below). self.neighbor_attention: network-forward-time only (each
+        # worker's Q-network attends over neighbor obs vs. mean-pools them,
+        # see NeighborAttentionQNetwork.forward). These used to be the same
+        # flag (a naming collision, not a deliberate coupling) -- every past
+        # "masked-head ablation" result was silently also an
+        # attention-vs-pooling comparison. Now independent so each can be
+        # tested in isolation.
         self.head_fix = bool(head_fix)
+        self.neighbor_attention = bool(neighbor_attention)
         self.fedavg_blend = float(max(0.0, min(1.0, fedavg_blend)))
         self._head_weight_key, self._head_bias_key = head_key_names(dueling)
         self.server_momentum = float(server_momentum)
@@ -306,7 +317,7 @@ class ParallelFederatedServer:
                     name, cfg, own_dim, neighbor_dim, k_max, action_dim,
                     comm_dropout_cfg, local_episodes, log_loss_every_steps, eps_decay,
                     city_lr, lr_decay, min_lr,
-                    head_fix,
+                    self.neighbor_attention,
                     tau, target_update,
                     mu, dueling, n_step,
                     self.log_file,
@@ -540,7 +551,14 @@ class ParallelFederatedServer:
                     # masked_head_weighted_average unconditionally, so the
                     # flag never worked under `--parallel` (it only changed
                     # the local network's neighbor-processing architecture,
-                    # via head_fix threaded into _client_worker). Reusing
+                    # via what was then a shared `head_fix` value also
+                    # threaded into _client_worker). `self.head_fix` is now
+                    # aggregation-only and `self.neighbor_attention` (see
+                    # __init__) is the independent flag threaded into
+                    # _client_worker for the network-level choice -- the two
+                    # were accidentally the same variable until 2026-08-15,
+                    # confounding every past masked-head ablation with an
+                    # attention-vs-pooling comparison. Reusing
                     # aggregate_round() here instead of reimplementing the
                     # dispatch also keeps this in sync with the sequential
                     # path (federated/server.py), which already calls it the

@@ -452,9 +452,10 @@ def main(args):
 
     logger.info("Arguments:\n%s", pprint.pformat(vars(args), sort_dicts=True))
     logger.info(
-        "config: strategy=%s head_fix=%s eval_episodes=%d rounds=%d",
+        "config: strategy=%s head_fix=%s neighbor_attention=%s eval_episodes=%d rounds=%d",
         args.aggregation_strategy,
         not args.disable_head_fix,
+        not args.disable_neighbor_attention,
         args.eval_episodes,
         args.rounds,
     )
@@ -473,7 +474,24 @@ def main(args):
     if args.base_dir is not None:
         base = args.base_dir
     else:
-        base = "environments" 
+        base = "environments"
+
+    # Resolved comm-dropout severity: each of the three probabilities falls
+    # back independently to DEFAULT_COMM_DROPOUT's value when its CLI flag
+    # is left unset (None), so e.g. only overriding p_isolate doesn't reset
+    # p_link/p_hop_cutoff to 0. Applied identically to training and eval
+    # envs unless a call site overrides it -- there was previously no CLI
+    # surface for this at all, only the hardcoded DEFAULT_COMM_DROPOUT.
+    comm_dropout_cfg = dict(DEFAULT_COMM_DROPOUT)
+    if args.comm_dropout_p_link is not None:
+        comm_dropout_cfg["p_link"] = args.comm_dropout_p_link
+    if args.comm_dropout_p_isolate is not None:
+        comm_dropout_cfg["p_isolate"] = args.comm_dropout_p_isolate
+    if args.comm_dropout_p_hop_cutoff is not None:
+        comm_dropout_cfg["p_hop_cutoff"] = args.comm_dropout_p_hop_cutoff
+    if comm_dropout_cfg != DEFAULT_COMM_DROPOUT:
+        logger.info("Comm-dropout override: %s (default was %s)",
+                    comm_dropout_cfg, DEFAULT_COMM_DROPOUT)
 
     if args.baseline_controller != "none":
         city_configs, obs_dims, action_dim, _steps_per_ep = resolve_city_configs_and_dims(base)
@@ -484,6 +502,7 @@ def main(args):
             episodes=args.eval_episodes,
             holdout_base_dir=args.eval_base_dir,
             eval_sumo_seed=args.eval_sumo_seed,
+            eval_comm_dropout_cfg=comm_dropout_cfg,
         )
         if evaluator is None:
             raise RuntimeError("Could not construct holdout evaluator for baseline controller run.")
@@ -547,7 +566,7 @@ def main(args):
 
         global_model = _make_agent(
             own_dim, neighbor_dim, k_max, action_dim, eps_decay,
-            head_fix=not args.disable_head_fix,
+            head_fix=not args.disable_neighbor_attention,
             tau=args.tau, target_update=args.target_update,
             mu=args.fedprox_mu,
             dueling=args.dueling,
@@ -583,6 +602,7 @@ def main(args):
             episodes=args.eval_episodes,
             holdout_base_dir=args.eval_base_dir,
             eval_sumo_seed=args.eval_sumo_seed,
+            eval_comm_dropout_cfg=comm_dropout_cfg,
         )
 
         aggregation_config = {
@@ -607,7 +627,7 @@ def main(args):
             k_max=k_max,
             action_dim=action_dim,
             eps_decay=eps_decay,                   # ← threaded through to workers
-            comm_dropout_cfg=DEFAULT_COMM_DROPOUT,
+            comm_dropout_cfg=comm_dropout_cfg,
             local_episodes=args.local_episodes,
             log_loss_every_steps=args.log_loss_every_steps,
             evaluator=evaluator,
@@ -620,6 +640,7 @@ def main(args):
             min_lr=args.min_lr,
             per_city_lr=per_city_lr,
             head_fix=not args.disable_head_fix,
+            neighbor_attention=not args.disable_neighbor_attention,
             no_federation=args.no_federation,
             fedavg_blend=args.fedavg_blend,
             tau=args.tau,
@@ -650,7 +671,8 @@ def main(args):
             local_episodes=args.local_episodes,
             explore_fraction=args.explore_fraction,
             log_loss_every_steps=args.log_loss_every_steps,
-            head_fix=not args.disable_head_fix,
+            comm_dropout_cfg=comm_dropout_cfg,
+            head_fix=not args.disable_neighbor_attention,
             tau=args.tau,
             target_update=args.target_update,
             mu=args.fedprox_mu,
@@ -668,7 +690,7 @@ def main(args):
 
         global_model = _make_agent(
             own_dim, neighbor_dim, k_max, action_dim, eps_decay,
-            head_fix=not args.disable_head_fix,
+            head_fix=not args.disable_neighbor_attention,
             tau=args.tau, target_update=args.target_update,
             mu=args.fedprox_mu,
             dueling=args.dueling,
@@ -681,6 +703,7 @@ def main(args):
             episodes=args.eval_episodes,
             holdout_base_dir=args.eval_base_dir,
             eval_sumo_seed=args.eval_sumo_seed,
+            eval_comm_dropout_cfg=comm_dropout_cfg,
         )
 
         aggregation_config = {
@@ -756,7 +779,23 @@ if __name__ == "__main__":
         "--disable_head_fix",
         action="store_true",
         help="Ablation flag: use naive uniform averaging on the head layer instead of "
-            "masked_head_weighted_average. Used to reproduce the pre-fix behavior.",
+            "masked_head_weighted_average. Used to reproduce the pre-fix behavior. "
+            "Aggregation-time only -- independent of --disable_neighbor_attention (see "
+            "below). Before 2026-08-15 these were accidentally the same underlying flag, "
+            "confounding every masked-head ablation result with an attention-vs-pooling "
+            "comparison in the Q-network itself; they're now decoupled.",
+    )
+    parser.add_argument(
+        "--disable_neighbor_attention",
+        action="store_true",
+        help="Ablation flag: replace the Q-network's masked multi-head attention over "
+            "neighbor_obs (NeighborAttentionQNetwork.forward, head_fix=True branch) with "
+            "simple masked mean-pooling (the head_fix=False branch, originally built as "
+            "part of --disable_head_fix before the two were split 2026-08-15). "
+            "Network-forward-time only -- independent of --disable_head_fix (aggregation-"
+            "time). Use this to directly test whether neighbor attention helps or hurts "
+            "at a given roster size, without also changing how the aggregation step "
+            "handles heterogeneous action-space widths.",
     )
     parser.add_argument("--aggregation_strategy", type=str, default="fedavg",
                         choices=["fedavg", "ema_loss", "ema_alignment",
@@ -850,6 +889,28 @@ if __name__ == "__main__":
         type=int,
         default=12345,
         help="Fixed SUMO seed for evaluation env so round-to-round comparisons use a deterministic scenario.",
+    )
+    parser.add_argument(
+        "--comm_dropout_p_link", type=float, default=None,
+        help="Override CommDropoutWrapper's per-neighbor-slot link-drop probability "
+             "(applied every tick to both training and eval envs). Default (None) uses "
+             "DEFAULT_COMM_DROPOUT's p_link=0.10 -- this has been the silent default on "
+             "every run in this project's history; there was previously no CLI way to "
+             "disable it. Pass 0 for clean (uncorrupted) neighbor communication.",
+    )
+    parser.add_argument(
+        "--comm_dropout_p_isolate", type=float, default=None,
+        help="Override CommDropoutWrapper's per-tick full-isolation probability (drops "
+             "ALL neighbors for that intersection this tick). Default (None) uses "
+             "DEFAULT_COMM_DROPOUT's p_isolate=0.05. Pass 1.0 to force every intersection "
+             "isolated every tick -- an own-obs-only ablation (no neighbor info reaches "
+             "the network at all) without touching agents/networks.py.",
+    )
+    parser.add_argument(
+        "--comm_dropout_p_hop_cutoff", type=float, default=None,
+        help="Override CommDropoutWrapper's random-hop-cutoff probability (drops every "
+             "neighbor farther than a randomly chosen hop each tick). Default (None) uses "
+             "DEFAULT_COMM_DROPOUT's p_hop_cutoff=0.10. Pass 0 to disable.",
     )
     args = parser.parse_args()
     if args.dueling and args.server_momentum > 0.0:

@@ -72,12 +72,6 @@ Tests:
 pytest tests/                      # gym_test.py (Gymnasium API), pz_test.py (PettingZoo API)
 ```
 
-Lint/format (pre-commit hooks: flake8, black, isort, pyupgrade, pydocstyle, pyright, codespell):
-```bash
-pre-commit run --all-files
-```
-`experiments/`, `nets/`, and `tests/` are excluded from flake8/pydocstyle. black line-length is
-127.
 
 ## Architecture
 

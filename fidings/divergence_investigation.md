@@ -1427,6 +1427,195 @@ vs. the `city_1` fallback) remains open and is now more clearly scoped: only 7-c
 a true holdout; both 2-city and 3-city results in this entire document are `city_1`-fallback,
 in-distribution evaluations.
 
+## 30. First real test of the newly-decoupled `--disable_neighbor_attention` flag: mean-pooling is
+    actively worse than using no neighbor info at all, on one seed
+
+**2026-08-15.** Until today, `--disable_head_fix` controlled two unrelated things at once: the
+aggregation-time choice (masked-head weighted average vs. naive uniform averaging) *and* the
+network-forward-time choice (`NeighborAttentionQNetwork`'s masked attention over `neighbor_obs`
+vs. simple masked mean-pooling) — a naming collision, not a deliberate coupling, confounding every
+past masked-head ablation (§9-§12, §20, §23) with an attention-vs-pooling comparison nobody
+intended to run. Split into two independent flags in the working tree this session (not yet
+committed as of this writeup): `--disable_head_fix` (aggregation-only) and
+`--disable_neighbor_attention` (network-forward-only, threaded through
+`ParallelFederatedServer.neighbor_attention` / `_client_worker`). This section is the first run
+that actually exercises `--disable_neighbor_attention` as an independent knob.
+
+**Setup:** `environments_c1_4` (2-city: `city_1`+`city_4`), `--dueling --n_step 3`, `fedavg`,
+single seed (3), 20 rounds each, via `analyse/run_concurrent_batch.sh` (`MAX_CONCURRENT=2`) at
+`results/neighbor_ablation_2city.log`. Three trained variants plus two rule-based baselines added
+for reference (`--baseline_controller`, default eval seed 12345, single deterministic episode
+each — a quick consistency check against §29's proper 5-seed numbers, not a new baseline
+measurement):
+
+| variant | comm condition | network | final-round reward | best-round reward | across-round mean |
+|---|---|---|---:|---:|---:|
+| A1 `max_pressure` | n/a (rule-based) | n/a | -236.27 (single eval) | — | — |
+| A2 `fixed_time` | n/a (rule-based) | n/a | -469.03 (single eval) | — | — |
+| B `no_neighbor` | fully isolated (`p_isolate=1.0`) | attention (unused — no neighbor_obs ever arrives) | -3030.75 (r20) | **-30.69 (r6)** | -2834.90 |
+| C `clean_attention` | clean (`p_link=p_isolate=p_hop_cutoff=0`) | attention | **-83.32 (r20)** | **-5.60 (r12)** | **-1182.42** |
+| D `clean_pooling` | clean (same as C) | `--disable_neighbor_attention` (mean-pool) | -3911.75 (r20) | -836.87 (r7) | -3364.11 |
+
+A1/A2 line up closely with §29's proper 5-seed baselines on this same `city_1`-fallback holdout
+(`max_pressure` -240.698±25.784, `fixed_time` -472.400±70.311) — both single-eval numbers land
+well within 1 std of the 5-seed means, a good sanity check that this batch's eval setup is
+consistent with §29's.
+
+**C (clean comm, attention on) is the only trained variant that beats both rule-based baselines
+outright**, on final-round, best-round, and across-round mean — the first time in this project a
+trained-DQN configuration has cleared that bar on *every* one of those measures rather than just
+best-round (cf. §21/§29's "peak-competitive, average-not" pattern for the standard-comm-dropout
+config). Clean communication plus intact attention looks like it removes a real source of the
+DQN's baseline-losing problem, at least at 2-city scale, one seed.
+
+**D (mean-pooling, otherwise identical to C) is not just worse than C — it's worse than B
+(no neighbor info at all).** D's best round (-836.87) is the single worst best-round of any
+trained variant here, and worse than both rule-based baselines; B's best round (-30.69), despite
+having *zero* neighbor information reaching the network all run, beats both baselines and is
+within 6x of C's best round. This is not "neighbor info doesn't matter" — it's a specific claim
+that this codebase's mean-pooling fallback path actively hurts relative to ignoring neighbors
+entirely, at least on this seed. If this holds up, it reframes the whole masked-head-ablation
+history (§9-§12, §20, §23): those results were measuring attention-vs-pooling noise on top of
+whatever real aggregation-fix signal existed, not aggregation alone.
+
+**B's best round beating both baselines despite zero neighbor info is itself the well-documented
+round-to-round volatility (§3, §12, §28), not evidence that neighbor info is unnecessary** — B's
+own final round (-3030.75) is close to its worst, a ~100x swing from its round-6 peak within the
+same single run. Read B's result as "this run happened to hit a great round," not as a stable
+own-obs-only capability.
+
+**Caveats — this is one seed, not a validated result:**
+1. All three trained variants are a single seed (3). Given the volatility documented throughout
+   this file, none of the final/best/mean numbers above should be treated as more than a
+   directional lead until repeated across seeds — especially D's "worse than no-neighbor-info"
+   claim, which is the most novel and most consequential-if-true finding here.
+2. This depends on uncommitted code (`experiments/federated_training.py`,
+   `federated/parallel_server.py` — the `--disable_head_fix`/`--disable_neighbor_attention` split).
+   The fact that C and D produce visibly different training trajectories from the same starting
+   config is itself a functional confirmation the split isn't a no-op, but the code should be
+   committed and this ablation re-run post-commit before citing it as settled.
+3. A1/A2 are single-episode/single-seed reference points, included only as a sanity check against
+   §29's real baseline numbers, not as a replacement for them.
+
+**Next step, not yet run:** repeat B/C/D across 5 seeds before drawing conclusions about
+attention-vs-pooling as a structural effect — this is exactly the kind of one-seed pattern (cf.
+§11 "clean win" → §12 "2 more seeds break the story") that has previously reversed on more data in
+this project.
+
+## 31. §30's 5-seed follow-up: the single-seed story doesn't replicate — no clean win for C, no
+    clean loss for D, B/C/D are statistically indistinguishable from each other
+
+**2026-08-16.** Repeated B/C/D (2-city, `environments_c1_4`, `--dueling --n_step 3`, `fedavg`)
+across seeds 1, 2, 4, 5 (seed 3 already had from §30), via `analyse/run_concurrent_batch.sh`
+(`MAX_CONCURRENT=3`, 12 jobs, `results/neighbor_ablation_2city_multiseed.log`). One real
+complication mid-run: an ~8.5-hour wall-clock stall on the first 3 concurrent jobs (round 12 to
+round 13 of `C_clean_attention_s1`, and correspondingly `D_clean_pooling_s1`/`B_no_neighbor_s2`
+running alongside it) — no CPU/IO activity during the gap, clean resume afterward, exit=0 on every
+job. Signature matches the Windows host sleeping and freezing the WSL2 VM along with it, not a
+training bug; all 12 jobs completed without errors once the host stayed awake.
+
+**5-seed results (round-number-keyed parsing, robust to the log-interleaving line corruption noted
+in §30):**
+
+| variant | final-round (mean±std, 5 seeds) | best-round (mean±std, 5 seeds) | across-round mean (mean±std) |
+|---|---:|---:|---:|
+| B `no_neighbor` | -1856.88 ± 1581.51 | -257.25 ± 317.60 | -2783.49 ± 755.30 |
+| C `clean_attention` | -1740.88 ± 2334.53 | **-124.40 ± 252.51** | **-1952.84 ± 682.68** |
+| D `clean_pooling` | **-826.69 ± 1724.78** | -194.00 ± 359.62 | -2784.58 ± 486.94 |
+
+Reference, §29's 5-seed baselines on the same `city_1`-fallback holdout: `fixed_time` -472.400 ±
+70.311, `max_pressure` -240.698 ± 25.784.
+
+**Per-seed breakdown (best-round, the metric §30 leaned on most):**
+
+| seed | B best | C best | D best |
+|---|---:|---:|---:|
+| 1 | -677.89 (r8) | -17.14 (r20) | -19.58 (r20) |
+| 2 | -31.30 (r20) | -8.70 (r10) | -49.09 (r20) |
+| 3 | -30.69 (r6) | -5.60 (r12) | -836.87 (r7) |
+| 4 | -24.55 (r6) | -14.54 (r11) | -43.87 (r7) |
+| 5 | -521.83 (r15) | -576.03 (r4) | -20.57 (r19) |
+
+**|diff|/SE against §29's baselines** (this project's bar for a real, non-noise signal is ≥2):
+
+| comparison | vs `fixed_time` | vs `max_pressure` |
+|---|---:|---:|
+| B final-round mean | 1.96 | **2.28 (B significantly *worse*)** |
+| C final-round mean | 1.21 | 1.44 |
+| D final-round mean | 0.46 | 0.76 |
+| B best-round mean | 1.48 | 0.12 |
+| C best-round mean | **2.97 (C significantly *better*)** | 1.02 |
+| D best-round mean | 1.70 | 0.29 |
+
+**Pairwise B/C/D on best-round: all |diff|/SE ≤ 0.73** (B-vs-D 0.29, C-vs-D 0.35, C-vs-B 0.73) —
+no statistically distinguishable difference between any two of the three trained variants.
+
+**§30's two headline claims do not replicate:**
+1. *"C beats both rule-based baselines on every measure"* — false at 5 seeds. C only clears the
+   significance bar against `fixed_time`, and only on best-round (2.97). Against `max_pressure` —
+   the stronger baseline — C is not significantly different on any of final-round, best-round, or
+   across-round mean. Seeds 2 and 5 crashed hard on C's final round (-4089.59, -4496.80), pulling
+   the final-round mean and std to roughly the same bad territory as B and D; seed 3 (§30's only
+   data point) was the best of the five seeds on every measure, not a representative one.
+2. *"D (mean-pooling) is worse than B (no neighbor info), the most novel/consequential finding"* —
+   false at 5 seeds. D-vs-B on best-round is |diff|/SE=0.29, indistinguishable from noise. D's
+   seed-3 result (best round -836.87, the worst of any cell in this whole table) was itself the
+   outlier among D's 5 seeds — every other D seed's best round is between -19.58 and -49.87,
+   competitive with or better than C and B on the same seeds. One bad seed, not a structural
+   pooling-vs-attention effect.
+
+**What does hold up:** C's across-round mean (-1952.84) and best-round mean (-124.40) are still the
+best of the three trained variants numerically, and the one clean significant result in this batch
+(C beats `fixed_time` on best-round, 2.97) is a real, if partial, signal that clean communication
+plus intact attention has some peak-performance edge — just not the sweeping "beats everything"
+result §30 reported from one seed. **B also produced one clean significant result, in the opposite
+direction**: B's final-round mean is significantly worse than `max_pressure` (2.28) — full comm
+isolation reliably fails to recover a good policy by round 20, even though (per the per-seed table)
+it can still hit a strong best-round in 3 of 5 seeds.
+
+**Reframes item 8 in "Open questions" below and the reuse-caution this doc has flagged before
+(§11→§12 is the standing precedent): a single seed's ablation result — however clean-looking, and
+however good the mechanistic story sounds — is not evidence on its own in this project.** The
+`--disable_head_fix`/`--disable_neighbor_attention` code split itself is still confirmed working
+(C and D produce visibly different, seed-varying trajectories from the same starting config), that
+part of §30 stands; it's the *directional conclusion* about attention vs. pooling that doesn't.
+
+**Not yet done:** the same check at 3-city/7-city scale — deprioritized given how much the 2-city
+signal weakened here; probably not worth running before deciding whether this line of investigation
+is worth further compute at all.
+
+**Where this data lives (§30 and §31 combined, 17 runs total):** batch-runner logs at
+`results/neighbor_ablation_2city.log` (seed 3 + the two rule-based baselines, all four run via
+`--baseline_controller`/single seed) and `results/neighbor_ablation_2city_multiseed.log` (seeds
+1/2/4/5, 12 runs). Each run's own `run_dir/federated_history.json` + `run_dir/training.log` is the
+underlying source for every number in both sections' tables — the batch log is a tag-prefixed
+merge of all concurrent runs' stdout, `run_dir` is where each individual run's own untangled
+checkpoints and history live:
+
+| tag | seed | run_dir |
+|---|---:|---|
+| `A1_max_pressure` | n/a (rule-based) | `results/run_2026_08_15-22_44_28_160971` |
+| `A2_fixed_time` | n/a (rule-based) | `results/run_2026_08_15-22_44_30_161054` |
+| `B_no_neighbor` | 3 | `results/run_2026_08_15-20_09_49_128043` |
+| `C_clean_attention` | 3 | `results/run_2026_08_15-20_09_49_128045` |
+| `D_clean_pooling` | 3 | `results/run_2026_08_15-21_10_10_138403` |
+| `B_no_neighbor_s1` | 1 | `results/run_2026_08_16-00_00_56_180856` |
+| `C_clean_attention_s1` | 1 | `results/run_2026_08_16-00_00_56_180857` |
+| `D_clean_pooling_s1` | 1 | `results/run_2026_08_16-00_00_56_180862` |
+| `B_no_neighbor_s2` | 2 | `results/run_2026_08_16-01_23_34_201543` |
+| `C_clean_attention_s2` | 2 | `results/run_2026_08_16-10_28_19_212398` |
+| `D_clean_pooling_s2` | 2 | `results/run_2026_08_16-11_00_32_224372` |
+| `B_no_neighbor_s4` | 4 | `results/run_2026_08_16-12_13_56_245104` |
+| `C_clean_attention_s4` | 4 | `results/run_2026_08_16-12_46_21_256622` |
+| `D_clean_pooling_s4` | 4 | `results/run_2026_08_16-12_47_15_257777` |
+| `B_no_neighbor_s5` | 5 | `results/run_2026_08_16-14_32_20_287009` |
+| `C_clean_attention_s5` | 5 | `results/run_2026_08_16-14_34_51_287841` |
+| `D_clean_pooling_s5` | 5 | `results/run_2026_08_16-15_01_38_293963` |
+
+All 17 `run_dir`s are currently untracked local output (`results/` is not committed) — they exist
+only on this machine as of this writeup; the tables in §30/§31 are the durable record if the
+directories are ever cleaned up.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
@@ -1511,3 +1700,16 @@ in-distribution evaluations.
    comparison — comparing aggregation strategies against each other is less interesting if none of
    them currently beat a simple heuristic. Don't scale up Phase 2 compute assuming the trained
    model is competitive until this is checked.
+8. ~~**Is mean-pooling actively worse than no-neighbor-info, or was that one lucky/unlucky
+   seed?**~~ **Resolved (as "it was one lucky/unlucky seed") — see
+   [§31](#31-30s-5-seed-follow-up-the-single-seed-story-doesnt-replicate--no-clean-win-for-c-no-clean-loss-for-d-bcd-are-statistically-indistinguishable-from-each-other).**
+   §30's one-seed finding was seed3-driven noise on both sides: D's catastrophic seed3 (best round
+   -836.87) doesn't recur in seeds 1/2/4/5 (all between -19.58 and -49.87), and C's excellent seed3
+   was its best of five, not typical. At 5 seeds, B/C/D are pairwise statistically indistinguishable
+   on best-round (all |diff|/SE ≤ 0.73). Two real, narrower signals survived: C beats `fixed_time`
+   on best-round (|diff|/SE=2.97) but not `max_pressure`; B is significantly *worse* than
+   `max_pressure` on final-round (|diff|/SE=2.28). The code split (`--disable_head_fix` vs
+   `--disable_neighbor_attention`) is still uncommitted and still confirmed functionally real (C
+   and D produce visibly different trajectories) — that part of §30 holds even though the
+   attention-vs-pooling performance conclusion doesn't. Not run at 3-city/7-city — deprioritized,
+   the 2-city signal is too weak to justify the compute right now.
