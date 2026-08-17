@@ -653,6 +653,7 @@ def main(args):
             pseudo_grad_clip=args.pseudo_grad_clip,
             eval_ema_decay=args.eval_ema_decay,
             init_steps_done=init_steps_done,
+            epsilon_reset_every=args.epsilon_reset_every,
         )
         history = server.run(
             rounds=args.rounds,
@@ -860,6 +861,14 @@ if __name__ == "__main__":
                              "Purely a reporting-side smoothing -- never touches what's "
                              "broadcast to clients next round. 0 = disabled (default, exact "
                              "no-op, evaluates raw weights same as before).")
+    parser.add_argument("--epsilon_reset_every", type=int, default=0,
+                        help="Item 11(b) / fidings §40: every N rounds, reset each client's "
+                             "epsilon schedule back to eps_start (steps_done=0) instead of "
+                             "letting it keep decaying monotonically. Targets the 'confidently "
+                             "locked into a bad repeating action' failure mode (§34) directly in "
+                             "training, as a periodic version of the one-shot post-hoc recovery "
+                             "burst validated in §39/§40 (diagnostics/recovery_finetune.py). "
+                             "0 = disabled (default, exact no-op, unchanged monotonic decay).")
     parser.add_argument("--fedavg_blend", type=float, default=1.0,
                         help="FedAvg blending: 1.0 = fully replace global with aggregated (default). "
                              "0.7 = 70%% aggregated + 30%% previous global weights, preventing "

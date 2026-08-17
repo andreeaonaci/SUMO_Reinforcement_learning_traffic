@@ -91,6 +91,7 @@ def _client_worker(
     out_queue: "mp.Queue",
     seed: Optional[int] = None,
     init_steps_done: int = 0,
+    epsilon_reset_every: int = 0,
 ):
     """Runs inside its own process for the ENTIRE training run.
 
@@ -161,8 +162,29 @@ def _client_worker(
             if msg is None or msg[0] == "stop":
                 break
 
-            _, global_state = msg
+            _, global_state, round_num = msg
             agent.start_round(global_state)
+            # Periodic exploration reset (item 11(b), fidings/divergence_
+            # investigation.md §40): monotonic epsilon decay means a client
+            # that's locked onto a confidently-wrong repeating action by
+            # round ~16-20 (epsilon already ~0.05, §34) almost never samples
+            # its way back out on its own -- §39 showed a one-off exploration
+            # reset can walk a locked checkpoint into a good policy, and §40
+            # showed a single reset doesn't durably fix a severely-locked
+            # one. This makes that reset periodic instead of a one-shot
+            # post-hoc repair: every `epsilon_reset_every` rounds, restart
+            # this client's epsilon schedule at eps_start (steps_done=0)
+            # rather than letting it keep decaying from where it left off.
+            # Reuses the run's own eps_decay, not a separately-tuned one --
+            # each reset cycle decays over the same eps_decay steps_done
+            # is measured in, which was already fast enough (§39/§40's short
+            # recovery bursts used a similar-order eps_decay) to reach the
+            # floor again well before the next reset at typical round
+            # lengths.
+            if epsilon_reset_every > 0 and round_num % epsilon_reset_every == 0:
+                agent.steps_done = 0
+                logger.info("Worker '%s' round %d: periodic epsilon reset (steps_done -> 0)",
+                            name, round_num)
             try:
                 eps_start = agent.current_epsilon()
                 state_dict, n_samples, mean_loss, action_counts = agent.train(
@@ -247,6 +269,7 @@ class ParallelFederatedServer:
         pseudo_grad_clip: float = 0.0,
         eval_ema_decay: float = 0.0,
         init_steps_done: int = 0,
+        epsilon_reset_every: int = 0,
     ):
         self.global_model = global_model
         self.evaluator = evaluator
@@ -276,6 +299,7 @@ class ParallelFederatedServer:
         # eval-time swap in run() below). 0 = disabled, exact no-op.
         self.eval_ema_decay = float(eval_ema_decay)
         self._eval_ema_state: Optional[Dict[str, torch.Tensor]] = None
+        self.epsilon_reset_every = int(epsilon_reset_every)
         os.makedirs(os.path.join(checkpoint_dir, "clients"), exist_ok=True)
         self.strategy = build_aggregation_strategy(
             aggregation_strategy, aggregation_config
@@ -323,6 +347,7 @@ class ParallelFederatedServer:
                     self.log_file,
                     self.in_queues[name], self.out_queue,
                     city_seed, init_steps_done,
+                    self.epsilon_reset_every,
                 ),
                 daemon=True,
             )
@@ -432,7 +457,7 @@ class ParallelFederatedServer:
                         send_state = per_client_state[name]
                     else:
                         send_state = global_state_before
-                    self.in_queues[name].put(("train", send_state))
+                    self.in_queues[name].put(("train", send_state, r))
 
                 # Collect results as they arrive (order doesn't matter).
                 client_states: Dict[str, Dict[str, torch.Tensor]] = {}

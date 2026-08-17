@@ -2073,6 +2073,61 @@ standard monotonic epsilon decay) prevents reaching the fully-locked state in th
 which would be a training-*design* fix rather than a post-hoc *repair* — closer to item 11(b)'s
 full training-time exploration-policy change, now worth re-examining given round 20's result here.
 
+## 41. Item 11(b) built and tested from scratch on the worst 2-city seed: periodic epsilon reset
+    doesn't durably fix a bad seed either — consistent with §40, not a contradiction of it
+
+**2026-08-17.** Built `--epsilon_reset_every N` (new CLI flag, `experiments/federated_training.py`
++ `federated/parallel_server.py`): every N rounds, each client's epsilon schedule restarts at
+`eps_start=1.0` (`agent.steps_done = 0`) instead of continuing its monotonic decay — a periodic,
+built-into-training version of §39/§40's one-shot post-hoc recovery burst. Mechanics: the round
+number is now threaded into the existing per-round `("train", state)` message the server sends each
+worker (`parallel_server.py::run()`), and each worker resets its own agent's clock when
+`round_num % epsilon_reset_every == 0`. Reuses the run's existing `eps_decay` — no separate schedule
+needed, confirmed fast enough to reach the floor again well before the next reset at this interval.
+
+Tested on the worst-performing seed from §21's 5-seed validation of this project's actual
+recommended config (`--dueling --n_step 3`, standard `DEFAULT_COMM_DROPOUT`, not the "clean comm"
+override used in the B/C/D ablation thread) — **seed 5** (§21: mean -2747.4, best -23.5, worst
+-5003.3) — with `--epsilon_reset_every 5` added, otherwise identical
+(`run_2026_08_17-18_27_49_683258`).
+
+| metric | seed 5 baseline (§21, no reset) | seed 5 + `--epsilon_reset_every 5` |
+|---|---:|---:|
+| mean reward | -2747.4 | -2579.8 (std 1486.8) |
+| best round | -23.5 | -4.54 |
+| worst round | -5003.3 | -5066.01 |
+| rounds >-500 ("good") | not tabulated in §21 | **2/20 (10%)** |
+
+**No meaningful improvement.** Mean is ~6% better, within noise for a single seed given the
+round-to-round std (1486.8) is more than half the mean's own magnitude. Best round improved in
+absolute terms but both were already near-optimal-scale. Worst round is marginally *worse*, not
+better. Confirmed via the training log that resets fired exactly on schedule (rounds 5, 10, 15,
+20) — the mechanism works as designed — but the wild alternation between near-optimal and
+catastrophic rounds continued essentially unchanged through the whole 20-round run (round 4:
+-23.49 → round 6: -5066.01 just one reset later; round 11: -4.54 → round 13: -3770.92 two rounds
+later).
+
+**This doesn't contradict §39's positive result — it extends §40's finding to a fresh full-schedule
+run instead of post-hoc recovery from one specific already-crashed checkpoint.** §40 already showed
+the same mechanism (exploration reset) durably fixed a *moderately*-locked checkpoint (round 16)
+but not a *severely*-locked one (round 20, kept relapsing through 15 rounds). Seed 5 is this
+project's worst-performing 2-city seed by a wide margin — the periodic-reset-from-scratch result
+here (no durable fix) is the severity-dependent pattern §40 already predicted, not a new surprise.
+**The standing hypothesis is now reasonably well-supported across two different test designs (§40's
+post-hoc recovery and this section's from-scratch training): periodic/one-off exploration resets
+help specifically when a run is moderately, not severely, destabilized — they are not a general
+cure for this project's underlying round-to-round instability (§3, §12, §28's still-unresolved
+"why does federated aggregation regress past round 20").**
+
+**Not yet tried:** other reset intervals (5 may be too frequent — every reset costs several rounds
+of re-exploration before the network can exploit again, which could itself be contributing to the
+instability rather than fixing it; a longer interval, or resetting to a partial epsilon rather than
+full 1.0, are both untested), other seeds (seed 5 alone doesn't establish whether this generalizes
+even negatively — a less-bad seed might respond differently), and whether combining periodic reset
+with the best-round-checkpoint-selection idea from this document's very first "how do we beat the
+baselines" discussion (deploy the best round reached, whichever mechanism produced it) is more
+promising than expecting the *mean* trajectory to improve.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
@@ -2239,9 +2294,16 @@ full training-time exploration-policy change, now worth re-examining given round
     the fully-locked one (round 20, 0/30 escapes under pure argmax in §33) keeps relapsing through
     round 15, including a fresh crash to -4114.05 at round 14. Severity-dependent, not a universal
     one-shot cure.
-    (b) **Worth re-examining now, not just a fallback:** replace epsilon-greedy with softmax(Q/T) as
-    the training-time exploration
-    policy for the whole schedule, with its own temperature-decay schedule mirroring the existing
-    `eps_decay`/`compute_eps_decay` machinery. Not a drop-in change — needs a new exploration-policy
-    code path in `agents/dqn.py` (today's `_epsilon_action`/`act_batch` only implement
-    epsilon-greedy).
+    (b) **Split in two: the cheap half tested, the invasive half still isn't.** Built and tested
+    the cheap variant — `--epsilon_reset_every N` (periodic epsilon-greedy reset, not a policy
+    change, see
+    [§41](#41-item-11b-built-and-tested-from-scratch-on-the-worst-2-city-seed-periodic-epsilon-reset-doesnt-durably-fix-a-bad-seed-either--consistent-with-40-not-a-contradiction-of-it))
+    — on this project's worst-performing 2-city seed (seed 5, §21). No meaningful improvement
+    (mean -2579.8 vs -2747.4 baseline, worst round *slightly* worse) — consistent with §40's
+    severity-dependent read, not a contradiction of it: periodic reset alone doesn't fix a
+    severely-unstable seed any more than a one-shot recovery burst durably fixed the fully-locked
+    checkpoint there. The more invasive half — replacing epsilon-greedy with softmax(Q/T) as the
+    training-time exploration policy itself, with its own temperature-decay schedule, needing a new
+    exploration-policy code path in `agents/dqn.py` (today's `_epsilon_action`/`act_batch` only
+    implement epsilon-greedy) — is still untested, and §41's null result makes it a less obviously
+    promising next spend than it looked right after §39.
