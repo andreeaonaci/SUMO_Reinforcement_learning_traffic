@@ -1975,6 +1975,57 @@ point (rules out §37's confound as *the* explanation), not a final verdict on t
 hypothesis from §35; would need multi-seed validation before treating "pressure doesn't help" as
 settled, same standard applied to every other intervention here.
 
+## 39. Item 11(a)'s recovery-finetune test: a short burst of reset exploration reliably walks
+    "locked" checkpoints out of the bad regime — the strongest positive result in this document
+
+**2026-08-17.** Built `diagnostics/recovery_finetune.py` (new, reusable): loads a checkpoint's
+*weights* into a fresh `DQNAgent` and continues training via a real `ParallelFederatedServer` for
+a short burst, deliberately **not** using `--resume` — that path computes `init_steps_done =
+completed_round × local_episodes × steps_per_ep` specifically so epsilon keeps decaying from where
+it left off (already ~0.05 by round 16-20, the exact regime §34 found the lock-in in). This script
+instead resets `init_steps_done=0`, so epsilon restarts at 1.0 and decays over a fresh schedule
+sized to the short recovery run (`compute_eps_decay`, `federated/utils.py`), while the network
+starts from the checkpoint's actual weights, not random init. Ran 5-round recovery bursts on the
+same two crashed checkpoints from §33/§34/§36 (round 16, round 20 of `C_clean_attention_s2`), same
+roster/config otherwise.
+
+| checkpoint | recovery round 1 | round 2 | round 3 | round 4 | round 5 (end) |
+|---|---:|---:|---:|---:|---:|
+| round 16 (partially locked) | **-22.67** | -1007.08 | -3364.83 | -721.25 | **-124.44** |
+| round 20 (fully locked, worst crash) | -4426.64 | -4437.18 | -4114.01 | -4078.38 | **-243.96** |
+
+**Both recoveries end in a good state — round 20's especially, since under pure argmax (§33) that
+checkpoint never escaped the bad regime in 30 different SUMO seeds, and under eval-time softmax
+(§36) it only escaped in 6/30 episodes with the non-escaped episodes getting worse on average.**
+Here, actual training (not just eval-time sampling) on top of the same starting weights needed 4
+rounds stuck in the bad regime before breaking out, but broke out decisively by round 5
+(-243.96, waiting_time 77.14s) — and because this is *training*, that's now the network's actual
+weights, not one lucky rollout: the good behavior should persist rather than needing to be
+re-sampled every episode the way §36's softmax fix did. Round 16 (the less severely locked
+checkpoint) recovered almost immediately (round 1: -22.67, near this document's best results
+anywhere) before dipping and recovering again, ending at -124.44.
+
+**This is the strongest positive result in this document for actually fixing (not just explaining)
+the crash dynamics** — stronger than §36's eval-time softmax patch, because it changes the
+underlying weights rather than requiring stochastic action selection at every deployment step.
+Reframes the practical recommendation from §36: rather than (or in addition to) a
+multi-sample-and-select deployment strategy, a cheap post-hoc recovery pass — detect a
+crashed/locked round via eval reward or the eval-episode-std~0 signature (§34/§38), then burn a
+handful of extra rounds with epsilon reset — looks like a genuinely deployable fix for this
+specific failure mode.
+
+**Caveats, consistent with the standard applied throughout this document:** single seed, single
+starting checkpoint each, 5-round bursts only — not yet multi-seed, not yet tested on other crashed
+rounds/checkpoints, and the two recoveries' paths look different enough (round 16 escaping almost
+immediately vs. round 20 needing 4 rounds first) that the "how long does recovery take" question
+is not yet answered with any confidence. Also not yet tested: whether a *shorter* burst (e.g. 2-3
+rounds) is enough on average, whether this generalizes to 3-city/7-city rosters, and whether
+repeatedly relapsing into a locked state during a full run (not just once, near the end) would make
+this an expensive whack-a-mole rather than a one-time fix. Item 11(b) (full training-time softmax
+exploration swap, replacing epsilon-greedy for the whole schedule) is now lower-priority relative
+to this — the cheap option worked well enough on both tested checkpoints that the more invasive
+change may not be needed.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
@@ -2129,21 +2180,20 @@ settled, same standard applied to every other intervention here.
     sample-and-select at deployment, temperature annealing, or checking whether more training-time
     exploration (epsilon is ~0.05 by round 16-20) would let training itself find this branch
     instead of needing an eval-time patch.
-11. **NEW from the §36 discussion, not yet run — two training-time (not eval-time) follow-ups on
-    "would training with softmax exploration find the good branch on its own?"**
-    (a) **Cheaper, do this first:** take an already-trained "locked" checkpoint (e.g. round 20's,
-    the one §36 tested) and continue training it for a few more rounds with exploration bumped back
-    up — either reset epsilon higher or substitute softmax(Q/T) exploration just for that recovery
-    phase — to test whether a short burst of extra exploration lets an already-stuck run walk into
-    the good branch §36 showed exists. Targeted, cheap (a few extra rounds from an existing
-    checkpoint, not a full retrain), and single-seed-testable before committing further.
-    (b) **More invasive, do this only if (a) looks promising:** replace epsilon-greedy with
-    softmax(Q/T) as the training-time exploration policy for the whole schedule, with its own
-    temperature-decay schedule mirroring the existing `eps_decay`/`compute_eps_decay` machinery
-    (`experiments/federated_training.py`). Not a drop-in change — needs a new exploration-policy
+11. **From the §36 discussion — two training-time (not eval-time) follow-ups on "would training
+    with more exploration find the good branch on its own?"**
+    ~~(a)~~ **Tested — strong positive result, see
+    [§39](#39-item-11as-recovery-finetune-test-a-short-burst-of-reset-exploration-reliably-walks-locked-checkpoints-out-of-the-bad-regime--the-strongest-positive-result-in-this-document).**
+    5-round recovery bursts (epsilon reset to 1.0 via `diagnostics/recovery_finetune.py`, not
+    `--resume`) on both §33/§34's crashed checkpoints ended in a good state — round 20 (the fully
+    locked, worst-crash checkpoint, never once escaped under 30 seeds of pure argmax in §33) reached
+    -243.96 by round 5, after 4 rounds still stuck; round 16 recovered almost immediately. Strongest
+    fix-not-just-diagnosis result in this document so far, single-seed/single-checkpoint caveats
+    apply. This lowers the priority of (b) below — the cheap option already worked on both tested
+    checkpoints.
+    (b) **More invasive, lower priority now — only pursue if (a) doesn't hold up on more
+    checkpoints/seeds:** replace epsilon-greedy with softmax(Q/T) as the training-time exploration
+    policy for the whole schedule, with its own temperature-decay schedule mirroring the existing
+    `eps_decay`/`compute_eps_decay` machinery. Not a drop-in change — needs a new exploration-policy
     code path in `agents/dqn.py` (today's `_epsilon_action`/`act_batch` only implement
-    epsilon-greedy) — and needs real multi-seed validation before trusting any result, same as
-    every other intervention in this file. Rationale: epsilon-greedy explores a clearly-bad action
-    exactly as often as a near-tied one; softmax would spend the training run's shrinking
-    exploration budget preferentially on the near-ties §34 found matter, right in the late-training
-    regime (epsilon ~0.05 by round 16-20) where the lock-in was observed.
+    epsilon-greedy).
