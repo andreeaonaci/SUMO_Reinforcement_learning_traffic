@@ -2026,6 +2026,53 @@ exploration swap, replacing epsilon-greedy for the whole schedule) is now lower-
 to this — the cheap option worked well enough on both tested checkpoints that the more invasive
 change may not be needed.
 
+## 40. Relapse-risk check on §39's recovery: durable for the moderately-locked checkpoint, not
+    durable for the fully-locked one — the fix isn't uniform
+
+**2026-08-17.** Extended §39's 5-round recovery bursts to 15 rounds on the same two checkpoints
+(round 16, round 20 of `C_clean_attention_s2`), same `diagnostics/recovery_finetune.py`, to test
+whether a recovered good state holds once exploration decays back down, or relapses the way normal
+training does throughout this document (§3, §12, §28).
+
+| round | round 16 (moderately locked) | round 20 (fully locked, worst crash) |
+|---|---:|---:|
+| 1-5 | -211, -3021, -2265, -1734, -2172 | -3513, -998, -41, -817, -3755 |
+| 6-10 | -219, **-16**, **-49**, **-11**, -497 | -159, -3690, -84, -3852, -253 |
+| 11-15 | **-18**, **-17**, -188, -725, **-17** | -760, **-19**, -1482, **-4114**, -949 |
+| rounds 6-15: good/bad split (>-500 vs ≤-500) | **9/10 good**, mean -175.7 | **4/10 good**, mean -1536.1 |
+
+**Round 16 stabilizes durably — this is the clean positive case.** After the rocky first 5 rounds,
+rounds 6-15 stay in a good regime almost the whole way (9 of 10 rounds better than -500, several
+at or near this document's best results anywhere), with only one shallow dip (round 14, -724.50) —
+nowhere near the -1700 to -3000 range of the initial crash. This looks like genuine convergence to
+a good policy, not luck holding out.
+
+**Round 20 never stabilizes — it keeps relapsing through round 15**, including a fresh crash to
+-4114.05 at round 14, essentially as bad as anything seen anywhere in this checkpoint's history.
+Good and bad rounds keep alternating with no visible trend toward settling (4/10 good in rounds
+6-10 vs. rounds 11-15, no improvement). Extending the recovery burst from 5 to 15 rounds did not
+fix round 20's checkpoint the way it appeared to in §39's shorter test — §39's round-5 endpoint
+(-243.96) was a good ROUND, not evidence the run had actually stabilized; round 20's own subsequent
+rounds 7, 9, 11, 13, 14, 15 in this extended run are all back in the bad range.
+
+**Reading: §39's fix is real but not uniform, and depends on how deeply locked the starting
+checkpoint was.** Round 16 (partially locked — pure argmax still escaped 1/30 episodes, §33) fully
+recovers. Round 20 (fully locked — pure argmax escaped 0/30 episodes, §33; the same checkpoint
+softmax eval only rescued 20% of episodes in §36) keeps relapsing under continued training just as
+it did under continued eval sampling. This tracks §34's "confidently locked" severity gradient
+directly: the more completely a checkpoint had collapsed, the less a single recovery
+intervention — eval-time softmax (§36) or training-time exploration reset (§39) alike — durably
+fixes it, and the more it looks like the underlying aggregation dynamics (§28's still-standing
+suspicion) keep pulling it back rather than the fix itself being wrong.
+
+**Practical implication:** a recovery burst is not a one-shot cure-all — it may need to be applied
+repeatedly (detect-and-recover as a running policy throughout training, not a single post-hoc pass)
+for severely-locked cases, while a lighter touch might suffice for moderately-locked ones. Not yet
+tested: whether *starting* training with this kind of periodic exploration-reset (rather than the
+standard monotonic epsilon decay) prevents reaching the fully-locked state in the first place,
+which would be a training-*design* fix rather than a post-hoc *repair* — closer to item 11(b)'s
+full training-time exploration-policy change, now worth re-examining given round 20's result here.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
@@ -2182,17 +2229,18 @@ change may not be needed.
     instead of needing an eval-time patch.
 11. **From the §36 discussion — two training-time (not eval-time) follow-ups on "would training
     with more exploration find the good branch on its own?"**
-    ~~(a)~~ **Tested — strong positive result, see
-    [§39](#39-item-11as-recovery-finetune-test-a-short-burst-of-reset-exploration-reliably-walks-locked-checkpoints-out-of-the-bad-regime--the-strongest-positive-result-in-this-document).**
-    5-round recovery bursts (epsilon reset to 1.0 via `diagnostics/recovery_finetune.py`, not
-    `--resume`) on both §33/§34's crashed checkpoints ended in a good state — round 20 (the fully
-    locked, worst-crash checkpoint, never once escaped under 30 seeds of pure argmax in §33) reached
-    -243.96 by round 5, after 4 rounds still stuck; round 16 recovered almost immediately. Strongest
-    fix-not-just-diagnosis result in this document so far, single-seed/single-checkpoint caveats
-    apply. This lowers the priority of (b) below — the cheap option already worked on both tested
-    checkpoints.
-    (b) **More invasive, lower priority now — only pursue if (a) doesn't hold up on more
-    checkpoints/seeds:** replace epsilon-greedy with softmax(Q/T) as the training-time exploration
+    ~~(a)~~ **Tested — a real but not uniform fix, see
+    [§39](#39-item-11as-recovery-finetune-test-a-short-burst-of-reset-exploration-reliably-walks-locked-checkpoints-out-of-the-bad-regime--the-strongest-positive-result-in-this-document)
+    and the relapse-risk follow-up,
+    [§40](#40-relapse-risk-check-on-39s-recovery-durable-for-the-moderately-locked-checkpoint-not-durable-for-the-fully-locked-one--the-fix-isnt-uniform).**
+    5-round recovery bursts (epsilon reset to 1.0, not `--resume`) reached a good round on both
+    crashed checkpoints (§39). Extending to 15 rounds (§40) showed this only *durably* fixes the
+    moderately-locked checkpoint (round 16: 9/10 good rounds in the back half, real convergence) —
+    the fully-locked one (round 20, 0/30 escapes under pure argmax in §33) keeps relapsing through
+    round 15, including a fresh crash to -4114.05 at round 14. Severity-dependent, not a universal
+    one-shot cure.
+    (b) **Worth re-examining now, not just a fallback:** replace epsilon-greedy with softmax(Q/T) as
+    the training-time exploration
     policy for the whole schedule, with its own temperature-decay schedule mirroring the existing
     `eps_decay`/`compute_eps_decay` machinery. Not a drop-in change — needs a new exploration-policy
     code path in `agents/dqn.py` (today's `_epsilon_action`/`act_batch` only implement
