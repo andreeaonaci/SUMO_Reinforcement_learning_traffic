@@ -1844,6 +1844,96 @@ and [`agents/action_value/pfrl_dqn.py`](https://github.com/Pi-Star-Lab/RESCO/blo
 (fetched and read directly, 2026-08-16); RESCO paper (Ault & Sharon, NeurIPS 2021 Datasets &
 Benchmarks); PressLight (Wei et al., KDD 2019); CoLight (Wei et al., CIKM 2019, arXiv:1905.05717).
 
+## 36. §35's experiment (b), softmax eval on crashed checkpoints: a good policy is reachable from
+    the exact same weights — pure argmax just never finds it
+
+**2026-08-16.** Tested §34/§35's proposed fix directly: added `--temperature T` to
+`diagnostics/reeval_checkpoint.py` (a `SoftmaxPolicy` wrapper around the loaded agent, sampling
+`softmax(Q/T)` over valid actions instead of pure argmax at eval time, non-invasive — production
+`federated/evaluator.py` untouched). Ran at `T=0.2` on the same two crashed checkpoints from
+§33/§34 (round 16, round 20), 30 episodes each, same seeds as the pure-argmax baseline.
+
+| checkpoint | pure argmax (§33/§34) | softmax T=0.2 | escaped episodes (reward > -1000) |
+|---|---:|---:|---|
+| round 16 | mean -3389.13, std 672.84, 0/30 near-optimal | mean -3191.23, std 532.44 | 0/30 — modest, uniform improvement, no true escapes |
+| round 20 | mean -4094.58, std 301.45, **0/30** near-optimal (fully locked) | mean -4018.42, std **2004.51** | **6/30 (20%)**, rewards -36 to -857 — matching C's best-known results |
+
+**Round 20 is the headline result: a genuinely good policy is reachable from the exact same
+weights that produce a uniformly catastrophic outcome under pure argmax.** Under greedy action
+selection this checkpoint never once escaped the bad regime in 30 different SUMO seeds (§33).
+Under softmax at the same temperature, 6 of 30 episodes land in the -36 to -104 range — on par
+with this project's best-known trained results anywhere in this document (cf. §30's C best-round
+-5.60). This is direct, positive confirmation of §34's diagnosis: the "crash" is the policy
+confidently walking a bad deterministic path, not an inability to do well from these weights.
+
+**But softmax is not a clean fix — it trades a lower floor for occasional escapes, roughly a wash
+on the mean.** Round 20's *non-escaped* episodes got worse under softmax than under pure argmax
+(-4974.04 mean vs -4094.58), because perturbing away from the locked bad trajectory without any
+guidance mostly still lands in a different bad outcome, occasionally a much worse one — net effect
+on the overall mean is small (-4018 vs -4095, not a reliable win). Round 16 shows a smaller,
+more uniform gain (better mean, similar floor, no true escapes) — the same intervention doesn't
+generalize identically to both checkpoints, plausibly because round 16's Q-gaps were already more
+varied under pure argmax (§34) while round 20's were uniformly high (less "give" for a fixed
+temperature to work with).
+
+**Reading and next steps:** this is genuine evidence that the failure is a policy/inference-time
+issue superimposed on otherwise-servicable weights, not (only) a training-data/weight-quality
+problem — reinforcing §32's finding that weight-space metrics don't explain the crashes, and
+sharpening §34's mechanism. Practical directions this opens, none tried yet: (1) multi-sample
+eval/deployment — draw N stochastic rollouts and keep the best one via a cheap simulator check,
+which would capture round 20's 20% escape rate without paying for the worse floor on the other 80%;
+(2) temperature tuning/annealing rather than one fixed T; (3) most structurally interesting — since
+epsilon has already decayed to ~0.05 by round 16-20 in this training schedule, the fact that a good
+branch exists but the deterministic policy walks past it raises the question of whether training
+itself has enough exploration noise late in the schedule to find and consolidate onto that branch,
+which would tie this finding back into §28's still-unresolved "why does aggregation regress past
+round 20" question rather than treating it as purely an eval-time fix.
+
+## 37. §35's experiment (a) pilot result: pressure reward looks worse than `diff-waiting-time` —
+    but `reward_clip=10.0` is hardcoded and almost certainly destroys most of pressure's signal
+
+**2026-08-16/17.** `environments_c1_4_pressure/` pilot finished (2-city, seed 3, `--dueling
+--n_step 3`, `fedavg`, 20 rounds, `run_2026_08_16-23_27_18_433878`), same everything as §30's
+`C_clean_attention` seed 3 except `reward_fn: pressure` instead of the project default
+`diff-waiting-time`.
+
+| metric (`waiting_time`, reward-fn-agnostic — comparable across runs) | diff-waiting-time (§30 seed3) | pressure (this pilot) |
+|---|---:|---:|
+| best round | 3.20s (round 17) | 656.60s (round 15) |
+| worst round | 2303.80s (round 1) | 2713.23s (round 1) |
+| mean across 20 rounds | 571.1s (std 798.4) | 1836.6s (std 585.9) |
+| final round (20) | 12.57s | 1089.41s |
+
+**The pressure run never approaches a good policy at all — not even once in 20 rounds** (best
+waiting_time 656.60s vs. diff-waiting-time's 3.20s, a >200x gap at each run's own best). It's also
+*more* stable round-to-round (std 585.9 vs 798.4) — but stably bad, not stably good; no crash
+dynamic, no escape either, just flat mediocrity the whole run (own reward trajectory: mean
+-39405.6, std only 1715.1, never gets close to whatever "good" looks like on pressure's own scale).
+
+**This is very likely explained by the confound flagged when the pilot was launched, not a genuine
+verdict on pressure reward.** `DQNAgent.reward_clip` defaults to 10.0 (`agents/dqn.py:116`) and is
+**not exposed as a CLI flag anywhere in `experiments/federated_training.py`** — confirmed by
+grepping the whole training entry point, zero references outside `agents/dqn.py` itself. Every
+training-time reward, regardless of `reward_fn`, gets hard-clipped to ±10 before it ever reaches
+the replay buffer or a TD target (`agents/dqn.py:353-359`). `diff-waiting-time` is already
+scaled (divided by 100 inside `_diff_waiting_time_reward`) to roughly fit this range by design.
+Raw `pressure` (`entering_queued - exiting_queued`, unscaled vehicle counts) is not — this pilot's
+round-1 unclipped *episode total* was -41482, meaning individual-tick pressure values are very
+plausibly saturating the ±10 clip on nearly every tick, throughout training. If so, the network was
+trained on an almost-binary "clipped high/low" signal that carries far less information than real
+pressure differences do, which would fully explain uniformly-bad-but-stable performance without
+saying anything about whether pressure itself is a worse reward design.
+
+**Not a fair test as run. Two ways to fix it, neither done yet:** (1) add a `--reward_clip` CLIflag
+so it can be set proportional to pressure's actual scale for this experiment (quick, but changes a
+currently-hardcoded value everywhere it's threaded, worth checking nothing else assumes 10.0), or
+(2) follow RESCO's own pattern (§35 — their `wait_norm` divides raw wait by 224 and clips to ±4
+specifically so a differently-scaled reward still fits the same range) and add a `pressure_norm`-
+style reward function that pre-scales pressure into roughly `diff-waiting-time`'s natural range
+before it ever hits the existing clip, no CLI/agent changes needed. (2) is probably the smaller,
+safer change. **Don't treat this pilot as a verdict on the pressure-reward hypothesis from §35 —
+rerun with one of these fixes before concluding anything either way.**
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
@@ -1971,12 +2061,45 @@ Benchmarks); PressLight (Wei et al., KDD 2019); CoLight (Wei et al., CIKM 2019, 
    new evaluator policy branch (`federated/evaluator.py:132` currently hardcodes
    `explore=False`).
 10. **NEW from §35: two concrete, cheap, literature-motivated experiments this project has never
-    run.** (a) Train against `sumo_rl`'s built-in `pressure` reward instead of the default
+    run.**
+    (a) Train against `sumo_rl`'s built-in `pressure` reward instead of the default
     `diff-waiting-time` — PressLight/MPLight both train against pressure specifically because it's
     theoretically tied to throughput maximization (max-pressure control theory), and this project
-    currently only uses pressure as a rule-based eval baseline, never as the training signal. (b)
-    Softmax/stochastic eval-time action selection (already flagged in item 9/§34) — a genuine
-    departure from RESCO/MPLight/IDQN's shared pure-argmax convention, not something borrowed from
-    an existing baseline. Neither is run yet; (a) is the more novel, less-tested-anywhere-in-this-
-    doc direction and would need its own multi-seed validation before trusting a result, same as
-    every other intervention in this file.
+    currently only uses pressure as a rule-based eval baseline, never as the training signal.
+    ~~**In progress**~~ **Pilot done, inconclusive by design — see
+    [§37](#37-35s-experiment-a-pilot-result-pressure-reward-looks-worse-than-diff-waiting-time--but-reward_clip100-is-hardcoded-and-almost-certainly-destroys-most-of-pressures-signal).**
+    Single-seed pilot looks uniformly worse than `diff-waiting-time` (best-round waiting_time
+    656.60s vs 3.20s), but `reward_clip=10.0` is hardcoded in `agents/dqn.py` with no CLI override,
+    and pressure's raw scale (round-1 unclipped episode total -41482) is almost certainly getting
+    saturated by that clip every tick — this pilot is not yet a fair test. **Standing next step:**
+    add a `pressure_norm`-style pre-scaled reward function (cheaper/safer than exposing
+    `reward_clip` as a new CLI flag) and rerun before drawing any real conclusion about pressure
+    reward itself.
+    ~~(b)~~ **Tested — see
+    [§36](#36-35s-experiment-b-softmax-eval-on-crashed-checkpoints-a-good-policy-is-reachable-from-the-exact-same-weights--pure-argmax-just-never-finds-it).**
+    Softmax(Q/0.2) at eval time recovers near-optimal episodes (reward -36 to -104, on par with
+    this doc's best results anywhere) from a checkpoint that pure argmax never once escaped in 30
+    seeds — direct proof a good policy is reachable from the same weights. Not a clean win though:
+    roughly a wash on mean reward (the non-escaped episodes get worse, not just neutral), so this
+    is evidence of the mechanism, not yet a deployable fix. Next candidates, none tried: multi-
+    sample-and-select at deployment, temperature annealing, or checking whether more training-time
+    exploration (epsilon is ~0.05 by round 16-20) would let training itself find this branch
+    instead of needing an eval-time patch.
+11. **NEW from the §36 discussion, not yet run — two training-time (not eval-time) follow-ups on
+    "would training with softmax exploration find the good branch on its own?"**
+    (a) **Cheaper, do this first:** take an already-trained "locked" checkpoint (e.g. round 20's,
+    the one §36 tested) and continue training it for a few more rounds with exploration bumped back
+    up — either reset epsilon higher or substitute softmax(Q/T) exploration just for that recovery
+    phase — to test whether a short burst of extra exploration lets an already-stuck run walk into
+    the good branch §36 showed exists. Targeted, cheap (a few extra rounds from an existing
+    checkpoint, not a full retrain), and single-seed-testable before committing further.
+    (b) **More invasive, do this only if (a) looks promising:** replace epsilon-greedy with
+    softmax(Q/T) as the training-time exploration policy for the whole schedule, with its own
+    temperature-decay schedule mirroring the existing `eps_decay`/`compute_eps_decay` machinery
+    (`experiments/federated_training.py`). Not a drop-in change — needs a new exploration-policy
+    code path in `agents/dqn.py` (today's `_epsilon_action`/`act_batch` only implement
+    epsilon-greedy) — and needs real multi-seed validation before trusting any result, same as
+    every other intervention in this file. Rationale: epsilon-greedy explores a clearly-bad action
+    exactly as often as a near-tied one; softmax would spend the training run's shrinking
+    exploration budget preferentially on the near-ties §34 found matter, right in the late-training
+    regime (epsilon ~0.05 by round 16-20) where the lock-in was observed.

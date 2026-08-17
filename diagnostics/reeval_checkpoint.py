@@ -8,9 +8,16 @@ so the eval env, masking, and seeding are identical to what produced the origina
 only `episodes` (and therefore how many distinct
 `HoldoutEvaluator.eval_seed_base + ep` seeds get sampled) changes.
 
+`--temperature T` (T>0) switches action selection from pure argmax to softmax sampling
+over masked Q-values (`softmax(Q/T)`), via a thin wrapper that leaves
+`federated/evaluator.py`'s production eval loop untouched -- built to test §34's finding
+that crashed rounds are confidently locked into a repeating bad action, and that the rare
+low-Q-gap (uncertain) episodes are what escape it. T=0 (default) is unchanged pure-greedy
+behavior.
+
 Usage:
     python diagnostics/reeval_checkpoint.py results/run_.../global_round_016.pth \
-        --base_dir environments_c1_4 --episodes 30 --dueling \
+        --base_dir environments_c1_4 --episodes 30 --dueling --temperature 0.3 \
         --comm_dropout_p_link 0 --comm_dropout_p_isolate 0 --comm_dropout_p_hop_cutoff 0
 """
 import argparse
@@ -19,6 +26,7 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
+import numpy as np
 import torch
 
 from agents.dqn import DQNAgent
@@ -26,6 +34,33 @@ from experiments.federated_training import (
     resolve_city_configs_and_dims,
     make_holdout_evaluator,
 )
+
+
+class SoftmaxPolicy:
+    """Wraps a DQNAgent so `.act(obs, explore=False)` samples from
+    softmax(Q/temperature) over valid actions instead of pure argmax.
+    Delegates everything else (`.q_values()`) to the underlying agent
+    unchanged, so it's a drop-in `model` for `HoldoutEvaluator.evaluate()`."""
+
+    def __init__(self, agent, temperature: float):
+        self.agent = agent
+        self.temperature = temperature
+
+    def act(self, obs, explore: bool = False):
+        if explore:
+            return self.agent.act(obs, explore=True)
+        q = self.agent.q_values(obs)
+        valid_mask = ~np.isnan(q)
+        valid_idx = np.flatnonzero(valid_mask)
+        valid_q = q[valid_mask]
+        scaled = valid_q / self.temperature
+        scaled = scaled - scaled.max()
+        probs = np.exp(scaled)
+        probs = probs / probs.sum()
+        return int(np.random.choice(valid_idx, p=probs))
+
+    def q_values(self, obs):
+        return self.agent.q_values(obs)
 
 
 def main():
@@ -39,6 +74,8 @@ def main():
     ap.add_argument("--comm_dropout_p_link", type=float, default=0.0)
     ap.add_argument("--comm_dropout_p_isolate", type=float, default=0.0)
     ap.add_argument("--comm_dropout_p_hop_cutoff", type=float, default=0.0)
+    ap.add_argument("--temperature", type=float, default=0.0,
+                     help="0 (default) = pure argmax. >0 = softmax(Q/T) stochastic action selection.")
     args = ap.parse_args()
 
     city_configs, (own_dim, neighbor_dim, k_max), action_dim, _ = resolve_city_configs_and_dims(args.base_dir)
@@ -50,6 +87,8 @@ def main():
     )
     state = torch.load(args.checkpoint, map_location="cpu")
     agent.load_state_dict(state)
+    if args.temperature > 0:
+        agent = SoftmaxPolicy(agent, args.temperature)
 
     comm_cfg = {
         "p_link": args.comm_dropout_p_link,
@@ -72,6 +111,7 @@ def main():
     rewards = result.get("per_episode_reward", result.get("episode_rewards"))
     print(f"checkpoint={args.checkpoint}")
     print(f"episodes={args.episodes}")
+    print(f"temperature={args.temperature} ({'softmax' if args.temperature > 0 else 'pure argmax'})")
     print(f"mean_reward={result.get('mean_reward'):.4f}  std_reward={result.get('std_reward'):.4f}")
     if rewards:
         print(f"min={min(rewards):.2f}  max={max(rewards):.2f}")

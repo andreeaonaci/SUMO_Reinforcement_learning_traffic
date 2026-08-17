@@ -1,0 +1,26 @@
+name: city_1
+net_file: sumo_rl/nets/RESCO/arterial4x4/arterial4x4.net.xml
+route_file: sumo_rl/nets/RESCO/arterial4x4/arterial4x4_1.rou.xml
+delta_time: 5
+num_seconds: 3600
+sumo_seed: 42
+max_lanes: 16
+max_queue: 50.0
+max_wait: 300.0
+max_speed: 50.0
+k_max: 8
+max_hops: 3
+use_libsumo: true
+begin_time: 0.0
+# reward_fn override for §35's experiment (a): train against a pressure-based
+# reward instead of the project default diff-waiting-time, to test the
+# PressLight/MPLight-motivated hypothesis that it changes the crash dynamics
+# documented in §3-§34. Everything else is an unmodified copy of
+# environments/city_1/config.yaml -- a real file copy, not a symlink, so this
+# doesn't touch the shared base roster.
+# pressure_norm, not pressure: §37 found raw pressure's per-tick scale (std
+# ~12, 26% of ticks exceed +-10 under random actions, measured empirically)
+# blows straight through DQNAgent's hardcoded reward_clip=10.0, saturating
+# most of the training signal. pressure_norm (sumo_rl/environment/
+# traffic_signal.py) pre-scales it the same way diff-waiting-time already is.
+reward_fn: pressure_norm

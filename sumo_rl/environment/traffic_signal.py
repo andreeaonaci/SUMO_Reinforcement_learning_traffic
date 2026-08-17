@@ -239,6 +239,20 @@ class TrafficSignal:
     def _pressure_reward(self):
         return self.get_pressure()
 
+    def _pressure_norm_reward(self):
+        # Raw get_pressure() is unbounded (#veh leaving - #veh approaching);
+        # measured empirically on this project's RESCO city configs under
+        # random actions, 26% of per-tick per-intersection values already
+        # exceed +-10 (std ~12, range -57..+36) -- DQNAgent's reward_clip
+        # (hardcoded to 10.0, agents/dqn.py) would silently saturate over a
+        # quarter of the training signal if fed raw pressure directly.
+        # _diff_waiting_time_reward is already pre-scaled (/100) to fit that
+        # range by design; this does the same for pressure, mirroring
+        # RESCO's own wait_norm (mdp_options/rewards.py: raw wait /224,
+        # clipped to +-4) rather than RESCO's unnormalized pressure(), which
+        # has no such scaling and isn't a safe default for a fixed-clip agent.
+        return float(np.clip(self.get_pressure() / 10.0, -5.0, 5.0))
+
     def _average_speed_reward(self):
         return self.get_average_speed()
 
@@ -361,4 +375,5 @@ class TrafficSignal:
         "average-speed": _average_speed_reward,
         "queue": _queue_reward,
         "pressure": _pressure_reward,
+        "pressure_norm": _pressure_norm_reward,
     }
