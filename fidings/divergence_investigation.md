@@ -1934,6 +1934,47 @@ before it ever hits the existing clip, no CLI/agent changes needed. (2) is proba
 safer change. **Don't treat this pilot as a verdict on the pressure-reward hypothesis from §35 —
 rerun with one of these fixes before concluding anything either way.**
 
+## 38. §37's fix applied: `pressure_norm` pilot rerun properly-scaled — still doesn't beat
+    `diff-waiting-time`, and shows the same degenerate-lock-in signature from §34
+
+**2026-08-17.** Reran the §37 pilot with the fix: `pressure_norm` (new reward function,
+`sumo_rl/environment/traffic_signal.py`, `clip(get_pressure()/10, -5, 5)`) instead of raw
+`pressure`. Confirmed empirically before launching that this keeps the signal well inside both the
+new internal clip (hit 0.1% of ticks) and `DQNAgent`'s existing `reward_clip=10.0` (hit 0% of
+ticks) — the saturation problem from §37 is fixed. Same setup otherwise: 2-city, seed 3, `--dueling
+--n_step 3`, `fedavg`, 20 rounds (`run_2026_08_17-09_51_35_580341`).
+
+| metric (`waiting_time`, comparable across reward functions) | diff-waiting-time (§30 seed3) | pressure (§37, unscaled) | pressure_norm (this pilot) |
+|---|---:|---:|---:|
+| best round | 3.20s | 656.60s | 472.61s |
+| worst round | 2303.80s | 2713.23s | 2960.11s |
+| mean across 20 rounds | 571.1s (std 798.4) | 1836.6s (std 585.9) | 1933.0s (std 701.8) |
+
+**Fixing the clip saturation didn't fix the underlying result — pressure_norm still never gets
+anywhere near `diff-waiting-time`'s best rounds** (472.61s vs 3.20s, still two orders of magnitude
+apart), and is actually marginally *worse* on mean/worst than the broken §37 pilot was, well within
+noise for a single seed. This rules out §37's specific confound as *the* explanation — the clip
+fix changed the signal quality substantially (confirmed above) but not the outcome, which points
+toward a real difference between the reward designs on this setup rather than an artifact of the
+earlier scaling bug.
+
+**A second, unplanned finding: pressure_norm's training shows the same degenerate-lock-in signature
+§34 found in `diff-waiting-time`'s crashed rounds.** 6 of 20 rounds (2, 6, 7, 13, 15, 16) have
+eval-episode reward std of ~0.0000 across the default 5 eval episodes (different SUMO seeds each,
+same mechanism as §34) — the same byte-identical-across-seeds fingerprint of a policy that's
+stopped responding to its own (seed-varying) observations. **This is evidence the lock-in mechanism
+isn't specific to `diff-waiting-time` as a reward design** — it reproduces under a differently-
+scaled, differently-shaped reward too, which weakens the case that reward redesign alone would fix
+it and strengthens §28's original suspicion that the cause is in the federated
+aggregation/training dynamics rather than the reward function.
+
+**Caveats, same as everywhere else in this document: single seed, one run.** Seed 3 might just be
+an unlucky seed for `pressure_norm` specifically — `diff-waiting-time`'s own single-seed history in
+this document (§21) shows real seed-to-seed spread too. This pilot is a real, useful negative data
+point (rules out §37's confound as *the* explanation), not a final verdict on the pressure-reward
+hypothesis from §35; would need multi-seed validation before treating "pressure doesn't help" as
+settled, same standard applied to every other intervention here.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
@@ -2066,15 +2107,18 @@ rerun with one of these fixes before concluding anything either way.**
     `diff-waiting-time` — PressLight/MPLight both train against pressure specifically because it's
     theoretically tied to throughput maximization (max-pressure control theory), and this project
     currently only uses pressure as a rule-based eval baseline, never as the training signal.
-    ~~**In progress**~~ **Pilot done, inconclusive by design — see
-    [§37](#37-35s-experiment-a-pilot-result-pressure-reward-looks-worse-than-diff-waiting-time--but-reward_clip100-is-hardcoded-and-almost-certainly-destroys-most-of-pressures-signal).**
-    Single-seed pilot looks uniformly worse than `diff-waiting-time` (best-round waiting_time
-    656.60s vs 3.20s), but `reward_clip=10.0` is hardcoded in `agents/dqn.py` with no CLI override,
-    and pressure's raw scale (round-1 unclipped episode total -41482) is almost certainly getting
-    saturated by that clip every tick — this pilot is not yet a fair test. **Standing next step:**
-    add a `pressure_norm`-style pre-scaled reward function (cheaper/safer than exposing
-    `reward_clip` as a new CLI flag) and rerun before drawing any real conclusion about pressure
-    reward itself.
+    ~~**In progress**~~ **Confound fixed and rerun — still doesn't beat `diff-waiting-time`, see
+    [§37](#37-35s-experiment-a-pilot-result-pressure-reward-looks-worse-than-diff-waiting-time--but-reward_clip100-is-hardcoded-and-almost-certainly-destroys-most-of-pressures-signal)
+    and
+    [§38](#38-37s-fix-applied-pressure_norm-pilot-rerun-properly-scaled--still-doesnt-beat-diff-waiting-time-and-shows-the-same-degenerate-lock-in-signature-from-34).**
+    §37's raw-`pressure` pilot was clip-saturated (confirmed empirically: 26% of ticks exceed the
+    hardcoded `reward_clip=10.0` under random actions). Added `pressure_norm` (§38,
+    `sumo_rl/environment/traffic_signal.py`, confirmed 0% clip-saturation) and reran — best round
+    472.61s vs `diff-waiting-time`'s 3.20s, still two orders of magnitude worse, on one seed. Also
+    surfaced an unplanned finding: 6/20 rounds show the same eval-episode-std~0 degenerate-lock-in
+    signature §34 found in crashed `diff-waiting-time` rounds, suggesting that failure mode isn't
+    specific to the default reward. Single seed only — not a settled verdict on pressure reward,
+    would need the same multi-seed treatment as everything else here before trusting the direction.
     ~~(b)~~ **Tested — see
     [§36](#36-35s-experiment-b-softmax-eval-on-crashed-checkpoints-a-good-policy-is-reachable-from-the-exact-same-weights--pure-argmax-just-never-finds-it).**
     Softmax(Q/0.2) at eval time recovers near-optimal episodes (reward -36 to -104, on par with
