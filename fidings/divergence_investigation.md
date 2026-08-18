@@ -2128,6 +2128,47 @@ with the best-round-checkpoint-selection idea from this document's very first "h
 baselines" discussion (deploy the best round reached, whichever mechanism produced it) is more
 promising than expecting the *mean* trajectory to improve.
 
+## 42. §41 brought to all 5 seeds: `--epsilon_reset_every 5` is a clean null across the full 2-city
+    validation, not just the worst seed
+
+**2026-08-17/18.** Completed the other 4 seeds §41 didn't cover, same config as §21's baseline
+(`--dueling --n_step 3`, standard `DEFAULT_COMM_DROPOUT`, `environments_c1_4`) plus
+`--epsilon_reset_every 5`, via `analyse/run_concurrent_batch.sh` (`MAX_CONCURRENT=3`,
+`results/epsilon_reset_5seed_batch.log`). One real-world interruption mid-batch: the host went to
+sleep during seed 4's run (round 8 completed 23:04, round 9 didn't complete until 15:55 the next
+day, ~17-hour gap) — same freeze-and-cleanly-resume signature as §30's incident, not a bug; the run
+finished correctly from where it left off, confirmed by sequential round numbers with no restart.
+Run dirs: seed 1 `run_2026_08_17-20_17_59_710286`, seed 2 `..._710290`, seed 3 `..._710289`, seed 4
+`run_2026_08_17-22_22_42_744398`, seed 5 reused from §41 (`run_2026_08_17-18_27_49_683258`).
+
+| seed | baseline mean (§21) | baseline best | reset mean | reset best | Δ mean |
+|---|---:|---:|---:|---:|---:|
+| 1 | -2455.2 | -13.5 | -2209.8 | -17.67 | +245.4 |
+| 2 | -1667.1 | -18.9 | -2148.0 | -114.55 | -480.9 |
+| 3 | -1954.8 | -142.8 | -1723.3 | -100.60 | +231.5 |
+| 4 | -1327.5 | -20.8 | -1368.4 | -12.98 | -40.9 |
+| 5 | -2747.4 | -23.5 | -2579.8 | -4.54 | +167.6 |
+| **mean of 5** | **-2030.4** (std 515.0) | **-43.9** | **-2005.9** (std 468.3) | **-50.1** | — |
+
+**|diff|/SE = 0.07 (mean reward), 0.18 (best round) — both far below this project's ≥2 bar for a
+real signal.** Per-seed deltas are mixed in sign (3 of 5 positive, 2 negative) with no consistent
+direction, exactly the pattern noise around a true null effect produces. This is now a clean,
+properly-powered (5 seeds both sides) null result, not just a single-seed impression from §41:
+**`--epsilon_reset_every 5` has no detectable effect, positive or negative, on this project's
+standard 2-city config.**
+
+**Reading, tying together §39-§42:** the periodic-reset idea helps specifically when a checkpoint
+is *already* badly locked (§40's round-16 case: durable recovery) and does nothing reliable
+otherwise — it's neither a broad improvement across typical seeds (this section) nor a reliable
+fix for the worst case on its own (§41's seed 5, and §40's round-20 case both kept relapsing). The
+practical takeaway for this project's actual training config: `--epsilon_reset_every` is not worth
+turning on by default. It remains a plausible *targeted* tool — apply it only after detecting a
+locked/degenerate round (the eval-episode-std~0 signature from §34/§38), not as a standing part of
+the training schedule. Item 11(b)'s more invasive full softmax-exploration-policy swap is now even
+less clearly worth building — the milder, cheaper exploration intervention already tested null in
+aggregate, and the standing "why does aggregation regress" question (§28) still looks like the
+higher-leverage target than further exploration-schedule tweaks.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
@@ -2294,16 +2335,16 @@ promising than expecting the *mean* trajectory to improve.
     the fully-locked one (round 20, 0/30 escapes under pure argmax in §33) keeps relapsing through
     round 15, including a fresh crash to -4114.05 at round 14. Severity-dependent, not a universal
     one-shot cure.
-    (b) **Split in two: the cheap half tested, the invasive half still isn't.** Built and tested
-    the cheap variant — `--epsilon_reset_every N` (periodic epsilon-greedy reset, not a policy
-    change, see
-    [§41](#41-item-11b-built-and-tested-from-scratch-on-the-worst-2-city-seed-periodic-epsilon-reset-doesnt-durably-fix-a-bad-seed-either--consistent-with-40-not-a-contradiction-of-it))
-    — on this project's worst-performing 2-city seed (seed 5, §21). No meaningful improvement
-    (mean -2579.8 vs -2747.4 baseline, worst round *slightly* worse) — consistent with §40's
-    severity-dependent read, not a contradiction of it: periodic reset alone doesn't fix a
-    severely-unstable seed any more than a one-shot recovery burst durably fixed the fully-locked
-    checkpoint there. The more invasive half — replacing epsilon-greedy with softmax(Q/T) as the
-    training-time exploration policy itself, with its own temperature-decay schedule, needing a new
-    exploration-policy code path in `agents/dqn.py` (today's `_epsilon_action`/`act_batch` only
-    implement epsilon-greedy) — is still untested, and §41's null result makes it a less obviously
-    promising next spend than it looked right after §39.
+    ~~(b)~~ **Cheap variant built and now fully tested (5/5 seeds) — clean null, not turning it on
+    by default. Invasive variant still not worth building on this evidence.** `--epsilon_reset_every
+    N` (periodic epsilon-greedy reset) tested first on the worst seed alone (§41: seed 5, no
+    meaningful change) then across all 5 seeds of §21's validation set
+    ([§42](#42-41-brought-to-all-5-seeds-epsilon_reset_every-5-is-a-clean-null-across-the-full-2-city-validation-not-just-the-worst-seed)):
+    |diff|/SE = 0.07 (mean), 0.18 (best round) — both far below this project's ≥2 significance bar,
+    mixed-sign per-seed deltas consistent with pure noise. Combined with §40's checkpoint-level
+    result (durably fixes a moderately-locked case, doesn't durably fix a severely-locked one), the
+    picture is now consistent and reasonably complete: exploration resets are a *targeted* tool for
+    an already-detected locked/degenerate round, not a standing training-schedule improvement.
+    Replacing epsilon-greedy with softmax(Q/T) as the exploration policy itself (needing a new code
+    path in `agents/dqn.py`) remains untested, but §42's clean null on the cheaper variant makes it
+    a lower-priority next spend than the still-open §28 aggregation-dynamics question.
