@@ -2234,6 +2234,40 @@ control?"** The answer, once measured correctly at every roster size now tested,
 `results/run_2026_08_18-22_01_48_854557`. All three untracked local output, same caveat as §31's
 index — this table is the durable record if the directories are ever cleaned up.
 
+## 44. First reward-shaping pilot (7-city, `wait_weight=0.001`): no help, looks worse on this one
+    seed — inconclusive given the weight choice, not a verdict on the idea
+
+**2026-08-18.** Alongside §43, piloted `debugging_andreea`'s other new capability:
+`--reward_shaping_wait_weight`, aimed at §26/§28's diagnosed 7-city gap (policy avoids gridlock but
+doesn't drain queues to zero by episode end). `environments` (7-city), seed 1, `--dueling --n_step
+3`, `fedavg`, 20 rounds, `--reward_shaping_wait_weight 0.001` (`run_2026_08_18-19_46_49_818365`).
+Weight chosen empirically (measured `{ts}_accumulated_waiting_time`'s actual per-tick distribution
+first — mean 1172, p90 3996 — same lesson as §37's clip-saturation trap, picked small enough that
+the shaping term mostly stays within `reward_clip`'s ±10 range rather than swamping the base
+reward).
+
+| metric | unshaped `fedavg` baseline (§23/§25/§27, 5 seeds) | this pilot (1 seed, `wait_weight=0.001`) |
+|---|---:|---:|
+| mean reward | -6918.4 | **-9898.4** (std 901.7) |
+| best round | -2182.0 | **-6447.99** |
+
+**Looks worse on both metrics, on this one seed.** Not the direction the hypothesis predicted.
+Round-to-round pattern is also different from the usual chaotic alternation seen everywhere else in
+this document — mostly flat-bad with one round-7 partial escape (-6447.99), then back to uniformly
+bad for the rest of the run; several rounds show near-zero std (e.g. round 11: std 0.0738), the
+same degenerate-lock-in signature as §34/§38.
+
+**Read this as inconclusive on the reward-shaping idea itself, not a rejection of it — the weight
+chosen may simply have been too conservative to matter, or (less likely given the calibration) still
+wrong in a way §37 didn't anticipate.** Single seed, single weight value, no comparison at a
+stronger `wait_weight` or with `stopped_weight` added. Given how much the diagnosed 7-city queue-
+draining problem matters to this project's central open question (§43 just showed the trained
+policy loses badly to rule-based control at every roster size), this is worth another pass with a
+larger weight before concluding reward shaping doesn't help — but not before checking whether the
+degenerate-lock-in pattern showing up here again is the more fundamental blocker regardless of
+reward design, consistent with §38's finding that the same signature appears under a completely
+different reward function too.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
@@ -2423,3 +2457,9 @@ index — this table is the durable record if the directories are ever cleaned u
     get), (b) the same true-holdout check on 3-city (`environments_c1_4_6`), (c) a decision on
     whether any past 2-/3-city section's framing needs a correction note added rather than being
     left to read as if the in-distribution numbers were the real result.
+13. **From §44: reward shaping's first pilot (7-city, `wait_weight=0.001`, 1 seed) looked worse
+    than the unshaped baseline, not better — inconclusive (weight may just be too conservative),
+    not a rejection.** Same degenerate-lock-in signature (§34/§38) showed up again under yet a
+    third reward design. Worth a follow-up at a larger `wait_weight` (and/or `stopped_weight`)
+    before concluding the idea doesn't work, but given §43's much bigger finding, probably lower
+    priority than re-auditing existing claims and extending the true-holdout check to 3-city.
