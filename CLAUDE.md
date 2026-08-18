@@ -200,9 +200,28 @@ which had gone stale):
 
 Phase 1 is complete at all three roster sizes (2/3/7-city, 5 seeds each). Read
 `fidings/divergence_investigation.md` in full before doing anything non-trivial here — it's long
-(42 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
+(43 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
 version, newest first:
 
+- **CRITICAL, 2026-08-18: the 2-city "best-round beats baselines" claim (§21, §29) does not
+  survive a genuine holdout — it was entirely an artifact of evaluating in-distribution (§43).**
+  Merged in `debugging_andreea`'s `--pad_to_true_holdout` flag (widens a reduced roster's Q-head so
+  it can actually be evaluated on `city_5_holdout` instead of always falling back to `city_1`, one
+  of its own training cities). First-ever true-holdout 2-city run: trained DQN's best round out of
+  20 is -2855.95 vs. `max_pressure`'s -0.34 and `fixed_time`'s -2.73 (baselines re-run on the same
+  true holdout for a fair comparison) — a ~1000-8000x gap, not a subtle one. **Every "2-city
+  best-round beats baselines" statement anywhere in this file or in the fidings doc's §21/§29 (and
+  the neighbor-attention thread §30/§31, which also evaluated on `city_1`) needs to be read as an
+  in-distribution result, not evidence the trained policy generalizes.** This brings 2-city into
+  alignment with 7-city (§24-§29): at every roster size now checked with a true holdout, the
+  trained DQN loses badly to both rule-based baselines. Single-seed so far, but the effect size is
+  large enough that a seed flip is unlikely to matter. Two other new capabilities merged in the same
+  commit, not yet validated: `--reward_shaping_wait_weight`/`--reward_shaping_stopped_weight`
+  (training-only reward shaping, targets the 7-city queue-draining gap from §26/§28 — a 7-city pilot
+  is running) and 6 real bugs fixed in `sumo_rl/nacrl/` (separate algorithm, "training never
+  actually happened" was the worst one) plus one more found and fixed live
+  (`SumoEnvironmentPZ.__init__` reading action/observation spaces before the env had ever been
+  reset).
 - **The "why does the trained DQN lose to rule-based baselines" investigation (2026-08-15 to
   2026-08-18, §30-§42) narrowed the mechanism a lot without fully resolving it.** Chain of
   elimination, each ruling out a candidate cause: weight-divergence/gradient-conflict between
@@ -245,20 +264,24 @@ version, newest first:
 - **Phase 1's masked-head ablation across roster sizes (§20/§23), still the standing read:**
   mean-reward benefit shrinks monotonically with roster size, gone by 7 cities (|diff|/SE: 3.42 →
   0.71 → 0.23); best-round benefit real at every size but also shrinking in relative terms.
-- **`fixed_time`/`max_pressure` rule-based baselines beat the trained DQN on 7-city holdout, now
-  confirmed multi-seed and mechanism-investigated (§24-§29, §32-§34), not just a 2026-08-13 single
-  data point.** 2-city: trained DQN's best-round *does* beat both baselines with proper multi-seed
-  grounding (§21/§29), mean does not. 7-city: DQN loses on both mean and best-round, still.
-- **NEXT ACTION — the same two open decisions flagged 2026-08-13 are still open, now with much
-  more evidence behind them, still not resolved by the user:** (1) whether/how to close the
-  DQN-vs-baseline gap — the mechanism is now well-characterized (confidently-locked degenerate
-  policy, §34) and several fixes tested (softmax eval §36, recovery-finetune §39/§40,
-  periodic-reset §41/§42, pressure reward §37/§38) but none is a clean, general win yet; the
-  highest-leverage remaining thread is §28's still-unanswered "why does federated aggregation
-  itself produce this lock-in" — everything tested so far treats a symptom (exploration/reward)
-  rather than that root cause. (2) Phase 1's own decision-gate outcome is still mixed (2-city
-  clean pass, 7-city null mean-reward result) — per the plan's own instruction not to guess on an
-  ambiguous gate, this needs a user call before scaling Phase 2 compute.
+- **`fixed_time`/`max_pressure` rule-based baselines beat the trained DQN at every roster size now
+  checked with a true holdout — 7-city since §24-§29/§32-§34, 2-city since §43.** The old "2-city
+  best-round *does* beat both baselines" framing (§21/§29) only ever held on the `city_1`
+  in-distribution fallback — see the §43 bullet above. Both roster sizes: DQN loses on mean and
+  best-round once evaluated correctly.
+- **NEXT ACTION — decision (1) below is now largely answered; decision (2) is still open:**
+  (1) "does the trained DQN beat rule-based control" — **no, at any roster size, once evaluated on
+  a true holdout (§43).** The mechanism behind the underlying instability is well-characterized
+  (confidently-locked degenerate policy, §34) and several fixes were tested (softmax eval §36,
+  recovery-finetune §39/§40, periodic-reset §41/§42, pressure reward §37/§38) but none is a clean,
+  general win; the highest-leverage remaining thread is still §28's unanswered "why does federated
+  aggregation itself produce this lock-in." Newly open sub-question from §43: does
+  `--reward_shaping_wait_weight` (untested, 7-city pilot running as of this writeup) or a properly
+  validated `--pad_to_true_holdout`-corrected multi-seed sweep change this picture at all, or is
+  the gap simply too large for any tested intervention to close. (2) Phase 1's own decision-gate
+  outcome is still mixed (2-city clean pass on the now-superseded in-distribution numbers, 7-city
+  null mean-reward result) — per the plan's own instruction not to guess on an ambiguous gate, this
+  needs a user call before scaling Phase 2 compute, and arguably needs re-litigating given §43.
 - `analyse/run_concurrent_batch.sh` is the **default** way to run any multi-run batch (see
   "Common commands" above). §22 measured ~1.5x wall-clock speedup at `MAX_CONCURRENT=3` on
   2-city runs (each concurrent run individually slows ~60%, contention worsens over a run's

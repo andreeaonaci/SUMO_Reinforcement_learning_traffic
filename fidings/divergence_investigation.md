@@ -2169,6 +2169,71 @@ less clearly worth building — the milder, cheaper exploration intervention alr
 aggregate, and the standing "why does aggregation regress" question (§28) still looks like the
 higher-leverage target than further exploration-schedule tweaks.
 
+## 43. First-ever true-holdout evaluation of a 2-city trained policy: the "best-round beats
+    baselines" claim was entirely an artifact of in-distribution evaluation — it reverses
+    completely once measured on a genuinely unseen city
+
+**2026-08-18.** Merged in `debugging_andreea`'s `--pad_to_true_holdout` flag (widens a reduced
+roster's shared Q-head to `city_5_holdout`'s action width up front, so `make_holdout_evaluator`
+can select the real holdout instead of always falling back to an in-distribution training city —
+see the merge commit and CLAUDE.md). Ran the first true-holdout 2-city training pilot in this
+project's history: `environments_c1_4`, seed 3, `--dueling --n_step 3`, `fedavg`, 20 rounds,
+`--pad_to_true_holdout` (`action_dim` widened 5→8). Confirmed in the log: `"Holdout city not found
+under base_dir='environments_c1_4'; using 'environments' for evaluation"` — no
+`"!!! NOT A TRUE HOLDOUT"` warning this time, meaning this run genuinely evaluated on
+`city_5_holdout`, not `city_1`.
+
+| condition | reward |
+|---|---:|
+| Trained DQN — best round (1 of 20) | **-2855.95** |
+| Trained DQN — mean across 20 rounds | -6624.9 (std 1587.1) |
+| Trained DQN — worst round | -9895.42 |
+| `max_pressure` (also re-run with `--pad_to_true_holdout`, same true holdout) | **-0.34** |
+| `fixed_time` (same) | **-2.73** |
+
+**The trained policy's *best* round of the entire run is ~1000x worse than `fixed_time` and
+~8400x worse than `max_pressure`.** This is not a subtle, statistical-noise-level gap the way
+most comparisons in this document are — it's categorical. Both baselines were re-run with
+`--pad_to_true_holdout` too (cheap, eval-only, no training needed) specifically so this is a fair
+apples-to-apples comparison: same evaluation city on both sides, not the trained side being
+penalized by an unfair target.
+
+**This directly reverses §21/§29's headline positive claim.** Every "best-round reward -43.9 beats
+both rule-based baselines" statement in this document (§21, §29, and CLAUDE.md's own "RESUME HERE"
+section as of this writeup) was measured with the model evaluating on `city_1` — one of its own
+*training* cities, confirmed in-distribution by §25/§29's own caveat, which was **already known and
+already flagged as a caveat** but had never actually been tested against the real alternative until
+now. It turns out that caveat wasn't a minor asterisk — it was load-bearing for the entire claim.
+Once evaluated on a city the model never trained on, "best-round beats baselines" **does not
+survive contact with a genuine holdout at all.**
+
+**This brings the 2-city picture into alignment with the 7-city picture (§24-§29): at every
+roster size tested so far, once evaluated on a true holdout, the trained DQN loses badly to both
+`fixed_time` and `max_pressure`.** The 2-city roster's "it might still generalize, unlike 7-city"
+framing implicit throughout §21-§42 (differentiating 2-city's best-round win from 7-city's
+across-the-board loss) no longer has a basis — the only genuine difference was never re-run, until
+now, on a fair target.
+
+**Caveats, though the effect size makes them matter less than usual:** single seed (seed 3) —
+worth confirming the direction holds on other seeds, though a ~1000x gap is not the kind of thing
+that plausibly flips sign on a different seed the way a 2x or |diff|/SE≈1 result might. Also
+single training run at 20 rounds — §28 already showed more rounds regresses rather than converges
+for this general instability pattern, so there's no strong reason to expect a longer run closes a
+gap this large. Not yet checked on 3-city (`environments_c1_4_6`, same in-distribution-fallback
+problem per §25/§29) or repeated with the neighbor-attention-ablation conditions (B/C/D from
+§30/§31) — those results likely need the same re-evaluation, though given the size of this effect,
+revisiting every past 2-/3-city claim's validity is now the more urgent item than running new
+ablations.
+
+**This resolves (in the negative direction) one of the two open decisions flagged in CLAUDE.md's
+"RESUME HERE" section since 2026-08-13: "does the trained DQN actually beat simple rule-based
+control?"** The answer, once measured correctly at every roster size now tested, is no.
+
+**Where this data lives:** trained-DQN run `results/run_2026_08_18-19_46_23_818099`; true-holdout
+`max_pressure` `results/run_2026_08_18-22_01_39_854474`; true-holdout `fixed_time`
+`results/run_2026_08_18-22_01_48_854557`. All three untracked local output, same caveat as §31's
+index — this table is the durable record if the directories are ever cleaned up.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
@@ -2348,3 +2413,13 @@ higher-leverage target than further exploration-schedule tweaks.
     Replacing epsilon-greedy with softmax(Q/T) as the exploration policy itself (needing a new code
     path in `agents/dqn.py`) remains untested, but §42's clean null on the cheaper variant makes it
     a lower-priority next spend than the still-open §28 aggregation-dynamics question.
+12. **NEW, top priority from §43: the 2-city "best-round beats baselines" claim (§21, §29) does not
+    survive a genuine holdout — every past 2-/3-city claim in this document needs re-auditing, not
+    just re-running.** With `--pad_to_true_holdout` (merged from `debugging_andreea`), the trained
+    DQN's best round out of 20 is -2855.95 vs. `max_pressure`'s -0.34 and `fixed_time`'s -2.73 on
+    the actual `city_5_holdout` — a ~1000-8000x gap, not a subtle one. Every number in §21, §29, and
+    the neighbor-attention thread (§30/§31) was measured on `city_1` (in-distribution). Needs: (a)
+    multi-seed confirmation of §43's direction (low priority given the effect size, but cheap to
+    get), (b) the same true-holdout check on 3-city (`environments_c1_4_6`), (c) a decision on
+    whether any past 2-/3-city section's framing needs a correction note added rather than being
+    left to read as if the in-distribution numbers were the real result.

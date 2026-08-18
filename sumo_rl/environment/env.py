@@ -754,6 +754,16 @@ class SumoEnvironmentPZ(AECEnv, EzPickle):
         self.env = SumoEnvironment(**self._kwargs)
         self.render_mode = self.env.render_mode
 
+        # SumoEnvironment.traffic_signals (what action_spaces()/
+        # observation_spaces() read from below) is only populated inside
+        # reset() -> _build_traffic_signals(), which needs a live TraCI
+        # connection to query each light's phase/lane layout -- it's empty
+        # right after plain construction. Reset once here so those two
+        # dict comprehensions have something to read; harmless if the
+        # caller resets again immediately after (reset() closes any
+        # already-running episode first via `if self.episode != 0`).
+        self.env.reset()
+
         self.agents = self.env.ts_ids
         self.possible_agents = self.env.ts_ids
         self._agent_selector = AgentSelector(self.agents)
