@@ -134,6 +134,8 @@ class FederatedServer:
             "mean_arrived": self._mean(arrived),
             "action_counts": None,
             "q_gaps": None,
+            "eval_city_name": self.evaluator.eval_city_name,
+            "is_true_holdout": self.evaluator.is_true_holdout,
         }
         aggregate["eval_per_model"] = per_model
         return aggregate, per_model
@@ -193,6 +195,8 @@ class FederatedServer:
             "eval_arrived": [],
             "eval_mode": [],
             "cluster_assignments": [],
+            "eval_city_name": [],
+            "is_true_holdout": [],
         }
 
         base_global_state = self._clone_state_dict(self.global_model.state_dict())
@@ -424,7 +428,8 @@ class FederatedServer:
                     history["eval_stopped_std"].append(metrics.get("std_stopped"))
                     history["eval_stopped_episodes"].append(metrics.get("per_episode_stopped"))
                     history["eval_arrived"].append(metrics.get("mean_arrived"))
-
+                    history.setdefault("eval_city_name", []).append(metrics.get("eval_city_name"))
+                    history.setdefault("is_true_holdout", []).append(metrics.get("is_true_holdout"))
                     logger.info(
                         "Round %d | reward mean=%.4f std=%.4f | waiting_time mean=%.2fs std=%.2f | stopped mean=%.1f std=%.1f",
                         r,
@@ -446,6 +451,8 @@ class FederatedServer:
                     history["eval_stopped_std"].append(None)
                     history["eval_stopped_episodes"].append(None)
                     history["eval_arrived"].append(None)
+                    history.setdefault("eval_city_name", []).append(None)
+                    history.setdefault("is_true_holdout", []).append(None)
 
                 self._atomic_save_history(history)
                 logger.info(

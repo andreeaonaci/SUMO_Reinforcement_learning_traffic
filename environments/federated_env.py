@@ -922,6 +922,17 @@ class RewardShapingWrapper(FixedTsForwardingMixin):
     This wrapper intentionally avoids using city-wide aggregates such as global waiting time,
     stopped vehicles, or queue length because those are not attributable to a single intersection.
     For multi-agent traffic control, only per-intersection-local signals should be used.
+
+    Available per-intersection info keys (see sumo_rl/environment/env.py
+    ``_get_per_agent_info``, populated when ``add_per_agent_info`` is True,
+    the default): ``{ts}_stopped`` (queue length -- SumoEnvironment computes
+    this via ``get_total_queued()``, i.e. it IS the queue-length signal
+    despite the name), ``{ts}_accumulated_waiting_time``,
+    ``{ts}_average_speed``. There is no separate ``{ts}_queue_length`` key
+    distinct from ``{ts}_stopped`` -- ``queue_weight`` is kept as a knob for
+    if/when a distinct queue-length metric is added, but is intentionally
+    NOT a silent no-op if enabled with nothing to read: see
+    ``_extract_local_metric``.
     """
 
     def __init__(
@@ -938,23 +949,43 @@ class RewardShapingWrapper(FixedTsForwardingMixin):
         self.stopped_weight = float(stopped_weight)
         self.raw_weight = float(raw_weight)
 
-    def _extract_local_metric(self, info: Dict[str, Any], ts_id: str, default: float = 0.0) -> float:
-        if not isinstance(info, dict):
-            return float(default)
-        if ts_id in info:
-            return float(info[ts_id])
-        return float(default)
+    def _extract_local_metric(self, info: Dict[str, Any], key: str, weight_name: str) -> float:
+        # Loud, not silent, when a configured non-zero weight has nothing to
+        # read: RewardShapingWrapper previously looked up
+        # f"{ts_id}_waiting_time" for wait_weight, a key that has never
+        # existed (the real key is f"{ts_id}_accumulated_waiting_time") --
+        # _extract_local_metric's `default=0.0` fallback silently turned
+        # wait_weight into a no-op for anyone who set it, indistinguishable
+        # from wait_weight actually working but the city having zero
+        # waiting time. Same failure shape as sec 10 (--disable_head_fix
+        # never gating under --parallel) and sec 24 (fixed_ts never
+        # reaching the raw env) -- a config knob that looks like it does
+        # something but doesn't, discoverable only by reading the source.
+        if not isinstance(info, dict) or key not in info:
+            raise KeyError(
+                f"RewardShapingWrapper: {weight_name} is set but info key "
+                f"'{key}' was not found (available keys: "
+                f"{sorted(info.keys()) if isinstance(info, dict) else 'info is not a dict'}). "
+                f"Set {weight_name}=0.0 to disable this term, or fix the key name."
+            )
+        return float(info[key])
 
     def _shape_reward(self, reward: float, info: Dict[str, Any], ts_id: str | None = None) -> float:
         shaped = self.raw_weight * float(reward)
         if ts_id is None:
             return float(shaped)
         if self.wait_weight != 0.0:
-            shaped -= self.wait_weight * self._extract_local_metric(info, f"{ts_id}_waiting_time", 0.0)
+            shaped -= self.wait_weight * self._extract_local_metric(
+                info, f"{ts_id}_accumulated_waiting_time", "wait_weight"
+            )
         if self.stopped_weight != 0.0:
-            shaped -= self.stopped_weight * self._extract_local_metric(info, f"{ts_id}_stopped", 0.0)
+            shaped -= self.stopped_weight * self._extract_local_metric(
+                info, f"{ts_id}_stopped", "stopped_weight"
+            )
         if self.queue_weight != 0.0:
-            shaped -= self.queue_weight * self._extract_local_metric(info, f"{ts_id}_queue_length", 0.0)
+            shaped -= self.queue_weight * self._extract_local_metric(
+                info, f"{ts_id}_queue_length", "queue_weight"
+            )
         return float(shaped)
 
     def reset(self, *a, **kw):

@@ -31,8 +31,12 @@ def main():
             # determine observation shape
             import numpy as np
 
-            obs_arr = np.array(obs)
-            obs_shape = obs_arr.shape
+            multi_agent = hasattr(env, "ts_ids") and not getattr(env, "single_agent", True)
+            if multi_agent and isinstance(obs, dict):
+                obs_shape = {ts: np.array(o).shape for ts, o in obs.items()}
+            else:
+                obs_arr = np.array(obs)
+                obs_shape = obs_arr.shape
             # action space size
             try:
                 action_n = env.action_space.n
@@ -49,11 +53,16 @@ def main():
 
             rewards = []
             for i in range(10):
-                if action_n is None:
+                if multi_agent:
+                    a = {ts: env.action_spaces(ts).sample() for ts in env.ts_ids}
+                elif action_n is None:
                     a = random.randint(0, 1)
                 else:
                     a = env.action_space.sample()
                 next_obs, r, done, info = env.step(a)
+                if multi_agent:
+                    r = sum(r.values())
+                    done = done.get("__all__", False) if isinstance(done, dict) else done
                 rewards.append(float(r))
                 if done:
                     env.reset()
