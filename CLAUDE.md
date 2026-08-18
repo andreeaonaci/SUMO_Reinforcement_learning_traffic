@@ -196,45 +196,69 @@ which had gone stale):
   implemented and tested* FedProx proximal term, `DQNAgent.mu` — see next bullet — which is real
   and unaffected by this deletion.
 
-## RESUME HERE (as of 2026-08-13 — check this is still current before trusting it)
+## RESUME HERE (as of 2026-08-18 — check this is still current before trusting it)
 
-Phase 1 is now complete at all three roster sizes (2/3/7-city, 5 seeds each). Read
+Phase 1 is complete at all three roster sizes (2/3/7-city, 5 seeds each). Read
 `fidings/divergence_investigation.md` in full before doing anything non-trivial here — it's long
-but every number is re-derivable and the reasoning matters. Short version:
+(42 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
+version, newest first:
 
-- **Current best-known training config: `--dueling --n_step 3`** (dueling Q-head +
-  n-step returns). Validated on 5 seeds, 2-city roster (§21): mean reward -2030.4 (std 515.0),
-  no seed-outlier failure mode. Do not use `--fedprox_mu` (tested, no effect, §14) or
-  `--server_momentum` combined with `--dueling` (tested, net-negative, §18 — a hard CLI check in
-  `experiments/federated_training.py` blocks this combination). `--pseudo_grad_clip` and
-  `--eval_ema_decay` are implemented but unconvincing (§19) — not part of the recommended config.
-- **Phase 1's masked-head ablation, redone on `--dueling --n_step 3`, three roster sizes, now
-  complete (§20 for 2/3-city, §23 for 7-city brought to 5 seeds on 2026-08-13):** mean-reward
-  benefit shrinks monotonically with roster size and is fully gone by 7 cities — |diff|/SE: 3.42
-  (2-city, clean win) → 0.71 (3-city, ambiguous) → 0.23 (7-city, genuine null, not a data gap).
-  Best-round benefit is real at every roster size (fix-on reaches a meaningfully better peak at
-  2/3/7-city) but also shrinks in relative terms: ~95% → 76% → 44% better best-round mean.
-  **No more seeds needed on this question — Phase 1 is done.**
-- **CRITICAL, as of 2026-08-13: the `fixed_time` rule-based baseline was broken project-wide, now
-  fixed — see §24.** Three-layer bug (wrapper classes' `__getattr__` covers reads only, not
-  writes, so `env.fixed_ts = True` silently shadowed instead of reaching the raw SUMO env; plus a
-  missing multi-agent guard in `sumo_rl`'s `SumoEnvironment.step()`). Every `fixed_time` number
-  ever cited in this project (going back to §1) measured a degenerate "never switch off the first
-  phase" policy, not real fixed-time control. Fixed in `environments/federated_env.py`,
-  `federated/comm_dropout.py`, `sumo_rl/environment/env.py`. **Consequence that matters far more
-  than the number itself: with the fix, `fixed_time` (-2.73) and `max_pressure` (-0.34) both beat
-  the 7-city trained DQN (mean -6918.4, best-round -2182.0) by a wide margin on the same holdout
-  city** — invisible before today since the only baseline was itself broken. Not yet multi-seed,
-  not yet checked on 2-city/3-city.
-- **NEXT ACTION — two open decisions, not a compute task to just run:** (1) §24's finding that the
-  trained DQN currently loses to simple rule-based control needs investigating properly (multi-seed
-  baseline numbers, check other rosters) before spending more compute on Phase 2's
-  aggregation-strategy comparison — that comparison matters less if no strategy beats a heuristic
-  yet. (2) Separately, Phase 1's own decision-gate outcome is mixed (see `PROJECT_NEXT_STEPS.md`
-  Phase 1/Phase 2 status) — 2-city passed cleanly but 7-city shows a null mean-reward result
-  alongside a real best-round win. Per the plan's own instruction not to guess on an ambiguous
-  gate, both of these need a call from the user on how to proceed. Don't unilaterally launch more
-  Phase 2 compute without that decision.
+- **The "why does the trained DQN lose to rule-based baselines" investigation (2026-08-15 to
+  2026-08-18, §30-§42) narrowed the mechanism a lot without fully resolving it.** Chain of
+  elimination, each ruling out a candidate cause: weight-divergence/gradient-conflict between
+  cities doesn't predict a round's crash (§32); the crashes are real, reproducible policy failures
+  that survive 6x more eval episodes, not measurement noise (§33); crashed rounds are genuinely
+  **confidently-locked degenerate policies** — byte-identical rewards across different SUMO seeds,
+  `min_gap` (Q-value confidence) correlating -0.884 with reward within the one checkpoint with real
+  gap variance — the network gets *sure* of a bad repeating action, and rare low-confidence moments
+  are what let it escape (§34). A literature check against RESCO (the benchmark this project's city
+  configs are drawn from, fetched and read directly) confirmed this project's pure-argmax-at-eval
+  convention matches the field standard (§35) — the failure mode isn't a project-specific mistake.
+  Two fixes were built and tested: **softmax(Q/0.2) at eval time recovers near-optimal episodes
+  from a checkpoint pure argmax never once escaped**, but only partially (§36); **a short
+  training-time exploration-reset burst durably fixed a moderately-locked checkpoint but not a
+  severely-locked one** (§39/§40), and **turning that into a standing `--epsilon_reset_every N`
+  training flag is a clean null across all 5 seeds of the standard 2-city config** (§41/§42,
+  |diff|/SE ≈ 0.1-0.2) — not worth enabling by default, useful only as a targeted repair once a
+  locked round is detected. A `pressure_norm` reward function was added and tested as an
+  alternative to the default `diff-waiting-time` (§37/§38, single seed) — didn't help, and the same
+  degenerate-lock-in signature reproduced under it too, evidence the lock-in isn't specific to the
+  default reward design. **`agents/dqn.py`'s `_epsilon_action`/`act_batch` still only implement
+  epsilon-greedy — the actual `federated/parallel_server.py`-level root cause of *why* aggregation
+  produces this lock-in (§28's original question) is still open.** New reusable diagnostics from
+  this stretch: `diagnostics/weight_divergence.py`, `diagnostics/reeval_checkpoint.py` (supports
+  `--temperature` for softmax eval), `diagnostics/recovery_finetune.py`.
+- **Also from this stretch: the 2-city masked-head/neighbor-attention ablation reversed on more
+  seeds (§30→§31) — a cautionary, not a settled, result.** Single-seed found clean-comm attention
+  (C) beating both rule-based baselines on every measure and mean-pooling (D) badly underperforming
+  no-neighbor-info (B); on 5 seeds neither claim survived (B/C/D pairwise indistinguishable on
+  best-round, |diff|/SE ≤ 0.73) — another instance of this project's standing pattern (§11→§12 was
+  the first) where a good single-seed story doesn't reproduce. The `--disable_head_fix` /
+  `--disable_neighbor_attention` code split itself (decoupling aggregation-time masked-head
+  averaging from network-time attention-vs-pooling, previously conflated) is real and committed.
+- **Current best-known training config, unchanged: `--dueling --n_step 3`.** Validated on 5 seeds,
+  2-city roster (§21): mean reward -2030.4 (std 515.0), no seed-outlier failure mode. Do not use
+  `--fedprox_mu` (§14, no effect) or `--server_momentum` with `--dueling` (§18, net-negative — a
+  hard CLI check blocks this). `--pseudo_grad_clip`/`--eval_ema_decay` implemented but unconvincing
+  (§19). `--epsilon_reset_every` (new, §41/§42) is implemented and safe (0 = exact no-op) but a
+  clean null in aggregate — don't turn it on as a default, it's a targeted-repair tool only.
+- **Phase 1's masked-head ablation across roster sizes (§20/§23), still the standing read:**
+  mean-reward benefit shrinks monotonically with roster size, gone by 7 cities (|diff|/SE: 3.42 →
+  0.71 → 0.23); best-round benefit real at every size but also shrinking in relative terms.
+- **`fixed_time`/`max_pressure` rule-based baselines beat the trained DQN on 7-city holdout, now
+  confirmed multi-seed and mechanism-investigated (§24-§29, §32-§34), not just a 2026-08-13 single
+  data point.** 2-city: trained DQN's best-round *does* beat both baselines with proper multi-seed
+  grounding (§21/§29), mean does not. 7-city: DQN loses on both mean and best-round, still.
+- **NEXT ACTION — the same two open decisions flagged 2026-08-13 are still open, now with much
+  more evidence behind them, still not resolved by the user:** (1) whether/how to close the
+  DQN-vs-baseline gap — the mechanism is now well-characterized (confidently-locked degenerate
+  policy, §34) and several fixes tested (softmax eval §36, recovery-finetune §39/§40,
+  periodic-reset §41/§42, pressure reward §37/§38) but none is a clean, general win yet; the
+  highest-leverage remaining thread is §28's still-unanswered "why does federated aggregation
+  itself produce this lock-in" — everything tested so far treats a symptom (exploration/reward)
+  rather than that root cause. (2) Phase 1's own decision-gate outcome is still mixed (2-city
+  clean pass, 7-city null mean-reward result) — per the plan's own instruction not to guess on an
+  ambiguous gate, this needs a user call before scaling Phase 2 compute.
 - `analyse/run_concurrent_batch.sh` is the **default** way to run any multi-run batch (see
   "Common commands" above). §22 measured ~1.5x wall-clock speedup at `MAX_CONCURRENT=3` on
   2-city runs (each concurrent run individually slows ~60%, contention worsens over a run's
@@ -244,4 +268,7 @@ but every number is re-derivable and the reasoning matters. Short version:
   concurrent 7-city jobs) — don't assume `MAX_CONCURRENT=1` is required for 7-city, but watch RAM
   headroom if pushing higher. Depends on the `run_dir` PID-suffix fix in
   `experiments/federated_training.py::main()` (§22) — without it, concurrent launches within the
-  same wall-clock second silently corrupt each other's output directories.
+  same wall-clock second silently corrupt each other's output directories. **Host sleep during a
+  long batch (§30, §42) freezes but does not kill a running job** — it resumes cleanly from
+  wherever it left off once the machine wakes (confirmed twice now, hours-long gaps both times);
+  don't assume a large wall-clock gap in a training log means the run needs restarting.
