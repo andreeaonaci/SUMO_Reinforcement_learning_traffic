@@ -196,12 +196,37 @@ which had gone stale):
   implemented and tested* FedProx proximal term, `DQNAgent.mu` — see next bullet — which is real
   and unaffected by this deletion.
 
-## RESUME HERE (as of 2026-08-18 — check this is still current before trusting it)
+## RESUME HERE (as of 2026-08-19 — check this is still current before trusting it)
+
+**No internet available in this session — do not attempt WebFetch/WebSearch or assume network
+access.** Everything needed to resume is local: this file, `fidings/divergence_investigation.md`,
+and the `results/` run directories. If a task seems to need a web lookup (e.g. another literature
+check like §35), flag it as blocked rather than guessing or fabricating a source.
+
+**Experiment running unattended, launched 2026-08-19 evening, check on resume:** extending the
+plain-FedAvg (no dueling, no n_step) true-holdout baseline from 1 seed to 5 (seeds 1/2/4/5 added),
+2-city (`environments_c1_4`), via `analyse/run_concurrent_batch.sh`, log at
+`results/true_holdout_baseline_5seed.log`. Purpose: §46 found `--dueling --n_step 3` still beats
+this baseline under corrected true-holdout eval on a single seed (seed 3) — this run brings that
+comparison to the same 5-seed rigor already given to the "does DQN beat rule-based baselines"
+question in §45, so the architecture recommendation can be trusted or corrected with confidence
+instead of resting on one seed. Check `results/true_holdout_baseline_5seed.log` for `finished ...
+exit=` lines (4 expected) and `ps aux | grep federated_training` for whether it's still running or
+was interrupted by host sleep (which resumes cleanly on its own, per the §30/§42/§45 pattern — don't
+restart a run just because of a large wall-clock gap in its log).
 
 Phase 1 is complete at all three roster sizes (2/3/7-city, 5 seeds each). Read
 `fidings/divergence_investigation.md` in full before doing anything non-trivial here — it's long
-(43 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
+(46 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
 version, newest first:
+
+- **§46: the `--dueling --n_step 3` architecture recommendation itself survives true-holdout
+  re-evaluation (single seed) — it's still the best of 4 configs tested, beating a plain-FedAvg
+  floor by roughly 2x on best-round.** But architecture choice moves the numbers by ~2x while the
+  gap to `fixed_time`/`max_pressure` is ~1000x — **don't read this as progress toward beating the
+  baselines, and don't scale Phase 2 on the assumption a better architecture will close that gap.**
+  5-seed extension of the baseline side of this comparison is the run currently in flight (see
+  above).
 
 - **CRITICAL, confirmed at full 5-seed rigor 2026-08-19: the 2-city "best-round beats baselines"
   claim (§21, §29) does not survive a genuine holdout — it was entirely an artifact of evaluating

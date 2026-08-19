@@ -2337,6 +2337,54 @@ definitively in the negative, at every scale tested.
 `results/pad_to_true_holdout_3city_pilot.log`. All untracked local output, same caveat as every
 other reproducibility index in this document.
 
+## 46. Does the architecture recommendation itself survive true-holdout evaluation? Single-seed
+    check: yes for dueling+n_step over the plain baseline, but the gap to rule-based control is
+    unmoved either way
+
+**2026-08-19.** §43/§45 corrected the *evaluation* methodology but every architecture/head-fix
+comparison that produced this document's standing recommendation (`--dueling --n_step 3`, §15/§19)
+was itself run and ranked under the old, leaky in-distribution eval — never re-checked under
+`--pad_to_true_holdout`. Ran three more seed-3, 2-city (`environments_c1_4`), true-holdout pilots
+alongside the existing `--dueling --n_step 3` (head-fix on) data point from §43: plain `fedavg` (no
+dueling, no n_step), dueling-only (no n_step), and `--dueling --n_step 3 --disable_head_fix`.
+
+| config | best round | mean (20 rounds) |
+|---|---:|---:|
+| plain FedAvg (no dueling, no n_step) | -5705.06 | -8729.18 |
+| dueling only (no n_step) | -6067.35 | -7937.38 |
+| dueling+n_step, head-fix **off** | -4037.32 | -6159.30 |
+| dueling+n_step, head-fix **on** (§43) | **-2855.95** | -6624.90 |
+| `fixed_time` baseline | -2.73 | — |
+| `max_pressure` baseline | -0.34 | — |
+
+**The architecture ranking holds up under honest evaluation.** `--dueling --n_step 3` (head-fix on)
+is still the best of the four on both metrics — not an artifact of the old leaky eval. The
+masked-head fix's own contribution is smaller and mixed here (better best-round, slightly worse
+mean than head-fix-off), consistent with Phase 1's own "ambiguous on mean, real peak benefit"
+characterization (§11/§12) rather than a new finding.
+
+**It doesn't matter for the standing question.** Even the best config's best round (-2855.95) is
+still ~3 orders of magnitude worse than `fixed_time` and ~4 than `max_pressure` — architecture
+choice moves the trained-DQN numbers around by a factor of ~2, not by the ~1000x needed to approach
+either rule-based baseline. **Practical read: don't scale Phase 2 (aggregation-strategy comparison)
+on the assumption a better architecture closes this gap** — every variant tested so far is still
+catastrophically behind trivial control, so ranking aggregation strategies against each other right
+now would only be ranking different flavors of "still loses badly."
+
+**Caveats: single seed (seed 3) for all three new configs.** Not yet known whether the
+dueling+n_step-over-baseline ranking holds on other seeds — given this document's standing pattern
+of single-seed stories not replicating (§11→§12, §30→§31), this specific ranking should be treated
+as provisional. **Follow-up launched same day:** extending the plain-FedAvg baseline (currently the
+only one of these four configs with just one seed and no multi-seed reference point) to seeds
+1/2/4/5 under the same true-holdout setup, via `analyse/run_concurrent_batch.sh`
+(`results/true_holdout_baseline_5seed.log`) — so the architecture-recommendation claim above can
+eventually get the same 5-seed rigor §45 already gave the "does DQN beat baselines" question.
+
+**Where this data lives:** `results/run_2026_08_19-15_51_32_969415` (plain fedavg),
+`results/run_2026_08_19-15_52_06_969729` (dueling-only), `results/run_2026_08_19-15_52_09_969822`
+(dueling+n_step, head-fix off). All untracked local output, same caveat as every other
+reproducibility index in this document.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
