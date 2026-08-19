@@ -2385,6 +2385,46 @@ eventually get the same 5-seed rigor §45 already gave the "does DQN beat baseli
 (dueling+n_step, head-fix off). All untracked local output, same caveat as every other
 reproducibility index in this document.
 
+## 47. §46's 5-seed follow-up: the architecture-recommendation gap over plain FedAvg does NOT reach
+    significance — another single-seed story that doesn't replicate
+
+**2026-08-19.** Completed §46's flagged follow-up: extended the plain-FedAvg (no dueling, no
+n_step) true-holdout baseline from seed 3 alone to the full 5-seed set (1/2/4/5 added), same
+`environments_c1_4`/`--pad_to_true_holdout` setup, via `analyse/run_concurrent_batch.sh`
+(`results/true_holdout_baseline_5seed.log`). Compared against `--dueling --n_step 3`'s existing
+5-seed numbers (§45).
+
+| | best round | mean (20 rounds) |
+|---|---:|---:|
+| plain FedAvg, mean of 5 seeds | -6227.66 (std 2433.75) | -8798.57 (std 1345.73) |
+| `--dueling --n_step 3`, mean of 5 seeds (§45) | -5278.1 (std 2335.2) | -8317.6 (std 1348.5) |
+| **\|diff\|/SE** | **0.63** | **0.56** |
+
+**Both well below this project's own ≥2 significance bar — the §46 single-seed finding does not
+replicate at 5 seeds.** Per-seed spread explains why: plain-FedAvg seed 4 was catastrophic (best
+-10124.05, its worst seed by far) but seed 5 was actually *better* than three of the five
+dueling+n_step seeds (best -3396.76, beating dueling+n_step's own seeds 1/2/5). The two
+distributions overlap enough that "dueling+n_step beats plain FedAvg" is not a supportable claim at
+this rigor, even though it looked clean on seed 3 alone. **This is the same standing pattern as
+§11→§12 and §30→§31 — yet another single-seed architecture story that doesn't survive multi-seed
+scrutiny once true-holdout evaluation is the yardstick.** Note this is a different (and weaker)
+finding than §15/§19's original dueling/n-step wins, which were multi-seed themselves but measured
+under the old in-distribution eval — this section doesn't re-litigate whether dueling+n_step helps
+*in-distribution* (still true, per §15/§19), only whether it helps *on a true holdout*, which is
+now genuinely unresolved rather than confirmed.
+
+**Practical read, updating §46's:** there is currently no config — architecture or aggregation
+strategy — with a statistically supportable claim to distance itself from a trivial `fedavg`
+baseline once evaluated on a true holdout, and none come remotely close to `fixed_time`/
+`max_pressure` regardless. The standing recommendation `--dueling --n_step 3` should be treated as
+"still our best guess, not a confirmed win" rather than settled. **This reinforces, more strongly
+than §46 did, that scaling to Phase 2 (comparing aggregation strategies against each other) is
+premature** — there isn't yet a validated non-trivial baseline to build that comparison on top of.
+
+**Where this data lives:** run dirs logged in `results/true_holdout_baseline_5seed.log`'s
+`finished ... run_dir=` lines (seeds 1/2/4/5); seed 3 is `run_2026_08_19-15_51_32_969415` (§46).
+All untracked local output, same caveat as every other reproducibility index in this document.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a

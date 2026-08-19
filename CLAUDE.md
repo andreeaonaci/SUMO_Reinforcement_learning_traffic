@@ -196,37 +196,34 @@ which had gone stale):
   implemented and tested* FedProx proximal term, `DQNAgent.mu` — see next bullet — which is real
   and unaffected by this deletion.
 
-## RESUME HERE (as of 2026-08-19 — check this is still current before trusting it)
+## RESUME HERE (as of 2026-08-19 night — check this is still current before trusting it)
 
 **No internet available in this session — do not attempt WebFetch/WebSearch or assume network
 access.** Everything needed to resume is local: this file, `fidings/divergence_investigation.md`,
 and the `results/` run directories. If a task seems to need a web lookup (e.g. another literature
 check like §35), flag it as blocked rather than guessing or fabricating a source.
 
-**Experiment running unattended, launched 2026-08-19 evening, check on resume:** extending the
-plain-FedAvg (no dueling, no n_step) true-holdout baseline from 1 seed to 5 (seeds 1/2/4/5 added),
-2-city (`environments_c1_4`), via `analyse/run_concurrent_batch.sh`, log at
-`results/true_holdout_baseline_5seed.log`. Purpose: §46 found `--dueling --n_step 3` still beats
-this baseline under corrected true-holdout eval on a single seed (seed 3) — this run brings that
-comparison to the same 5-seed rigor already given to the "does DQN beat rule-based baselines"
-question in §45, so the architecture recommendation can be trusted or corrected with confidence
-instead of resting on one seed. Check `results/true_holdout_baseline_5seed.log` for `finished ...
-exit=` lines (4 expected) and `ps aux | grep federated_training` for whether it's still running or
-was interrupted by host sleep (which resumes cleanly on its own, per the §30/§42/§45 pattern — don't
-restart a run just because of a large wall-clock gap in its log).
+**No experiment currently running as of this writeup** — the 5-seed baseline batch flagged in the
+previous version of this note finished cleanly (all 4 exit=0, see §47) and nothing new has been
+launched since. Safe to start something without first checking for a stale in-flight job, though
+`ps aux | grep federated_training` costs nothing to confirm.
 
 Phase 1 is complete at all three roster sizes (2/3/7-city, 5 seeds each). Read
 `fidings/divergence_investigation.md` in full before doing anything non-trivial here — it's long
-(46 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
+(47 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
 version, newest first:
 
-- **§46: the `--dueling --n_step 3` architecture recommendation itself survives true-holdout
-  re-evaluation (single seed) — it's still the best of 4 configs tested, beating a plain-FedAvg
-  floor by roughly 2x on best-round.** But architecture choice moves the numbers by ~2x while the
-  gap to `fixed_time`/`max_pressure` is ~1000x — **don't read this as progress toward beating the
-  baselines, and don't scale Phase 2 on the assumption a better architecture will close that gap.**
-  5-seed extension of the baseline side of this comparison is the run currently in flight (see
-  above).
+- **§47 corrects §46: the `--dueling --n_step 3` architecture recommendation's edge over plain
+  FedAvg does NOT hold up at 5-seed rigor under true-holdout eval — |diff|/SE = 0.63 (best-round),
+  0.56 (mean), both far below this project's ≥2 bar.** §46's single-seed (seed 3) finding that
+  dueling+n_step clearly beat the baseline was itself a case of the standing "single-seed story
+  doesn't replicate" pattern (§11→§12, §30→§31) — plain FedAvg's own seed 5 (best -3396.76) beat
+  three of dueling+n_step's five seeds. **`--dueling --n_step 3` remains the best guess (it's still
+  what §15/§19 validated for the in-distribution eval, a separate and still-true claim), but is NOT
+  a confirmed win under true-holdout evaluation.** No architecture or aggregation-strategy
+  comparison currently has a statistically supportable non-trivial baseline to build on, and none
+  come close to `fixed_time`/`max_pressure` regardless (§45) — **this is a stronger reason than §46
+  gave not to scale Phase 2 yet.**
 
 - **CRITICAL, confirmed at full 5-seed rigor 2026-08-19: the 2-city "best-round beats baselines"
   claim (§21, §29) does not survive a genuine holdout — it was entirely an artifact of evaluating
