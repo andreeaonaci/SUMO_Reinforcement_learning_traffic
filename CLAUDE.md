@@ -203,25 +203,28 @@ Phase 1 is complete at all three roster sizes (2/3/7-city, 5 seeds each). Read
 (43 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
 version, newest first:
 
-- **CRITICAL, 2026-08-18: the 2-city "best-round beats baselines" claim (§21, §29) does not
-  survive a genuine holdout — it was entirely an artifact of evaluating in-distribution (§43).**
-  Merged in `debugging_andreea`'s `--pad_to_true_holdout` flag (widens a reduced roster's Q-head so
-  it can actually be evaluated on `city_5_holdout` instead of always falling back to `city_1`, one
-  of its own training cities). First-ever true-holdout 2-city run: trained DQN's best round out of
-  20 is -2855.95 vs. `max_pressure`'s -0.34 and `fixed_time`'s -2.73 (baselines re-run on the same
-  true holdout for a fair comparison) — a ~1000-8000x gap, not a subtle one. **Every "2-city
-  best-round beats baselines" statement anywhere in this file or in the fidings doc's §21/§29 (and
-  the neighbor-attention thread §30/§31, which also evaluated on `city_1`) needs to be read as an
-  in-distribution result, not evidence the trained policy generalizes.** This brings 2-city into
-  alignment with 7-city (§24-§29): at every roster size now checked with a true holdout, the
-  trained DQN loses badly to both rule-based baselines. Single-seed so far, but the effect size is
-  large enough that a seed flip is unlikely to matter. Two other new capabilities merged in the same
-  commit, not yet validated: `--reward_shaping_wait_weight`/`--reward_shaping_stopped_weight`
-  (training-only reward shaping, targets the 7-city queue-draining gap from §26/§28 — a 7-city pilot
-  is running) and 6 real bugs fixed in `sumo_rl/nacrl/` (separate algorithm, "training never
-  actually happened" was the worst one) plus one more found and fixed live
-  (`SumoEnvironmentPZ.__init__` reading action/observation spaces before the env had ever been
-  reset).
+- **CRITICAL, confirmed at full 5-seed rigor 2026-08-19: the 2-city "best-round beats baselines"
+  claim (§21, §29) does not survive a genuine holdout — it was entirely an artifact of evaluating
+  in-distribution (§43, confirmed §45).** Merged in `debugging_andreea`'s `--pad_to_true_holdout`
+  flag (widens a reduced roster's Q-head so it can actually be evaluated on `city_5_holdout`
+  instead of always falling back to `city_1`, one of its own training cities). 5-seed true-holdout
+  2-city result: best-round mean -5278.1 (std 2335.2) vs. `max_pressure`'s -0.34 and `fixed_time`'s
+  -2.73 — **|diff|/SE = 5.05 (best-round), 13.79 (mean reward)**, the cleanest, most decisive
+  result in the whole investigation, every single seed's best round 3-4 orders of magnitude worse
+  than either baseline. A 3-city pilot lands in the same range — adding a third training city
+  doesn't help. **Every "2-city best-round beats baselines" statement anywhere in this file or in
+  the fidings doc's §21/§29 (and the neighbor-attention thread §30/§31, which also evaluated on
+  `city_1`) is superseded, not just caveated — correction notes added to those sections.** At every
+  roster size and every seed now tested with a true holdout (2-city, 3-city pilot, 7-city since
+  §24), the trained DQN loses decisively to both rule-based baselines, full stop. Two other new
+  capabilities merged in the same commit: `--reward_shaping_wait_weight`/
+  `--reward_shaping_stopped_weight` (training-only reward shaping, targets the 7-city
+  queue-draining gap from §26/§28) — first pilot (1 seed, conservative weight) looked worse than
+  the unshaped baseline, inconclusive rather than a rejection (§44) — and 6 real bugs fixed in
+  `sumo_rl/nacrl/` (separate algorithm, "training never actually happened" was the worst one) plus
+  one more found and fixed live (`SumoEnvironmentPZ.__init__` reading action/observation spaces
+  before the env had ever been reset) — NACRL itself is still blocked on this sandbox missing the
+  `pettingzoo` dependency (network too throttled to install it as of this writeup).
 - **The "why does the trained DQN lose to rule-based baselines" investigation (2026-08-15 to
   2026-08-18, §30-§42) narrowed the mechanism a lot without fully resolving it.** Chain of
   elimination, each ruling out a candidate cause: weight-divergence/gradient-conflict between

@@ -971,6 +971,13 @@ seed4 `run_2026_08_11-11_52_39_1220777`, seed5 `run_2026_08_11-11_55_34_1224641`
 
 ## 21. `dueling+n_step` 5-seed validation (2-city): holds up, no seed4-style outlier
 
+> **⚠ CORRECTED BY §43 (2026-08-18):** the best-round numbers below were evaluated on `city_1`,
+> one of this roster's own training cities (in-distribution, not a true holdout — see §25/§29's
+> caveat, confirmed load-bearing by §43). On the actual `city_5_holdout`, best-round losses badly
+> to `fixed_time`/`max_pressure` instead of beating them. The mean-reward numbers here are
+> unaffected by this (mean was never the claim being made), but any "beats baselines" framing
+> below should be read as "beats baselines in-distribution," not as evidence of generalization.
+
 **2026-08-10, run between §19 and §20, written up here for completeness.** Before trusting
 `dueling+n_step` as the new recommended config (§19 found it on a single seed, 4 — deliberately
 the known-hardest case per §13, but still one sample), validated it across 5 seeds on the 2-city
@@ -1385,6 +1392,13 @@ conflict measurements across cities) than on running this same 40-round extensio
 ## 29. Multi-seed `fixed_time`/`max_pressure` baselines on the 2-city and 3-city rosters — and the
     3-city roster turns out to eval on the same fallback city as 2-city
 
+> **⚠ CORRECTED BY §43 (2026-08-18):** these baseline numbers are themselves fine (rule-based
+> controllers, not affected by which city they're measured on the same way a trained policy's
+> generalization claim is) — what's corrected is the *comparison drawn from them*. The "DQN
+> best-round beats both baseline means" reading below was an in-distribution comparison (`city_1`
+> fallback on both sides). Re-run on the true `city_5_holdout` in §43: `max_pressure` -0.34,
+> `fixed_time` -2.73, trained DQN best-round -2855.95 — the DQN loses badly instead.
+
 **2026-08-15.** Filled the two gaps §25 flagged as not yet done: proper 5-seed (`--eval_sumo_seed`
 1-5) `fixed_time`/`max_pressure` baseline numbers on `environments_c1_4` (2-city) and
 `environments_c1_4_6` (3-city), via `--baseline_controller` (no training, ~1min/job, 20 jobs run
@@ -1504,6 +1518,11 @@ this project.
 
 ## 31. §30's 5-seed follow-up: the single-seed story doesn't replicate — no clean win for C, no
     clean loss for D, B/C/D are statistically indistinguishable from each other
+
+> **⚠ ADDITIONAL CAVEAT FROM §43 (2026-08-18):** independent of this section's own multi-seed
+> correction to §30, every B/C/D number here was also measured in-distribution on `city_1`, not
+> the true `city_5_holdout` (same issue as §21/§29). §43 showed that gap is large enough to flip
+> conclusions on its own. Nothing here has been re-checked with `--pad_to_true_holdout` yet.
 
 **2026-08-16.** Repeated B/C/D (2-city, `environments_c1_4`, `--dueling --n_step 3`, `fedavg`)
 across seeds 1, 2, 4, 5 (seed 3 already had from §30), via `analyse/run_concurrent_batch.sh`
@@ -2268,6 +2287,56 @@ degenerate-lock-in pattern showing up here again is the more fundamental blocker
 reward design, consistent with §38's finding that the same signature appears under a completely
 different reward function too.
 
+## 45. §43 brought to full 5-seed rigor (2-city) plus a 3-city true-holdout check: the cleanest,
+    most statistically overwhelming result in this entire document
+
+**2026-08-18/19.** Completed item 12(a)/(b): seeds 1, 2, 4, 5 on `environments_c1_4` with
+`--pad_to_true_holdout` (seed 3 already had from §43), plus a 3-city (`environments_c1_4_6`) pilot
+on seed 3. Same host-sleep-during-a-long-batch interruption hit twice more (2-city seeds 2/4, and
+the 3-city run, all around round 17-18 → resumed 10 hours later) — same clean-resume signature as
+§30/§42, confirmed no data lost via sequential round numbers and `exit=0` on every job.
+
+| seed | best round | mean across 20 rounds |
+|---|---:|---:|
+| 1 | -4676.79 | -8538.9 |
+| 2 | -8262.38 | -10184.3 |
+| 3 (§43) | -2855.95 | -6624.9 |
+| 4 | -3470.40 | -7488.6 |
+| 5 | -7124.94 | -8751.2 |
+| **mean of 5** | **-5278.1** (std 2335.2) | **-8317.6** (std 1348.5) |
+| 3-city (seed 3 pilot) | -3545.41 | -6111.3 |
+
+Baselines (re-run on the same true holdout, §43): `max_pressure` -0.34, `fixed_time` -2.73.
+
+**|diff|/SE = 5.05 (best-round) and 13.79 (mean reward) against `max_pressure`** — both far past
+this project's ≥2 bar, by a wider margin than almost any other result in this document. This isn't
+a borderline call requiring careful interpretation the way most §-numbered findings here are; it's
+about as clean and decisive as a 5-seed comparison gets. **Every seed's best round is worse than
+either baseline by three to four orders of magnitude; there is no seed where the direction is even
+ambiguous.**
+
+**3-city doesn't change the picture.** One seed on `environments_c1_4_6` lands right in the same
+range as the 2-city seeds (best -3545.41, mean -6111.3) — adding a third training city doesn't
+narrow the generalization gap at this scale. Not multi-seeded (lower priority given how consistent
+the 2-city result already is and how expensive 3-city runs are), but nothing here suggests 3-city
+would tell a different story.
+
+**This closes out item 12 from "Open questions."** §43's finding was already large enough that a
+seed flip seemed unlikely to matter; this confirms it formally. **The standing conclusion for this
+entire document, updated: at every roster size and every seed tested with a genuine holdout
+(2-city here, 3-city pilot here, 7-city since §24), the trained federated DQN loses to both simple
+rule-based controllers, decisively.** The in-distribution "best-round beats baselines" framing that
+shaped how §21/§29/§30/§31 were written should be considered fully superseded, not just caveated —
+see the correction notes added to those sections. The open mechanistic question from §28 ("why does
+federated aggregation produce this instability") remains exactly as open as before; this section
+answers a different question (does the resulting policy generalize/compete with trivial baselines)
+definitively in the negative, at every scale tested.
+
+**Where this data lives:** run dirs for seeds 1/2/4/5 are logged in
+`results/pad_to_true_holdout_2city_multiseed.log`'s `finished ... run_dir=` lines; 3-city pilot is
+`results/pad_to_true_holdout_3city_pilot.log`. All untracked local output, same caveat as every
+other reproducibility index in this document.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
@@ -2447,16 +2516,17 @@ different reward function too.
     Replacing epsilon-greedy with softmax(Q/T) as the exploration policy itself (needing a new code
     path in `agents/dqn.py`) remains untested, but §42's clean null on the cheaper variant makes it
     a lower-priority next spend than the still-open §28 aggregation-dynamics question.
-12. **NEW, top priority from §43: the 2-city "best-round beats baselines" claim (§21, §29) does not
-    survive a genuine holdout — every past 2-/3-city claim in this document needs re-auditing, not
-    just re-running.** With `--pad_to_true_holdout` (merged from `debugging_andreea`), the trained
-    DQN's best round out of 20 is -2855.95 vs. `max_pressure`'s -0.34 and `fixed_time`'s -2.73 on
-    the actual `city_5_holdout` — a ~1000-8000x gap, not a subtle one. Every number in §21, §29, and
-    the neighbor-attention thread (§30/§31) was measured on `city_1` (in-distribution). Needs: (a)
-    multi-seed confirmation of §43's direction (low priority given the effect size, but cheap to
-    get), (b) the same true-holdout check on 3-city (`environments_c1_4_6`), (c) a decision on
-    whether any past 2-/3-city section's framing needs a correction note added rather than being
-    left to read as if the in-distribution numbers were the real result.
+12. ~~NEW, top priority from §43: the 2-city "best-round beats baselines" claim (§21, §29) does not
+    survive a genuine holdout~~ **Resolved — see
+    [§45](#45-43-brought-to-full-5-seed-rigor-2-city-plus-a-3-city-true-holdout-check-the-cleanest-most-statistically-overwhelming-result-in-this-entire-document).**
+    (a) 5-seed 2-city confirmation: |diff|/SE = 5.05 (best-round), 13.79 (mean) vs `max_pressure` —
+    the cleanest, most decisive result in this document, every seed's best round 3-4 orders of
+    magnitude worse than either baseline. (b) 3-city pilot lands in the same range, doesn't change
+    the picture. (c) correction notes added to §21, §29, §31. **At every roster size and every seed
+    tested with a true holdout, the trained DQN loses decisively to both rule-based controllers.**
+    Not yet done: 3-city multi-seed (low priority — nothing suggests it would tell a different
+    story), and the B/C/D neighbor-attention conditions (§30/§31) haven't been re-run with
+    `--pad_to_true_holdout` specifically, only flagged with a caveat.
 13. **From §44: reward shaping's first pilot (7-city, `wait_weight=0.001`, 1 seed) looked worse
     than the unshaped baseline, not better — inconclusive (weight may just be too conservative),
     not a rejection.** Same degenerate-lock-in signature (§34/§38) showed up again under yet a
