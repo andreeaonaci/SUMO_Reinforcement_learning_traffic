@@ -2425,6 +2425,63 @@ premature** — there isn't yet a validated non-trivial baseline to build that c
 `finished ... run_dir=` lines (seeds 1/2/4/5); seed 3 is `run_2026_08_19-15_51_32_969415` (§46).
 All untracked local output, same caveat as every other reproducibility index in this document.
 
+## 48. First direct test of §28's open question: is the confidently-locked degenerate policy an
+    aggregation-specific effect, or does independent (no-federation) training show it too?
+
+**2026-08-24.** §34 characterized crashed federated rounds as a genuinely degenerate, confidently-
+locked policy (near-zero eval-episode reward variance, e.g. std ~0.07-2 in §33/§44) — but never
+established whether federated weight-averaging *causes* this lock-in or whether it's just generic
+DQN/SUMO training instability that federation happens to inherit. `--no_federation` (each client
+trains fully independently, aggregation skipped entirely, `federated/parallel_server.py`'s
+`eval_named_states` evaluates each city's own local model on the holdout separately) is the natural
+control: same cities, same true-holdout eval, same architecture, only the aggregation step removed.
+
+Ran the isolated variable directly against the existing federated data point: `environments_c1_4`,
+seed 3, `--dueling --n_step 3`, `--pad_to_true_holdout`, 20 rounds, `--no_federation`
+(`results/run_2026_08_24-12_50_13_4599`, `results/no_federation_c1_4_s3_pilot.log`) — the same
+config as §43/§46's federated seed-3 run (`run_2026_08_19-15_51_32_969415`: best -2855.95, mean
+-6624.90) except aggregation is skipped, so `city_1` and `city_4` each keep training on their own
+frozen-apart local models the whole run, with the true holdout evaluated against both separately
+every round.
+
+| | best round | mean (across 20 rounds, both models) | min eval-episode std seen |
+|---|---:|---:|---:|
+| `city_1` alone (no federation) | -3710.34 | -6535.11 | 187.72 |
+| `city_4` alone (no federation) | -2524.03 | -7108.22 | 24.63 |
+| combined (both models, both cities) | **-2524.03** | -6821.67 | 24.63 |
+| federated (aggregated global model, §43/§46 seed 3) | -2855.95 | -6624.90 | (not re-checked here) |
+
+**Two findings, one clean and one still open.** (1) **Raw reward is not dramatically different** —
+no-federation's best round is nominally slightly better than federated's, its mean slightly worse;
+both are firmly in the same catastrophically-bad-vs-baselines range (§45/§46), so removing
+aggregation doesn't rescue absolute performance, unsurprising given §45's baselines gap is
+3-4 orders of magnitude. (2) **The near-zero-std lock-in signature never appears anywhere in this
+run.** Across all 40 model-round evaluations (2 models x 20 rounds, 5 episodes each), the *lowest*
+std observed is 24.63 — two orders of magnitude above the ~0.07-2 range that characterizes crashed
+federated rounds in §33/§34/§38/§44. Every no-federation round instead looks like ordinary noisy
+mediocrity (episode-to-episode variance in the hundreds), never the "byte-identical reward across
+different SUMO seeds" pattern that defines the degenerate-lock-in failure mode. **This is evidence,
+not proof, that the confident-lock-in specifically implicates aggregation** — a policy trained with
+no aggregation at all can still be bad, but on this one seed it never collapses into the same kind
+of confidently-repeating-bad-action trap that federated training regularly produces.
+
+**Caveats, several stacking:** single seed (seed 3) only, one roster (`environments_c1_4`),
+default `eval_episodes=5` per round (not the 30 §33 used to be fully sure a low std wasn't a small-
+sample fluke — though 24.63 is far enough above the ~0-2 range that 5 episodes is probably enough
+to rule it out here). `city_4` (3 intersections) and `city_1` (16, same scale as the holdout) are
+structurally different training cities, so their no-federation numbers aren't a matched pair with
+each other, only each against its own federated-aggregate counterpart. Given this project's
+standing pattern of single-seed stories not replicating (§11→§12, §30→§31, §46→§47), **this result
+should be treated as a promising first data point, not a settled answer to §28** — the natural
+follow-up is the same one every other finding in this document has needed: more seeds before
+trusting the direction, ideally alongside a `--temperature`/`diagnostics/reeval_checkpoint.py` check
+on whichever no-federation round is worst, to positively confirm "not locked" rather than just
+"no round happened to hit a low std at 5 episodes."
+
+**Where this data lives:** `results/run_2026_08_24-12_50_13_4599/federated_history.json`
+(`eval_per_model` has the per-city breakdown), `results/no_federation_c1_4_s3_pilot.log`. All
+untracked local output, same caveat as every other reproducibility index in this document.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
@@ -2551,6 +2608,12 @@ All untracked local output, same caveat as every other reproducibility index in 
    eval/deployment time (instead of pure argmax) reliably breaks this lock-in — untested, needs a
    new evaluator policy branch (`federated/evaluator.py:132` currently hardcodes
    `explore=False`).
+   **First direct test of the aggregation-vs-generic-instability question — see
+   [§48](#48-first-direct-test-of-28s-open-question-is-the-confidently-locked-degenerate-policy-an-aggregation-specific-effect-or-does-independent-no-federation-training-show-it-too).**
+   Single-seed `--no_federation` pilot never shows the near-zero-std lock-in signature (min std
+   24.63 vs. crashed federated rounds' ~0.07-2) while landing in the same bad-reward range overall
+   — a first, not-yet-multi-seed-confirmed data point that the confident lock-in is specifically an
+   aggregation effect, not generic DQN/SUMO instability that federation merely inherits.
 10. **NEW from §35: two concrete, cheap, literature-motivated experiments this project has never
     run.**
     (a) Train against `sumo_rl`'s built-in `pressure` reward instead of the default
