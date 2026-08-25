@@ -33,6 +33,7 @@ from agents.dqn import DQNAgent
 from experiments.federated_training import (
     resolve_city_configs_and_dims,
     make_holdout_evaluator,
+    maybe_pad_action_dim_to_true_holdout,
 )
 
 
@@ -76,9 +77,17 @@ def main():
     ap.add_argument("--comm_dropout_p_hop_cutoff", type=float, default=0.0)
     ap.add_argument("--temperature", type=float, default=0.0,
                      help="0 (default) = pure argmax. >0 = softmax(Q/T) stochastic action selection.")
+    ap.add_argument("--pad_to_true_holdout", action="store_true",
+                     help="Widen action_dim to city_5_holdout's width before loading the "
+                          "checkpoint -- required for any checkpoint produced by a "
+                          "--pad_to_true_holdout training run (the standard setup since "
+                          "fidings/divergence_investigation.md sec 43), otherwise load_state_dict "
+                          "fails on a Q-head size mismatch.")
     args = ap.parse_args()
 
     city_configs, (own_dim, neighbor_dim, k_max), action_dim, _ = resolve_city_configs_and_dims(args.base_dir)
+    if args.pad_to_true_holdout:
+        action_dim = maybe_pad_action_dim_to_true_holdout(action_dim, args.base_dir)
 
     agent = DQNAgent(
         own_dim=own_dim, neighbor_dim=neighbor_dim, k_max=k_max, action_dim=action_dim,

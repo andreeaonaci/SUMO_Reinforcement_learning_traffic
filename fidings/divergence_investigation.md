@@ -2482,6 +2482,82 @@ on whichever no-federation round is worst, to positively confirm "not locked" ra
 (`eval_per_model` has the per-city breakdown), `results/no_federation_c1_4_s3_pilot.log`. All
 untracked local output, same caveat as every other reproducibility index in this document.
 
+## 49. §48's 5-seed follow-up, and a correction: no-federation training DOES show the same
+    confident-lock-in as federated training once checked properly — the single-seed read was an
+    artifact of trusting a 5-episode std as sufficient
+
+**2026-08-24/25.** Extended §48 to the full 5-seed set (seeds 1/2/4/5 added to seed 3, same
+`environments_c1_4`/`--pad_to_true_holdout`/`--dueling --n_step 3`/`--no_federation` config, via
+`analyse/run_concurrent_batch.sh`, `results/no_federation_c1_4_5seed.log`, all 4 exit=0).
+
+**Raw reward, apples-to-apples (one model per seed, matching federated's sample size — the naive
+combined-both-models number is a confound, see below):**
+
+| | best round (mean of 5 seeds) | mean 20 rounds (mean of 5 seeds) | \|diff\|/SE vs. federated (§45) |
+|---|---:|---:|---:|
+| `city_1` alone, no federation | -2857.84 (std 2100.32) | -7629.43 (std 730.74) | 1.72 / 1.00 |
+| `city_4` alone, no federation | -3826.02 (std 2369.41) | -7030.75 (std 1802.61) | 0.98 / 1.28 |
+| federated (§45, aggregated global model) | -5278.1 (std 2335.2) | -8317.6 (std 1348.5) | — |
+
+Both below this project's ≥2 significance bar — **no-federation is not a statistically supportable
+win or loss on raw reward**, consistent with the single-seed read. (A naive "best of both models
+combined" comparison gives a misleadingly significant-looking 2.33 — that's a sample-size confound,
+not a real effect: pooling both cities' rounds gives no-federation 40 "shots" per seed against
+federated's 20, so its max is expected to be higher purely from order statistics. Always compare
+per-model, not pooled, against a single-model baseline.)
+
+**The lock-in question is where this correction matters.** §48 used training-time 5-episode
+`std_reward` as a quick screen and found nothing near the ~0.07-2 range federated crashed rounds
+show, concluding (tentatively, single-seed) that aggregation might specifically cause the lock-in.
+At 5 seeds, the same 5-episode screen still finds nothing below std=5.64 across all 200 model-round
+evaluations — **but §33 already established that 5-episode std is not trustworthy enough on its own
+to rule lock-in out**, and this dataset proves the point directly. Reran the single lowest-std
+candidate (seed 5, `city_4`, round 2: 5-episode training-time std=5.64) through
+`diagnostics/reeval_checkpoint.py --episodes 30 --pad_to_true_holdout` (needed adding
+`--pad_to_true_holdout` support to that script first — it never got the flag when
+`--pad_to_true_holdout` became the standard way to run anything after §43, so it couldn't load a
+Q-head from any post-§43 checkpoint until now; fixed, `diagnostics/reeval_checkpoint.py`):
+
+```
+mean_reward=-9586.24  std_reward=1.5775
+per_episode_reward: only two distinct values across 30 different SUMO seeds,
+  -9584.47 (x14) and -9587.60 (x16) -- a spread of 3.13 out of ~9586
+mean_gap=9.07  min_gap=1.21 (consistent across every episode)
+```
+
+**This is the exact confident-lock-in signature §33/§34 defined for federated crashed rounds** —
+near-identical reward regardless of SUMO seed, moderate-not-huge Q-gap, no rare escape in 30 tries.
+And it isn't isolated: `city_4` seed 5's rounds 1-5 are all tightly clustered (-9594 to -10190,
+progressively falling 5-episode std) before a real escape at round 6 (-3472) — the same
+multi-round-lock-then-escape shape §39/§40 studied in federated checkpoints.
+
+**Corrected conclusion: the confident lock-in is not aggregation-specific.** A completely
+independent, never-aggregated single city can get just as confidently locked into a bad repeating
+policy as a federated one. This is the opposite lean from §48's tentative read, and **reframes
+§28's open question** — "why does federated aggregation produce this lock-in" was itself probably
+the wrong framing; the lock-in looks like a more fundamental property of DQN training against this
+SUMO reward/action-space setup (consistent with §37/§38's finding that the same signature
+reproduces under a completely different reward function too), which federated aggregation inherits
+rather than causes. Doesn't rule out aggregation making it *worse* or *more frequent* — that
+comparison needs a matched lock-in-rate count across the 5x2x20=200 no-federation model-rounds vs.
+the federated runs' rounds, not yet done — but "aggregation is the root cause" is no longer a
+supportable hypothesis on this evidence.
+
+**Caveats:** one 30-episode confirmation on one candidate round — didn't repeat this on the other
+low-std candidates (seed 2 `city_1` rounds 2/3, std 21.18/21.33; seed 3 `city_4` round 1, std 24.63)
+or on a genuinely mid-range-std round as a negative control, so "5.64 was real, everything above it
+is fine" isn't itself confirmed, just plausible. Same standing caveats as §48: 2-city roster only,
+`city_1`/`city_4` aren't a matched pair with each other. Given how much this correction changes the
+practical read of §28, this thread (which specific mechanism triggers the lock, and whether
+aggregation changes its frequency/severity even if it isn't the root cause) is now a stronger
+candidate for further compute than extending to another roster size blind.
+
+**Where this data lives:** `results/no_federation_c1_4_5seed.log`, run dirs
+`results/run_2026_08_24-18_18_09_{65147,65150,65151}` (seeds 1/2/4) and
+`results/run_2026_08_24-22_45_28_110824` (seed 5); seed 3 is `run_2026_08_24-12_50_13_4599` (§48).
+30-episode reeval: `results/reeval_no_fed_worst_round.log`. All untracked local output, same caveat
+as every other reproducibility index in this document.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
@@ -2608,12 +2684,18 @@ untracked local output, same caveat as every other reproducibility index in this
    eval/deployment time (instead of pure argmax) reliably breaks this lock-in — untested, needs a
    new evaluator policy branch (`federated/evaluator.py:132` currently hardcodes
    `explore=False`).
-   **First direct test of the aggregation-vs-generic-instability question — see
-   [§48](#48-first-direct-test-of-28s-open-question-is-the-confidently-locked-degenerate-policy-an-aggregation-specific-effect-or-does-independent-no-federation-training-show-it-too).**
-   Single-seed `--no_federation` pilot never shows the near-zero-std lock-in signature (min std
-   24.63 vs. crashed federated rounds' ~0.07-2) while landing in the same bad-reward range overall
-   — a first, not-yet-multi-seed-confirmed data point that the confident lock-in is specifically an
-   aggregation effect, not generic DQN/SUMO instability that federation merely inherits.
+   **First direct test of the aggregation-vs-generic-instability question — see §48, corrected by
+   [§49](#49-48s-5-seed-follow-up-and-a-correction-no-federation-training-does-show-the-same-confident-lock-in-as-federated-training-once-checked-properly--the-single-seed-read-was-an-artifact-of-trusting-a-5-episode-std-as-sufficient).**
+   §48's single-seed pilot found no round with a training-time 5-episode std near the ~0.07-2 range
+   federated crashed rounds show, tentatively reading that as evidence the lock-in was
+   aggregation-specific. **§49 (5 seeds) reversed this**: a 30-episode `reeval_checkpoint.py` check
+   on the lowest-std no-federation round found (5.64 at 5 episodes) landed on the exact same
+   confident-lock-in signature as federated crashed rounds — 30 different SUMO seeds producing only
+   two near-identical reward values. **The lock-in is not aggregation-specific** — independent,
+   never-aggregated single-city DQN training shows it too, reframing §28's original question (it
+   isn't "why does aggregation cause this," the lock-in looks like it predates aggregation
+   entirely). Still open: whether aggregation changes the lock-in's *frequency or severity* even
+   though it isn't the root cause — not yet measured.
 10. **NEW from §35: two concrete, cheap, literature-motivated experiments this project has never
     run.**
     (a) Train against `sumo_rl`'s built-in `pressure` reward instead of the default

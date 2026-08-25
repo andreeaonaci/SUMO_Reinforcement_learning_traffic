@@ -196,34 +196,43 @@ which had gone stale):
   implemented and tested* FedProx proximal term, `DQNAgent.mu` — see next bullet — which is real
   and unaffected by this deletion.
 
-## RESUME HERE (as of 2026-08-24 — check this is still current before trusting it)
+## RESUME HERE (as of 2026-08-25 — check this is still current before trusting it)
 
-**No experiment currently running as of this writeup** — the `--no_federation` pilot flagged below
-(§48) finished cleanly (exit=0) at 16:13 and nothing new has been launched since. Safe to start
-something without first checking for a stale in-flight job, though `ps aux | grep
-federated_training` costs nothing to confirm.
+**No experiment currently running as of this writeup** — the 5-seed `--no_federation` batch and
+its 30-episode reeval confirmation (both flagged below, §49) finished cleanly and nothing new has
+been launched since. Safe to start something without first checking for a stale in-flight job,
+though `ps aux | grep federated_training` costs nothing to confirm.
 
 Phase 1 is complete at all three roster sizes (2/3/7-city, 5 seeds each). Read
 `fidings/divergence_investigation.md` in full before doing anything non-trivial here — it's long
-(48 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
+(49 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
 version, newest first:
 
-- **NEW, §48: first direct test of §28's still-open "does aggregation itself cause the confident
-  lock-in" question — a promising single-seed signal, not yet confirmed.** Ran `--no_federation`
-  (each city trains fully independently, no weight-averaging at all) on the exact same seed-3
-  `environments_c1_4`/`--pad_to_true_holdout`/`--dueling --n_step 3` config as §43/§46's federated
-  data point, so aggregation is the only variable that changed. Raw reward landed in the same bad
-  range as federated (`no_federation` combined best -2524.03 / mean -6821.67 vs. federated's
-  -2855.95 / -6624.90 — aggregation isn't rescuing or hurting absolute performance much). But **the
-  near-zero-std confident-lock-in signature (§33/§34/§38/§44's ~0.07-2 std range) never appeared
-  anywhere in 40 model-round evaluations — the lowest std seen was 24.63, two orders of magnitude
-  higher.** First evidence the degenerate lock-in is specifically an aggregation effect rather than
-  generic DQN/SUMO training instability federation merely inherits — but single seed, single
-  roster, default 5-episode eval, and this project's standing pattern (§11→§12, §30→§31, §46→§47)
-  is that single-seed stories often don't replicate. **Next step on this thread: more seeds before
-  trusting the direction**, ideally with a `diagnostics/reeval_checkpoint.py` 30-episode check on
-  the worst no-federation round to positively confirm "not locked" rather than inferring it from a
-  5-episode std.
+- **NEW, §49 corrects §48: the confident-lock-in failure mode is NOT aggregation-specific —
+  independent, never-aggregated single-city training shows the exact same signature.** §48's
+  single-seed pilot found no near-zero-std round under `--no_federation` and tentatively read that
+  as "aggregation causes the lock-in." Extending to 5 seeds (`environments_c1_4`,
+  `--pad_to_true_holdout`, `--dueling --n_step 3`, `--no_federation`,
+  `results/no_federation_c1_4_5seed.log`, all exit=0) found the same absence *by the same shallow
+  5-episode-std screen* (lowest std 5.64 across 200 model-round evals) — **but a 30-episode
+  `diagnostics/reeval_checkpoint.py --pad_to_true_holdout` check (flag added to that script, it
+  never had one) on the single lowest-std round found the exact confident-lock-in signature from
+  §33/§34: 30 different SUMO seeds collapsing to two near-identical reward values (-9584.47/-9587.6,
+  spread of 3.13 out of ~9586), the same round also part of a 5-round tightly-clustered streak
+  (rounds 1-5, city_4 seed 5) before a genuine escape at round 6.** **Corrected conclusion: a
+  5-episode std is not a reliable enough screen to rule lock-in out (§33 already said this; this is
+  now direct proof), and the lock-in itself looks like a fundamental property of DQN training
+  against this SUMO setup that federated aggregation inherits rather than causes** — reframes §28's
+  original question away from "why does aggregation cause this" toward "why does this training
+  setup produce confidently-locked degenerate policies at all, federated or not." Raw reward itself
+  (apples-to-apples, one model per seed) was not significantly different from federated either way
+  (\|diff\|/SE 1.72/0.98 best-round, 1.00/1.28 mean, both under this project's ≥2 bar — a naive
+  pooled-both-models comparison gives a misleadingly significant 2.33, a sample-size confound from
+  no-federation getting 2x the "shots" per seed, not a real effect). **Still open: whether
+  aggregation changes the lock-in's frequency/severity even though it isn't the root cause** — not
+  yet measured, would need a matched lock-in-rate count across no-federation vs. federated rounds.
+  Given how much this correction moves the practical read, that's now a stronger next spend than
+  extending to another roster size blind.
 - **§47 corrects §46: the `--dueling --n_step 3` architecture recommendation's edge over plain
   FedAvg does NOT hold up at 5-seed rigor under true-holdout eval — |diff|/SE = 0.63 (best-round),
   0.56 (mean), both far below this project's ≥2 bar.** §46's single-seed (seed 3) finding that
@@ -310,10 +319,13 @@ version, newest first:
   a true holdout (§43).** The mechanism behind the underlying instability is well-characterized
   (confidently-locked degenerate policy, §34) and several fixes were tested (softmax eval §36,
   recovery-finetune §39/§40, periodic-reset §41/§42, pressure reward §37/§38) but none is a clean,
-  general win; the highest-leverage remaining thread is still §28's "why does federated aggregation
-  itself produce this lock-in" — §48 just got the first direct evidence on it (no-federation
-  training never shows the lock-in signature on one seed) but needs more seeds before trusting the
-  direction; that's the natural next spend on this thread. Newly open sub-question from §43: does
+  general win; §28's original framing ("why does federated aggregation itself produce this
+  lock-in") is now superseded by §49 — the lock-in isn't aggregation-specific, no-federation
+  training shows the identical signature, so the open mechanism question is broader: why does this
+  training setup (federated or not) produce confidently-locked degenerate policies at all. Still
+  worth checking whether aggregation changes the lock-in's frequency/severity even though it isn't
+  the root cause (§49, not yet measured) — that's the natural next spend on this thread. Newly open
+  sub-question from §43: does
   `--reward_shaping_wait_weight` (§44, one inconclusive pilot so far) or a properly validated
   `--pad_to_true_holdout`-corrected multi-seed sweep change this picture at all, or is the gap
   simply too large for any tested intervention to close. (2) Phase 1's own decision-gate
