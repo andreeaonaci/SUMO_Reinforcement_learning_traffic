@@ -2698,6 +2698,75 @@ replacement for a properly confirmed census.
 **Where this data lives:** no new files — reuses `federated_history.json` from the run dirs already
 cited in §45 (federated) and §49 (no-federation).
 
+## 52. §51's outlier checkpoint inspected: a genuine isolated escape reached by an ordinary-sized
+    gradient step, not a stable basin — and its own no-federation model's best-of-100 beats every
+    federated seed's best-of-100
+
+**2026-08-26.** Direct follow-up to §51's single striking exception
+(`nofed_seed5_city_1_round13`). Two zero-new-training-compute checks, reusing existing checkpoints
+and `federated_history.json` data.
+
+**(1) Weight-space diff against immediate neighbors** (`torch.load` + L2 distance,
+`city_1_round_011.pth` through `_015.pth`, same run):
+
+| round transition | L2 weight distance | 5-ep reward at destination round |
+|---|---:|---:|
+| r11 → r12 | 2.97 | -7486.25 |
+| r12 → r13 | 2.76 | **-126.10** |
+| r13 → r14 | 1.95 | -4071.14 |
+| r14 → r15 | 1.80 | -8501.01 |
+
+**Round 13 is a genuine, isolated escape, not a stable basin the training process settled into.**
+The full round 9-17 trajectory: -8600 → -9204 → -9406 → -7486 → **-126.10** → -4071 → -8501 → -8873
+→ -9452 — a sharp one-round spike immediately relapsing back toward the same catastrophic range it
+came from. Critically, **the weight movement producing this spike (L2=2.76) is unremarkable** —
+essentially the same magnitude as every neighboring step (1.80-2.97), not a discontinuous jump.
+**This means a genuinely good, near-competent policy is reachable by perfectly ordinary gradient
+steps in this setup — it just isn't retained.** This is the same "confidently locked, rare
+low-confidence moments let it escape" mechanism §34 characterized via Q-gap at the single-checkpoint
+level, now visible at the training-trajectory level: escapes happen, but the very next update
+(similarly ordinary in size) typically walks straight back into the bad regime rather than
+consolidating the improvement. Directly explains why "just train longer" doesn't help (§28) — more
+rounds means more chances to pass through a good region, not more chances to stay there.
+
+**(2) Fair (matched-n, per-model, not pooled — same convention §49 established) best-of-100
+comparison across the three populations already used throughout §45/§49/§50/§51:**
+
+| population | n | best-of-100 (5 seeds × 20 rounds each) |
+|---|---:|---:|
+| `city_1` alone, no-federation | 100 | **-126.10** |
+| `city_4` alone, no-federation | 100 | -1698.66 |
+| federated (aggregated global model) | 100 | -2855.95 |
+
+Unlike §49's pooled-both-models comparison (correctly flagged there as a sample-size confound),
+this is apples-to-apples — 100 model-rounds on every side. **Both independent no-federation models'
+best-ever round beat the federated model's best-ever round, on identical sample sizes.** The best
+federated round anywhere in this document's 5-seed 2-city true-holdout data ranks only 14th out of
+all 300 model-rounds evaluated across every run in §45/§49 combined; every round ranked 1-13 is
+no-federation.
+
+**Read with real caution, more than most findings in this document:** a best-of-N comparison is an
+extreme-value statistic, not a mean — it doesn't admit the same |diff|/SE significance convention
+used everywhere else here (max is far noisier/more outlier-driven than a mean under repeated
+sampling), and this entire ranking is dominated by the single round-13 spike from part (1) above.
+This is one run's worth of evidence, not independently replicated, and sits squarely in this
+project's standing "single-seed/single-run story doesn't replicate" pattern (§11→§12, §30→§31,
+§46→§47, all cautionary examples of exactly this kind of promising-looking result reversing on more
+data). **Do not read this as "no-federation has a higher ceiling than federated" as a settled
+claim** — it's a lead worth a multi-seed matched-pair replication (same seed, same city, federated
+vs. no-federation, compare each seed's best-of-20 head to head) before trusting the direction, not
+a result to build on yet. Notably, this would be a *different* claim from §49/§50 (mean reward and
+lock-in *rate* were both statistically indistinguishable between federated and no-federation) — this
+is specifically about the tail/ceiling, which those comparisons weren't designed to detect.
+
+**Not yet done:** action-distribution and per-intersection Q-gap inspection of the round13
+checkpoint itself (same tooling as §26/§34) to characterize *what* it's doing differently from its
+neighbors, beyond the aggregate reward/waiting-time numbers already in §51.
+
+**Where this data lives:** no new files — reuses checkpoints already cited in §50/§51
+(`results/run_2026_08_24-22_45_28_110824/clients/city_1_round_0{11,12,13,14,15}.pth`) and
+`federated_history.json` from the run dirs cited in §45/§49.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a

@@ -205,17 +205,32 @@ something without first checking for a stale in-flight job, though
 
 **User decision 2026-08-26: don't scale to Phase 2 yet — keep digging into why the trained DQN
 loses so badly to rule-based baselines**, given the 3-4-order-of-magnitude gap confirmed at every
-roster size (§43/§45/§47). §51 (below) is the first result of that direction and surfaces a
-concrete, not-yet-investigated lead — **the single best-performing checkpoint out of 300 ever
-evaluated** (`results/run_2026_08_24-22_45_28_110824/clients/city_1_round_013.pth`) — worth
-inspecting directly before running any more expensive multi-seed batches.
+roster size (§43/§45/§47). §51/§52 (below) are the first results of that direction.
 
 Phase 1 is complete at all three roster sizes (2/3/7-city, 5 seeds each). Read
 `fidings/divergence_investigation.md` in full before doing anything non-trivial here — it's long
-(51 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
+(52 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
 version, newest first:
 
-- **NEW, §51: escaping the confident lock-in mostly does NOT close the baseline gap — locked vs.
+- **NEW, §52: the §51 outlier checkpoint is a genuine isolated escape reached by an ordinary-sized
+  gradient step, not a stable basin — and a fair (matched-n, per-model) best-of-100 comparison finds
+  both no-federation models beat the federated model's best-ever round.** Weight-space L2 diff
+  against immediate neighbors (`city_1_round_011.pth`-`_015.pth`) shows the step producing the
+  round-13 spike (L2=2.76) is unremarkable in size — same magnitude as every neighboring step
+  (1.80-2.97) — yet the reward trajectory goes -7486 → **-126.10** → -4071 → -8501, a sharp one-round
+  spike immediately relapsing. **A good policy is reachable by ordinary gradient steps here, it just
+  isn't retained** — explains why "just train longer" doesn't help (§28: more chances to pass
+  through a good region, not more chances to stay there). Separately: best-of-100 (5 seeds × 20
+  rounds, matched sample size on all three sides, not the pooled comparison §49 already flagged as
+  confounded) gives `city_1`-alone -126.10, `city_4`-alone -1698.66, **federated -2855.95** — both
+  independent models beat the federated model's best-ever round on equal footing. **Read with real
+  caution**: this is a max/extreme-value statistic (not a mean, doesn't admit the |diff|/SE
+  convention used elsewhere), dominated by the single round-13 spike, one run's worth of evidence —
+  matches this project's standing "single-seed story doesn't replicate" pattern (§11→§12, §30→§31,
+  §46→§47) closely enough that it needs a multi-seed matched-pair replication (same seed, federated
+  vs. no-federation, best-of-20 head to head) before trusting the direction. **Not yet done:**
+  action-distribution/Q-gap inspection of the round-13 checkpoint itself.
+- **§51: escaping the confident lock-in mostly does NOT close the baseline gap — locked vs.
   not-locked rounds differ by only ~29% on mean reward (-9364 vs -6660), both still 2400-3500x worse
   than baselines.** Zero new compute — reused existing §45/§49 data, bucketed all 300 model-rounds
   (federated + no-federation) by 5-episode std as a locked/not-locked proxy. **Confirms the lock-in
