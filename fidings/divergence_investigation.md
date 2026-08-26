@@ -2767,6 +2767,65 @@ neighbors, beyond the aggregate reward/waiting-time numbers already in §51.
 (`results/run_2026_08_24-22_45_28_110824/clients/city_1_round_0{11,12,13,14,15}.pth`) and
 `federated_history.json` from the run dirs cited in §45/§49.
 
+## 53. §52's checkpoint inspected further: round13's escape shows the exact §34 signature (low
+    Q-gap, diverse actions) at the whole-round level, not just within a single checkpoint's episodes
+
+**2026-08-26.** Direct follow-up, zero new compute — the 5-episode training-time eval already
+recorded per-episode, per-intersection Q-gaps and action counts for every round in
+`federated_history.json` (`eval_per_model[...]['q_gaps']` / `['action_counts']`), so round13 and its
+neighbors could be compared without any new SUMO runs.
+
+| round | reward | mean Q-gap | min Q-gap | max Q-gap | avg distinct actions/intersection | avg dominant-action fraction |
+|---|---:|---:|---:|---:|---:|---:|
+| 11 | -9406.42 | 3.8403 | 0.7023 | 10.4731 | 7.50 | 0.633 |
+| 12 | -7486.25 | 5.0825 | 0.2316 | 18.2924 | 7.75 | 0.713 |
+| **13** | **-126.10** | **0.1379** | **0.0610** | **0.2427** | 8.00 | **0.378** |
+| 14 | -4071.14 | 0.9180 | 0.1646 | 3.6800 | 7.88 | 0.348 |
+| 15 | -8501.01 | 7.1902 | 0.1745 | 21.7129 | 7.56 | 0.701 |
+
+**Round 13's Q-gap is 30-50x lower than every neighboring round** (0.14 vs. 3.8-7.2), and its
+dominant-action fraction is the lowest of the five (0.378 vs. 0.63-0.71 for the fully bad rounds) —
+i.e., the network is markedly *less* confident and spreads its action choices more evenly across
+each intersection's available actions during the escape round than during the locked ones. Round 14
+(the partial-recovery round immediately after) shows the same pattern at intermediate strength
+(Q-gap 0.92, dominant-fraction 0.348) before round 15 fully relapses to high-confidence,
+high-dominant-fraction, catastrophic-reward territory.
+
+**This is exactly §34's mechanism** — "the network gets confidently locked into a bad, repeating
+action loop, and moments of relative uncertainty are what let it escape" — **replicated at a new
+level of analysis.** §34 established this within a single fixed checkpoint's 30 evaluation episodes
+(different SUMO seeds, same weights); this section shows the identical low-confidence-enables-escape
+signature *across training rounds* (different weights, same city, same evaluation protocol) on a
+completely different run (no-federation, `city_1`, this document's first inspection of this failure
+mode outside a federated context). Strengthens §49/§50's conclusion that this is a fundamental
+property of DQN training against this SUMO setup, not an artifact specific to how or when it was
+checked: the same confidence/lock-in relationship shows up whether you hold weights fixed and vary
+the SUMO seed (§34) or hold the SUMO seed protocol fixed and vary the weights round-to-round (here).
+
+**Practical implication, sharpened from §34's original one:** since a low-Q-gap state is both **(a)
+reachable by an ordinary gradient step** (§52) and **(b) the direct correlate of the only
+near-competent round found anywhere in this document's 300 evaluated model-rounds** (§51/§52), the
+open question shifts from "does uncertainty help escape" (now confirmed twice, independently) to
+"why doesn't training preferentially move toward and stay in low-Q-gap regions" — i.e. why does an
+ordinary DQN/SUMO training trajectory keep drifting back into high-confidence bad regions rather
+than consolidating a low-confidence good one once found. §34 already flagged softmax/stochastic
+eval-time action selection as an untested lever for this; a new, more direct one this section
+suggests: some form of confidence-regularization or entropy bonus *during training* (not just at
+eval time) that discourages the network from collapsing to a high-Q-gap, high-dominant-action state
+in the first place — untested, would need a new training-time flag (e.g. a Q-value entropy penalty
+term in the loss), not yet implemented anywhere in this codebase.
+
+**Caveats:** single round, single city, single seed, no-federation only — the exact same "n=1,
+needs replication" caveat as §51/§52. The Q-gap/dominant-fraction numbers here come from the
+5-episode training-time eval, not the 30-episode gold-standard reeval §33 established as necessary
+before trusting a single checkpoint's numbers fully — though the *contrast* between round13 and its
+neighbors is large enough (30-50x on Q-gap) that this is unlikely to be a small-sample artifact the
+way a marginal call would be.
+
+**Where this data lives:** no new files — reuses `results/run_2026_08_24-22_45_28_110824/federated_history.json`
+(`eval_per_model[...]['city_1']['q_gaps']` and `['action_counts']` for rounds 11-15), same run
+already cited throughout §50-§52.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a

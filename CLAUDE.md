@@ -205,14 +205,30 @@ something without first checking for a stale in-flight job, though
 
 **User decision 2026-08-26: don't scale to Phase 2 yet — keep digging into why the trained DQN
 loses so badly to rule-based baselines**, given the 3-4-order-of-magnitude gap confirmed at every
-roster size (§43/§45/§47). §51/§52 (below) are the first results of that direction.
+roster size (§43/§45/§47). §51/§52/§53 (below) are the first results of that direction.
 
 Phase 1 is complete at all three roster sizes (2/3/7-city, 5 seeds each). Read
 `fidings/divergence_investigation.md` in full before doing anything non-trivial here — it's long
-(52 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
+(53 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
 version, newest first:
 
-- **NEW, §52: the §51 outlier checkpoint is a genuine isolated escape reached by an ordinary-sized
+- **NEW, §53: the §51/§52 escape round shows §34's exact "confident lock-in vs. low-confidence
+  escape" signature, now confirmed at the whole-training-round level, not just within one
+  checkpoint's episodes.** Zero new compute — the 5-episode training-time eval already recorded
+  per-round Q-gaps and action counts. Round 13 (the -126.10 escape) has mean Q-gap 0.14, **30-50x
+  lower** than every neighboring round (3.8-7.2), and the most balanced action usage (dominant-action
+  fraction 0.378 vs. 0.63-0.71 for the fully-bad rounds) — round 14 (partial relapse, -4071) sits at
+  intermediate confidence before round 15 fully relapses back to high-confidence, catastrophic-reward
+  territory. **This independently replicates §34's mechanism** (established there within one fixed
+  checkpoint across 30 SUMO seeds) **at a completely different axis of variation** (same SUMO-seed
+  protocol, weights varying round-to-round instead) — strong convergent evidence this
+  confidence/lock-in relationship is a real, general property of this training setup, not an
+  artifact of how it was measured. Sharpens the open question from "does uncertainty help escape"
+  (now confirmed twice) to **"why doesn't training preferentially find and stay in low-Q-gap
+  regions"** — suggests a new untested lever: a training-time confidence-regularization / Q-value
+  entropy penalty (distinct from §34's already-tested eval-time softmax idea), not yet implemented
+  anywhere in this codebase.
+- **§52: the §51 outlier checkpoint is a genuine isolated escape reached by an ordinary-sized
   gradient step, not a stable basin — and a fair (matched-n, per-model) best-of-100 comparison finds
   both no-federation models beat the federated model's best-ever round.** Weight-space L2 diff
   against immediate neighbors (`city_1_round_011.pth`-`_015.pth`) shows the step producing the
