@@ -2826,6 +2826,67 @@ way a marginal call would be.
 (`eval_per_model[...]['city_1']['q_gaps']` and `['action_counts']` for rounds 11-15), same run
 already cited throughout §50-§52.
 
+## 54. `--q_entropy_weight` implemented and piloted: first training-time intervention targeting §34's
+    confident-lock-in mechanism directly — promising single-seed signal, not yet validated
+
+**2026-08-26.** Direct action on §53's suggested lever. Implemented a new training-time
+regularization term in `agents/dqn.py::DQNAgent.optimize()`: `loss -= q_entropy_weight *
+mean_batch_entropy(softmax(Q_masked))`, computed on the online network's Q-values for the current
+training batch (masked to each sample's valid actions, matching `_mask_q`'s existing convention).
+0.0 (default) is an exact no-op — the entropy term is skipped entirely, not just multiplied by
+zero. Wired through both the parallel (`--parallel`, primary) and sequential training paths;
+`--q_entropy_weight` is the new CLI flag. Unlike §34/§36's softmax-eval idea (which only helps at
+*deployment*, after training is already done), this acts *during* training, directly rewarding the
+network for not collapsing into the high-Q-gap, high-dominant-action state §53 characterized.
+Smoke-tested with a 1-round run before committing to real training compute (clean exit, ordinary
+loss magnitude, no NaN/explosion) and confirmed the existing test suite's 3 pre-existing failures
+(`gym_test.py`/`pz_test.py`, unrelated to `agents/dqn.py`) are unaffected — 19/22 tests pass either
+way.
+
+**Pilot (single seed, matching this project's standing cheap-screen-before-scaling convention —
+§37/§44 used the same pattern): 3 weight values, seed 3, `environments_c1_4`, `--dueling --n_step 3
+--pad_to_true_holdout`, 20 rounds each, `analyse/run_concurrent_batch.sh`,
+`results/q_entropy_pilot_s3.log`, all exit=0.** Compared against the existing seed-3 baseline
+(§43/§46, same config, `q_entropy_weight=0` implicitly, never re-run — reused):
+
+| condition | best-round | mean (20 rounds) | min 5-ep std | rounds with std<50 |
+|---|---:|---:|---:|---:|
+| baseline (qew=0, §43/§46) | -2855.95 | -6624.90 | 45.2 | 1/20 |
+| `qew=0.001` | **-2183.01** | **-5462.07** | 140.6 | **0/20** |
+| `qew=0.01` | -4164.60 | -7177.24 | 33.7 | 1/20 |
+| `qew=0.05` | **-1591.34** | **-5206.92** | 124.4 | **0/20** |
+
+**Two of three weight values (0.001 and 0.05) beat baseline on both best-round and mean reward, and
+neither hit a single round with 5-episode std below 50 anywhere in 20 rounds** — the baseline's one
+low-std round (round 4, std=45.2) was confirmed as a genuine lock-in via 30-episode reeval in §50.
+This is the first training-time intervention tested anywhere in this document that shows both a
+reward improvement AND a reduction in the raw incidence of the low-std screening signal
+simultaneously — §41/§42's `--epsilon_reset_every` was a clean null on reward, and no other training-
+time lever (pressure reward §37/§38, FedProx §14, server momentum §18) has targeted the lock-in
+mechanism this directly.
+
+**The middle value (`qew=0.01`) was worse on both reward measures and did NOT avoid low-std rounds**
+— a non-monotonic result across the three weights tested, which could mean either a narrow
+"sweet spot" not centered on 0.01, or (more likely, given this project's standing pattern) that
+n=1-seed comparisons here are simply noisy enough that 0.01's apparent badness isn't meaningful
+either. No way to distinguish these from this pilot alone.
+
+**Read with the same standing caution as every other single-seed result in this document
+(§11→§12, §30→§31, §46→§47): promising, not proven.** A 3-value, 1-seed screen is exactly the kind
+of result that has reversed on more seeds every previous time it's been tried here. Before treating
+`--q_entropy_weight` as a real fix (or even a real lead) rather than a lucky seed-3 draw, the
+natural next step is a 5-seed validation of the two promising values (0.001 and 0.05) against the
+same seed-3/§45 baseline convention, ideally with true-holdout `--pad_to_true_holdout` eval
+throughout (already used here) and, for whichever value survives, a 30-episode
+`diagnostics/reeval_checkpoint.py` confirmation on its lowest-std round the way §50 did, to verify
+the absence of low training-time std actually reflects an absence of lock-in rather than just a
+shift in what the cheap screen catches.
+
+**Where this data lives:** `results/q_entropy_pilot_s3.log`, run dirs
+`results/run_2026_08_26-13_29_07_437380` (qew=0.001), `..._437383` (qew=0.01), `..._437384`
+(qew=0.05). Baseline reused from `results/run_2026_08_18-19_46_23_818099` (§43/§46, no new run).
+All untracked local output, same caveat as every other reproducibility index in this document.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a

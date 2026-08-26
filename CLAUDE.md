@@ -205,14 +205,31 @@ something without first checking for a stale in-flight job, though
 
 **User decision 2026-08-26: don't scale to Phase 2 yet — keep digging into why the trained DQN
 loses so badly to rule-based baselines**, given the 3-4-order-of-magnitude gap confirmed at every
-roster size (§43/§45/§47). §51/§52/§53 (below) are the first results of that direction.
+roster size (§43/§45/§47). §51/§52/§53 narrowed the mechanism; §54 is the first actual intervention
+built on that mechanism, with a promising but NOT YET VALIDATED single-seed pilot result — **next
+concrete step, not yet started: a 5-seed validation of `--q_entropy_weight 0.001` and `0.05`**
+before trusting the pilot's direction (see §54).
 
 Phase 1 is complete at all three roster sizes (2/3/7-city, 5 seeds each). Read
 `fidings/divergence_investigation.md` in full before doing anything non-trivial here — it's long
-(53 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
+(54 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
 version, newest first:
 
-- **NEW, §53: the §51/§52 escape round shows §34's exact "confident lock-in vs. low-confidence
+- **NEW, §54: implemented and piloted `--q_entropy_weight`, the first training-time intervention
+  targeting §34's confident-lock-in mechanism directly.** New loss term in
+  `agents/dqn.py::DQNAgent.optimize()` (`loss -= q_entropy_weight * mean_batch_entropy(softmax(Q))`,
+  0.0 = exact no-op) rewards the online network for not collapsing into the high-Q-gap state §53
+  characterized, acting *during* training rather than only at eval time. Single-seed pilot (seed 3,
+  3 weight values, `results/q_entropy_pilot_s3.log`, all exit=0) vs. the known qew=0 baseline
+  (best=-2855.95, mean=-6624.90, 1/20 rounds confirmed-locked per §50): `qew=0.001` gave
+  best=-2183.01, mean=-5462.07, **0/20 rounds with std<50**; `qew=0.05` gave best=-1591.34,
+  mean=-5206.92, **0/20 rounds with std<50**; `qew=0.01` (middle value) was worse on both counts,
+  non-monotonic result, likely single-seed noise. **Two of three weight values beat baseline on
+  both reward measures AND avoided the low-std lock-in signal entirely — the first training-time
+  lever tested anywhere in this document that shows both simultaneously.** **Read with the same
+  standing caution as every other single-seed result here (§11→§12, §30→§31, §46→§47): promising,
+  not proven.** Not yet validated at multi-seed rigor — that's the concrete next step.
+- **§53: the §51/§52 escape round shows §34's exact "confident lock-in vs. low-confidence
   escape" signature, now confirmed at the whole-training-round level, not just within one
   checkpoint's episodes.** Zero new compute — the 5-episode training-time eval already recorded
   per-round Q-gaps and action counts. Round 13 (the -126.10 escape) has mean Q-gap 0.14, **30-50x
