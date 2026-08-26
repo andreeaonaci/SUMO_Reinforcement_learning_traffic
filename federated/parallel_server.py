@@ -86,6 +86,7 @@ def _client_worker(
     mu: float,
     dueling: bool,
     n_step: int,
+    q_entropy_weight: float,
     log_file: str,
     in_queue: "mp.Queue",
     out_queue: "mp.Queue",
@@ -155,6 +156,7 @@ def _client_worker(
             tau=tau, target_update=target_update,
             mu=mu, dueling=dueling, n_step=n_step,
             init_steps_done=init_steps_done,
+            q_entropy_weight=q_entropy_weight,
         )
 
         while True:
@@ -266,6 +268,7 @@ class ParallelFederatedServer:
         dueling: bool = False,
         server_momentum: float = 0.0,
         n_step: int = 1,
+        q_entropy_weight: float = 0.0,
         pseudo_grad_clip: float = 0.0,
         eval_ema_decay: float = 0.0,
         init_steps_done: int = 0,
@@ -343,7 +346,7 @@ class ParallelFederatedServer:
                     city_lr, lr_decay, min_lr,
                     self.neighbor_attention,
                     tau, target_update,
-                    mu, dueling, n_step,
+                    mu, dueling, n_step, q_entropy_weight,
                     self.log_file,
                     self.in_queues[name], self.out_queue,
                     city_seed, init_steps_done,

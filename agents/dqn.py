@@ -123,6 +123,7 @@ class DQNAgent:
         dueling: bool = False,
         n_step: int = 1,
         init_steps_done: int = 0,
+        q_entropy_weight: float = 0.0,
     ):
         self.own_dim = own_dim
         self.neighbor_dim = neighbor_dim
@@ -209,6 +210,19 @@ class DQNAgent:
         # sliding window since actions/rewards differ per ts_id).
         self.n_step = max(1, int(n_step))
         self._nstep_buffers: Dict[str, "deque"] = {}
+        # Q-value entropy regularization: fidings/divergence_investigation.md
+        # §53 found the network's rare good rounds are consistently the ones
+        # with low Q-gap (i.e. high softmax(Q) entropy) -- confidently locked
+        # bad policies have high Q-gap, and the one near-competent checkpoint
+        # found anywhere in that document had a Q-gap 30-50x lower than its
+        # neighbors. This subtracts entropy_weight * mean_batch_entropy from
+        # the loss each optimize() step, i.e. rewards the online network for
+        # keeping its Q-value distribution less peaked over valid actions,
+        # instead of only ever encouraging uncertainty at eval time (§34/§36's
+        # softmax-eval idea, which never touches training). 0 = disabled
+        # (default, exact no-op -- optimize() skips the entropy term
+        # entirely rather than just multiplying by zero).
+        self.q_entropy_weight = float(q_entropy_weight)
         logger.info(
             "own_dim=%d neighbor_dim=%d action_dim=%d k_max=%d eps_decay=%.0f",
             self.own_dim, self.neighbor_dim, self.action_dim, self.k_max, self.eps_decay,
@@ -451,6 +465,16 @@ class DQNAgent:
         # wildly between near-optimal and catastrophic every few rounds --
         # see fidings/divergence_investigation.md §13). mu=0 recovers
         # plain local training exactly (no-op, not just numerically small).
+        if self.q_entropy_weight > 0:
+            # Entropy of softmax(Q/1.0) over each sample's VALID actions only
+            # -- masked actions get -inf Q (via _mask_q) so softmax already
+            # assigns them exactly 0 probability; clamp before log() so those
+            # zero-probability terms contribute 0, not nan, to the sum.
+            q_masked_for_entropy = _mask_q(q_values, action_mask)
+            probs = torch.softmax(q_masked_for_entropy, dim=1)
+            entropy = -(probs * torch.log(probs.clamp_min(1e-12))).sum(dim=1)
+            loss = loss - self.q_entropy_weight * entropy.mean()
+
         if self.mu > 0 and self._global_params is not None:
             # Fused multi-tensor ops instead of a Python loop doing one
             # subtract+pow+sum (and one kernel launch) per parameter tensor

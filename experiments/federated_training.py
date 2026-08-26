@@ -87,7 +87,7 @@ def resolve_resume(resume_arg: str) -> tuple:
 
 def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: bool = True,
                 tau: float = 0.005, target_update: int = 200, mu: float = 0.0,
-                dueling: bool = False, n_step: int = 1):
+                dueling: bool = False, n_step: int = 1, q_entropy_weight: float = 0.0):
     """Single place that constructs a DQNAgent with the computed eps_decay."""
     return DQNAgent(
         own_dim=own_dim,
@@ -101,6 +101,7 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
         mu=mu,
         dueling=dueling,
         n_step=n_step,
+        q_entropy_weight=q_entropy_weight,
     )
 
 
@@ -121,6 +122,7 @@ def load_clients(
     mu: float = 0.0,
     dueling: bool = False,
     n_step: int = 1,
+    q_entropy_weight: float = 0.0,
     reward_shaping: dict | None = None,
 ) -> tuple:
     """Build one FederatedClient per city directory.
@@ -199,10 +201,11 @@ def load_clients(
             _act=action_dim, _eps=eps_decay,
             _head_fix=head_fix,
             _tau=tau, _tu=target_update, _mu=mu, _dueling=dueling, _n_step=n_step,
+            _qew=q_entropy_weight,
         ):
             return _make_agent(_own, _nbr, _k, _act, _eps, head_fix=_head_fix,
                                tau=_tau, target_update=_tu, mu=_mu, dueling=_dueling,
-                               n_step=_n_step)
+                               n_step=_n_step, q_entropy_weight=_qew)
 
         clients.append(
             FederatedClient(
@@ -703,6 +706,7 @@ def main(args):
             mu=args.fedprox_mu,
             dueling=args.dueling,
             n_step=args.n_step,
+            q_entropy_weight=args.q_entropy_weight,
         )
 
         start_round = 1
@@ -782,6 +786,7 @@ def main(args):
             dueling=args.dueling,
             server_momentum=args.server_momentum,
             n_step=args.n_step,
+            q_entropy_weight=args.q_entropy_weight,
             pseudo_grad_clip=args.pseudo_grad_clip,
             eval_ema_decay=args.eval_ema_decay,
             init_steps_done=init_steps_done,
@@ -811,6 +816,7 @@ def main(args):
             mu=args.fedprox_mu,
             dueling=args.dueling,
             n_step=args.n_step,
+            q_entropy_weight=args.q_entropy_weight,
             reward_shaping=reward_shaping_cfg,
         )
         own_dim, neighbor_dim, k_max = obs_dims
@@ -829,6 +835,7 @@ def main(args):
             mu=args.fedprox_mu,
             dueling=args.dueling,
             n_step=args.n_step,
+            q_entropy_weight=args.q_entropy_weight,
         )
         evaluator = make_holdout_evaluator(
             base,
@@ -1002,6 +1009,20 @@ if __name__ == "__main__":
                              "training, as a periodic version of the one-shot post-hoc recovery "
                              "burst validated in §39/§40 (diagnostics/recovery_finetune.py). "
                              "0 = disabled (default, exact no-op, unchanged monotonic decay).")
+    parser.add_argument("--q_entropy_weight", type=float, default=0.0,
+                        help="fidings §53: the one near-competent checkpoint found anywhere in "
+                             "this project's evaluation history had a Q-gap 30-50x lower than its "
+                             "neighboring rounds -- confidently-locked bad policies show high "
+                             "Q-gap (low softmax(Q) entropy), rare good escapes show low Q-gap "
+                             "(high entropy), matching §34's within-checkpoint finding. This adds "
+                             "-q_entropy_weight * mean_batch_entropy(softmax(Q)) to the training "
+                             "loss each optimize() step, directly rewarding the online network for "
+                             "keeping Q-values less peaked over valid actions, instead of only "
+                             "encouraging uncertainty at eval time (§34/§36's softmax-eval idea, "
+                             "untested here for whether it helps DURING training). Untested as of "
+                             "this writeup -- no known good value yet, start small (e.g. 0.001-0.01) "
+                             "given Huber loss on clipped rewards keeps the TD-loss term small. "
+                             "0 = disabled (default, exact no-op).")
     parser.add_argument("--fedavg_blend", type=float, default=1.0,
                         help="FedAvg blending: 1.0 = fully replace global with aggregated (default). "
                              "0.7 = 70%% aggregated + 30%% previous global weights, preventing "
