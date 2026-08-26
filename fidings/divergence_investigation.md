@@ -2631,6 +2631,73 @@ open items in this document right now.
 `/tmp` into this results dir specifically so they survive past this session, unlike most of this
 document's other "untracked local output" citations.
 
+## 51. Does escaping the confident lock-in actually close the gap to baselines? Mostly no — one
+    striking exception found, zero new compute
+
+**2026-08-26.** Direct follow-up to §50, and to §26's older open question about what actually
+drives the 1000-8400x baseline gap. §50 established that confident lock-in happens at roughly the
+same ~6-7% rate whether or not aggregation is involved — but does *not* by itself establish how much
+of the overall reward gap that lock-in accounts for. Tested directly, reusing existing
+`federated_history.json` data from all 5 federated + 5 no-federation seed runs (§45/§49) — zero new
+training or eval compute.
+
+**Bucketed all 300 model-rounds (100 federated + 200 no-federation) by 5-episode `std_reward`** (a
+noisy but free proxy for locked-vs-not, per §49's own caveat) and compared mean reward/waiting-time/
+stopped/arrived against the `max_pressure`/`fixed_time` true-holdout baselines (§43):
+
+| bucket | n | mean reward | mean waiting_time | mean stopped | mean arrived |
+|---|---:|---:|---:|---:|---:|
+| low-std (<50, mostly confirmed LOCKED per §50) | 20 | -9364.0 | 1779.3 | 1000.8 | 263.8 |
+| mid-std (50-200) | 104 | -8977.3 | 1642.8 | 1009.0 | 304.5 |
+| high-std (>200, NOT locked) | 176 | -6659.5 | 1226.9 | 849.5 | 553.4 |
+| `max_pressure` baseline | — | -0.34 | 2.91 | 1.0 | 1462.0 |
+| `fixed_time` baseline | — | -2.73 | 6.97 | 10.0 | 1439.0 |
+
+**Escaping the lock-in helps, but only modestly — locked (-9364) to not-locked (-6660) is a ~29%
+improvement, nowhere close to bridging the gap to either baseline (still 2400-3500x worse on
+reward).** This directly answers the question against the optimistic reading: **confident lock-in
+is not the main driver of the overall baseline gap** — it's a real, well-characterized failure mode
+(§33/§34/§48-50) layered on top of a much larger, still-unexplained deficiency that afflicts locked
+and unlocked rounds close to equally. This is consistent with, and sharpens, §26's older finding
+("not a collapsed/degenerate policy... points at residual end-of-episode congestion") — the
+policy's ceiling problem is broader than the lock-in phenomenon that's absorbed most of this
+document's mechanism-hunting attention since §32.
+
+**One striking exception, found by sorting all 300 model-rounds by reward:** exactly one —
+`nofed_seed5_city_1_round_013` (`results/run_2026_08_24-22_45_28_110824/clients/city_1_round_013.pth`,
+the same checkpoint §50 used as its confirmed-not-locked negative control) — lands anywhere near
+baseline territory: reward -126.1 (5-ep training-time eval), waiting_time 71.96, stopped 69.2,
+arrived 1382.6 (94.6% of `max_pressure`'s throughput). Still meaningfully worse than either baseline
+(25x on waiting_time, not 2500x), but in a completely different regime from every other checkpoint
+ever evaluated in this project — the next-best of all 300 rounds is -1215.8, nearly 10x worse. Its
+30-episode reeval (§50) is less dramatic but still consistent with a real, if fragile, competent
+policy: mean -2688.24 over 30 episodes (min -321.64, max -4808.77, 21/30 distinct values, no lock-in
+signature) — worse than the 5-episode number suggested (likely partly a lucky 5-seed draw, per
+§33's standing lesson that few-episode evals overstate good rounds) but still by far the best 30-
+episode mean recorded anywhere in this document.
+
+**Not yet investigated — the natural next step:** what's actually different about this one
+checkpoint? Candidates worth checking directly, no new training needed: (a) diff its weights against
+the immediately adjacent rounds (`city_1_round_012.pth`, `city_1_round_014.pth`) from the same run to
+see if it's a sharp, isolated spike or part of a real trend; (b) inspect its action distribution and
+per-intersection Q-gaps (same tooling as §26/§34) to see whether it looks qualitatively different
+from typical checkpoints or just a less-unlucky sample of the same policy family; (c) check whether
+`city_1`'s neighboring rounds in the *federated* (aggregated) run ever come close, or whether this is
+specific to the no-federation condition — `city_1` never aggregates with `city_4` in this run, so if
+this is a real, findable "good" region of weight space, it's worth knowing whether federation's
+averaging step would have destroyed it.
+
+**Caveats:** single checkpoint, single seed, single city — could be a fragile fluke rather than a
+reproducible "good" region, and n=1 is a weak basis for any strong claim. The bucketed comparison
+above is a global pattern across 300 rounds so is on firmer ground than the single-checkpoint
+observation, but the std-based locked/not-locked split is still the same imperfect proxy §49 already
+flagged as unreliable in absolute terms (only directly confirmed for the 20 candidates checked in
+§50, not for all 300 rows bucketed here) — read the bucket comparison as indicative, not as a
+replacement for a properly confirmed census.
+
+**Where this data lives:** no new files — reuses `federated_history.json` from the run dirs already
+cited in §45 (federated) and §49 (no-federation).
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a

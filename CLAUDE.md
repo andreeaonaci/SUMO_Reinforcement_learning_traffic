@@ -198,17 +198,38 @@ which had gone stale):
 
 ## RESUME HERE (as of 2026-08-26 — check this is still current before trusting it)
 
-**No experiment currently running as of this writeup** — the 20-checkpoint matched lock-in-rate
-reeval batch (§50, launched to close out §49's open question) finished cleanly and nothing new has
-been launched since. Safe to start something without first checking for a stale in-flight job,
-though `ps aux | grep -E "federated_training|reeval_checkpoint"` costs nothing to confirm.
+**No experiment currently running as of this writeup** — §50's reeval batch and §51's zero-compute
+follow-up analysis both finished cleanly and nothing new has been launched since. Safe to start
+something without first checking for a stale in-flight job, though
+`ps aux | grep -E "federated_training|reeval_checkpoint"` costs nothing to confirm.
+
+**User decision 2026-08-26: don't scale to Phase 2 yet — keep digging into why the trained DQN
+loses so badly to rule-based baselines**, given the 3-4-order-of-magnitude gap confirmed at every
+roster size (§43/§45/§47). §51 (below) is the first result of that direction and surfaces a
+concrete, not-yet-investigated lead — **the single best-performing checkpoint out of 300 ever
+evaluated** (`results/run_2026_08_24-22_45_28_110824/clients/city_1_round_013.pth`) — worth
+inspecting directly before running any more expensive multi-seed batches.
 
 Phase 1 is complete at all three roster sizes (2/3/7-city, 5 seeds each). Read
 `fidings/divergence_investigation.md` in full before doing anything non-trivial here — it's long
-(50 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
+(51 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
 version, newest first:
 
-- **NEW, §50 closes out §49's open question: aggregation does NOT measurably change the
+- **NEW, §51: escaping the confident lock-in mostly does NOT close the baseline gap — locked vs.
+  not-locked rounds differ by only ~29% on mean reward (-9364 vs -6660), both still 2400-3500x worse
+  than baselines.** Zero new compute — reused existing §45/§49 data, bucketed all 300 model-rounds
+  (federated + no-federation) by 5-episode std as a locked/not-locked proxy. **Confirms the lock-in
+  (§32-34/§48-50) is a real but secondary failure mode layered on a larger, still-unexplained
+  deficiency** — consistent with §26's older "not a collapsed policy, residual end-of-episode
+  congestion" finding. **One striking exception found by sorting all 300 rounds by reward: exactly
+  one checkpoint** (`nofed seed5 city_1 round13`, the same one §50 used as its confirmed-not-locked
+  negative control) **lands anywhere near baseline territory** — reward -126.1 (5-ep), waiting_time
+  71.96 vs. `max_pressure`'s 2.91 (25x worse, not 2500x), 94.6% of baseline throughput. Every other
+  one of the 300 rounds is worse than -1200. **Next concrete step, not yet done:** diff this
+  checkpoint's weights against its immediate neighbors (`city_1_round_012.pth`/`_014.pth`) and
+  inspect its action distribution/Q-gaps to see whether it's a real, findable "good" region of
+  weight space or a fragile one-off fluke (n=1 caveat — see §51 for full caveats).
+- **§50 closes out §49's open question: aggregation does NOT measurably change the
   confident-lock-in's frequency.** Built the matched lock-in-rate count §49 called for: same
   5-episode `std_reward<50` screen applied identically to both the federated 5-seed run (§45, 100
   model-rounds) and the no-federation 5-seed run (§49, 200 model-rounds) — 7 and 13 candidates
