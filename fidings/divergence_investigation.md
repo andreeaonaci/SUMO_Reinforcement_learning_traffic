@@ -2558,6 +2558,79 @@ candidate for further compute than extending to another roster size blind.
 30-episode reeval: `results/reeval_no_fed_worst_round.log`. All untracked local output, same caveat
 as every other reproducibility index in this document.
 
+## 50. §49's open follow-up answered: aggregation does NOT measurably change the confident-lock-in's
+    frequency — federated and no-federation show statistically indistinguishable lock-in rates
+
+**2026-08-25/26.** §49 left one thing unmeasured: even though the confident-lock-in signature isn't
+aggregation-*caused* (a completely independent no-federation city locks in just as readily as a
+federated one), aggregation could still change how *often* it happens. Built the matched count §49
+asked for: same screen (5-episode training-time `std_reward`), same absolute threshold (<50),
+applied identically to both populations, then confirmed every candidate with a real
+`diagnostics/reeval_checkpoint.py --episodes 30 --pad_to_true_holdout` run (not just trusting the
+cheap screen, per §33/§49's own lesson that 5-episode std alone isn't reliable enough to call it).
+
+**Populations compared:** the same 5-seed, 2-city (`environments_c1_4`), `--dueling --n_step 3`,
+`--pad_to_true_holdout` runs already used in §45 (federated, 5 seeds × 20 rounds × 1 aggregated
+model = 100 model-rounds) and §49 (no-federation, 5 seeds × 20 rounds × 2 independent per-city
+models = 200 model-rounds) — no new training, all checkpoints already existed. (One correction made
+during setup: the federated seed-3 run cited in §45's table is `run_2026_08_18-19_46_23_818099`
+[§43's original run, `dueling: True`] — not `run_2026_08_19-15_51_32_969415`, which the fidings
+prose elsewhere cites in a different context [§46's "plain fedavg" architecture-comparison arm,
+confirmed `dueling: False` from its `training.log`]. Verified all 10 run dirs' actual CLI args
+directly from `training.log` before using any of them, not just trusted prose cross-references.)
+
+**Step 1 — screening rate (free, no new compute, both from existing `federated_history.json`):**
+applying the identical `std_reward < 50` threshold to both populations gave 7/100 federated
+model-rounds (7%) and 13/200 no-federation model-rounds (6.5%) as lock-in candidates — already
+close before any confirmation step.
+
+**Step 2 — 30-episode confirmation of all 20 candidates** (7 federated + 13 no-federation; ~15-20
+min/checkpoint at 3-way concurrency, `analyse/run_lockin_reeval_batch.sh`, new, reusable for any
+future matched-candidate reeval batch): classified each as **LOCKED** if the 30 episodes collapsed
+onto a small number of near-identical reward values (≤12 distinct values, matching or tighter than
+§33/§34's own confirmed round-20 case) or **not locked** if rewards were genuinely spread across the
+full range (many distinct values, no repeats).
+
+| | candidates screened (std<50) | confirmed LOCKED | confirmed not locked | rate over all model-rounds |
+|---|---:|---:|---:|---:|
+| federated (100 model-rounds) | 7 | 7 | 0 | **7/100 = 7.0%** |
+| no-federation (200 model-rounds) | 13 | 12 | 1 | **12/200 = 6.0%** |
+
+The one non-lock-in case (no-federation, seed 5, `city_1`, round 13) is a clean negative control:
+21 distinct values across 30 episodes, spanning -321 to -4809 (no repeats), i.e. a policy that
+actually responds to its (seed-varying) observations — exactly what a non-degenerate round should
+look like, confirming the classification method isn't just rubber-stamping everything as locked.
+Every other candidate showed 1-12 distinct values, most (10/19) showing 1-3 — e.g. `fed_s4_2`
+(1 distinct value across all 30 episodes), `nofed_s2_3c1`/`nofed_s2_13c4`/`nofed_s5_4c4`/
+`nofed_s5_5c4`/`nofed_s4_1c4` (also 1 distinct value each).
+
+**Statistical comparison (two-proportion, pooled SE, same convention as every other comparison in
+this document):** p_fed=0.070, p_nofed=0.060, pooled SE=0.0298, **|diff|/SE = 0.34** — nowhere near
+this project's ≥2 significance bar. **Aggregation does not measurably change the confident
+lock-in's frequency**, at least not at a magnitude this sample size could detect. Combined with
+§49, this closes out §28's original question about as fully as it's going to get on this roster
+size: the lock-in is a property of DQN training against this SUMO reward/action-space setup,
+federated aggregation neither causes it nor makes it appreciably more or less frequent.
+
+**Caveats:** this is a floor, not a census — only the 20 candidates below the std<50 screen were
+confirmed; any lock-in hiding above that threshold in either population (possible in principle,
+though every confirmed case here had 30-episode std under 65, well inside the screen, and §33's own
+highest-CV confirmed case (round 20, ~7% CV) is matched or beaten by every case here) wouldn't be
+counted. The screen itself was applied identically to both populations though, so even the
+uncorrected *candidate* rate (7% vs 6.5%, before any 30-episode confirmation) already told the same
+story — the confirmation step mainly ruled out the classification being an artifact of the cheap
+screen, not the direction of the result. Same standing 2-city-only, `city_1`/`city_4` not a matched
+pair caveats as §48/§49. A natural (not yet done) extension: repeat at a different roster size
+(3-city or 7-city) to see if the null holds there too, though given how close 7%/6% already are and
+how expensive each 30-episode reeval is (~15-20 min), this is a lower-priority spend than most other
+open items in this document right now.
+
+**Where this data lives:** `results/lockin_rate_reeval_2026_08_26/` (20 reeval logs +
+`candidates.txt` recording exactly which checkpoint each candidate came from), driver script
+`analyse/run_lockin_reeval_batch.sh` (new, reusable). All reeval logs are copied out of
+`/tmp` into this results dir specifically so they survive past this session, unlike most of this
+document's other "untracked local output" citations.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
@@ -2694,8 +2767,12 @@ as every other reproducibility index in this document.
    two near-identical reward values. **The lock-in is not aggregation-specific** — independent,
    never-aggregated single-city DQN training shows it too, reframing §28's original question (it
    isn't "why does aggregation cause this," the lock-in looks like it predates aggregation
-   entirely). Still open: whether aggregation changes the lock-in's *frequency or severity* even
-   though it isn't the root cause — not yet measured.
+   entirely). ~~Still open: whether aggregation changes the lock-in's *frequency or severity* even
+   though it isn't the root cause — not yet measured.~~ **Measured — see
+   [§50](#50-49s-open-follow-up-answered-aggregation-does-not-measurably-change-the-confident-lock-ins-frequency--federated-and-no-federation-show-statistically-indistinguishable-lock-in-rates).**
+   Matched, threshold-confirmed lock-in rate: federated 7/100 model-rounds (7.0%), no-federation
+   12/200 model-rounds (6.0%), |diff|/SE = 0.34 — no statistically supportable difference.
+   Aggregation neither causes nor measurably changes the frequency of this failure mode.
 10. **NEW from §35: two concrete, cheap, literature-motivated experiments this project has never
     run.**
     (a) Train against `sumo_rl`'s built-in `pressure` reward instead of the default

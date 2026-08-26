@@ -196,19 +196,38 @@ which had gone stale):
   implemented and tested* FedProx proximal term, `DQNAgent.mu` — see next bullet — which is real
   and unaffected by this deletion.
 
-## RESUME HERE (as of 2026-08-25 — check this is still current before trusting it)
+## RESUME HERE (as of 2026-08-26 — check this is still current before trusting it)
 
-**No experiment currently running as of this writeup** — the 5-seed `--no_federation` batch and
-its 30-episode reeval confirmation (both flagged below, §49) finished cleanly and nothing new has
+**No experiment currently running as of this writeup** — the 20-checkpoint matched lock-in-rate
+reeval batch (§50, launched to close out §49's open question) finished cleanly and nothing new has
 been launched since. Safe to start something without first checking for a stale in-flight job,
-though `ps aux | grep federated_training` costs nothing to confirm.
+though `ps aux | grep -E "federated_training|reeval_checkpoint"` costs nothing to confirm.
 
 Phase 1 is complete at all three roster sizes (2/3/7-city, 5 seeds each). Read
 `fidings/divergence_investigation.md` in full before doing anything non-trivial here — it's long
-(49 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
+(50 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
 version, newest first:
 
-- **NEW, §49 corrects §48: the confident-lock-in failure mode is NOT aggregation-specific —
+- **NEW, §50 closes out §49's open question: aggregation does NOT measurably change the
+  confident-lock-in's frequency.** Built the matched lock-in-rate count §49 called for: same
+  5-episode `std_reward<50` screen applied identically to both the federated 5-seed run (§45, 100
+  model-rounds) and the no-federation 5-seed run (§49, 200 model-rounds) — 7 and 13 candidates
+  respectively, already close before any confirmation (7% vs. 6.5%). Confirmed every candidate with
+  a real 30-episode `diagnostics/reeval_checkpoint.py --pad_to_true_holdout` run rather than trusting
+  the cheap screen: **7/7 federated candidates and 12/13 no-federation candidates showed the genuine
+  confident-lock-in signature** (rewards collapsing onto ≤12 distinct values across 30 different SUMO
+  seeds; the one exception, no-federation seed 5 `city_1` round 13, showed 21 distinct values spanning
+  -321 to -4809 — a clean negative control proving the classification isn't just rubber-stamping
+  everything). **Resulting rate: federated 7/100 model-rounds (7.0%) vs. no-federation 12/200
+  model-rounds (6.0%), |diff|/SE = 0.34** — far below this project's ≥2 bar, no statistically
+  supportable difference. Combined with §49, this closes §28's original question as far as this
+  roster size can take it: the lock-in is a property of DQN training against this SUMO
+  reward/action-space setup, and federated aggregation neither causes it nor changes how often it
+  happens. Caveat: a floor, not a census — only the std<50-screened candidates were confirmed, though
+  the screen was applied identically to both sides and every confirmed case had 30-episode std well
+  under the screen's threshold. Raw data + reusable batch driver:
+  `results/lockin_rate_reeval_2026_08_26/`, `analyse/run_lockin_reeval_batch.sh`.
+- **§49 corrects §48: the confident-lock-in failure mode is NOT aggregation-specific —
   independent, never-aggregated single-city training shows the exact same signature.** §48's
   single-seed pilot found no near-zero-std round under `--no_federation` and tentatively read that
   as "aggregation causes the lock-in." Extending to 5 seeds (`environments_c1_4`,
@@ -228,11 +247,9 @@ version, newest first:
   (apples-to-apples, one model per seed) was not significantly different from federated either way
   (\|diff\|/SE 1.72/0.98 best-round, 1.00/1.28 mean, both under this project's ≥2 bar — a naive
   pooled-both-models comparison gives a misleadingly significant 2.33, a sample-size confound from
-  no-federation getting 2x the "shots" per seed, not a real effect). **Still open: whether
-  aggregation changes the lock-in's frequency/severity even though it isn't the root cause** — not
-  yet measured, would need a matched lock-in-rate count across no-federation vs. federated rounds.
-  Given how much this correction moves the practical read, that's now a stronger next spend than
-  extending to another roster size blind.
+  no-federation getting 2x the "shots" per seed, not a real effect). ~~Still open: whether
+  aggregation changes the lock-in's frequency/severity even though it isn't the root cause~~ —
+  **measured, see §50 above: no measurable difference (|diff|/SE = 0.34).**
 - **§47 corrects §46: the `--dueling --n_step 3` architecture recommendation's edge over plain
   FedAvg does NOT hold up at 5-seed rigor under true-holdout eval — |diff|/SE = 0.63 (best-round),
   0.56 (mean), both far below this project's ≥2 bar.** §46's single-seed (seed 3) finding that
@@ -320,12 +337,12 @@ version, newest first:
   (confidently-locked degenerate policy, §34) and several fixes were tested (softmax eval §36,
   recovery-finetune §39/§40, periodic-reset §41/§42, pressure reward §37/§38) but none is a clean,
   general win; §28's original framing ("why does federated aggregation itself produce this
-  lock-in") is now superseded by §49 — the lock-in isn't aggregation-specific, no-federation
-  training shows the identical signature, so the open mechanism question is broader: why does this
-  training setup (federated or not) produce confidently-locked degenerate policies at all. Still
-  worth checking whether aggregation changes the lock-in's frequency/severity even though it isn't
-  the root cause (§49, not yet measured) — that's the natural next spend on this thread. Newly open
-  sub-question from §43: does
+  lock-in") is now superseded by §49/§50 — the lock-in isn't aggregation-specific, no-federation
+  training shows the identical signature, and §50 confirmed aggregation doesn't even change its
+  frequency (|diff|/SE = 0.34) — so the open mechanism question is now just: why does this
+  training setup (federated or not) produce confidently-locked degenerate policies at all — this
+  is now a mechanism question with no known federated/no-federation lever left to pull, not an
+  aggregation-specific one. Newly open sub-question from §43: does
   `--reward_shaping_wait_weight` (§44, one inconclusive pilot so far) or a properly validated
   `--pad_to_true_holdout`-corrected multi-seed sweep change this picture at all, or is the gap
   simply too large for any tested intervention to close. (2) Phase 1's own decision-gate
