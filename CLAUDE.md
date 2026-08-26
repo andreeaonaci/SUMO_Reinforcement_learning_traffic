@@ -206,9 +206,12 @@ something without first checking for a stale in-flight job, though
 **User decision 2026-08-26: don't scale to Phase 2 yet — keep digging into why the trained DQN
 loses so badly to rule-based baselines**, given the 3-4-order-of-magnitude gap confirmed at every
 roster size (§43/§45/§47). §51/§52/§53 narrowed the mechanism; §54 is the first actual intervention
-built on that mechanism, with a promising but NOT YET VALIDATED single-seed pilot result — **next
-concrete step, not yet started: a 5-seed validation of `--q_entropy_weight 0.001` and `0.05`**
-before trusting the pilot's direction (see §54).
+built on that mechanism, with a promising but NOT YET VALIDATED single-seed pilot result.
+
+**IN PROGRESS as of this writeup:** 5-seed validation of `--q_entropy_weight 0.001` and `0.05`
+(seeds 1/2/4/5 added to §54's seed-3 pilot, `results/q_entropy_5seed.log`) — launched, not yet
+complete. Check `ps aux | grep federated_training` / the log file before assuming it's done or
+starting something that would contend with it for RAM/CPU.
 
 Phase 1 is complete at all three roster sizes (2/3/7-city, 5 seeds each). Read
 `fidings/divergence_investigation.md` in full before doing anything non-trivial here — it's long

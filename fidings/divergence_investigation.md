@@ -2887,6 +2887,11 @@ shift in what the cheap screen catches.
 (qew=0.05). Baseline reused from `results/run_2026_08_18-19_46_23_818099` (§43/§46, no new run).
 All untracked local output, same caveat as every other reproducibility index in this document.
 
+**IN PROGRESS as of this writeup:** 5-seed validation launched for both promising values (seeds
+1/2/4/5 added to the seed-3 pilot above, same `environments_c1_4`/`--dueling --n_step 3
+--pad_to_true_holdout`/20-round config), `results/q_entropy_5seed.log`. Results not in yet — see
+§55 (or CLAUDE.md's RESUME HERE) once it finishes for the outcome.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
