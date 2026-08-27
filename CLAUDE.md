@@ -196,26 +196,36 @@ which had gone stale):
   implemented and tested* FedProx proximal term, `DQNAgent.mu` — see next bullet — which is real
   and unaffected by this deletion.
 
-## RESUME HERE (as of 2026-08-26 — check this is still current before trusting it)
+## RESUME HERE (as of 2026-08-27 — check this is still current before trusting it)
 
-**No experiment currently running as of this writeup** — §50's reeval batch and §51's zero-compute
-follow-up analysis both finished cleanly and nothing new has been launched since. Safe to start
-something without first checking for a stale in-flight job, though
-`ps aux | grep -E "federated_training|reeval_checkpoint"` costs nothing to confirm.
+**No experiment currently running as of this writeup** — §55's 5-seed `--q_entropy_weight`
+validation finished cleanly (all 10 jobs exit=0) and nothing new has been launched since. Safe to
+start something without first checking for a stale in-flight job, though
+`ps aux | grep -E "federated_training|reeval_checkpoint"` costs nothing to confirm. (Note: a prior
+session that launched this batch was itself lost/disconnected before writing up the result — the
+training processes kept running independently and completed normally regardless; nothing was lost,
+see §55's session note.)
 
 **User decision 2026-08-26: don't scale to Phase 2 yet — keep digging into why the trained DQN
 loses so badly to rule-based baselines**, given the 3-4-order-of-magnitude gap confirmed at every
-roster size (§43/§45/§47). §51/§52/§53 narrowed the mechanism; §54 is the first actual intervention
-built on that mechanism, with a promising but NOT YET VALIDATED single-seed pilot result.
-
-**IN PROGRESS as of this writeup:** 5-seed validation of `--q_entropy_weight 0.001` and `0.05`
-(seeds 1/2/4/5 added to §54's seed-3 pilot, `results/q_entropy_5seed.log`) — launched, not yet
-complete. Check `ps aux | grep federated_training` / the log file before assuming it's done or
-starting something that would contend with it for RAM/CPU.
+roster size (§43/§45/§47). §51/§52/§53 narrowed the mechanism; §54 found a promising single-seed
+signal for `--q_entropy_weight`; **§55 brought that to 5-seed rigor — split result, not a clean
+win.** Neither weight's reward improvement reaches this project's significance bar (best:
+|diff|/SE 0.50/0.24, mean: 1.49/0.78 for qew=0.001/0.05) — the same single-seed-doesn't-replicate
+pattern hit repeatedly in this document (§11→§12, §30→§31, §46→§47). But the lock-in-frequency
+claim *does* hold up: `qew=0.05` significantly reduces the confident-lock-in signature's raw
+incidence (7.1%→0.0% of rounds, z=2.71). Reading (ties to §51): the mechanism intervention works as
+designed, it just doesn't move the headline reward number much, because §51 already showed
+confident lock-in is a secondary factor in the baseline gap, not the primary one. **`--q_entropy_weight`
+is not ready to adopt as a default based on this.** The 30-episode reeval-checkpoint confirmation
+of the lock-in-rate reduction (§55's flagged follow-up) is the cheapest remaining next step; the
+bigger open question is still what *does* primarily drive the gap, which no tested intervention
+(exploration resets §41/§42, reward shaping §37/§38/§44, pressure/entropy regularization §54/§55)
+has yet resolved.
 
 Phase 1 is complete at all three roster sizes (2/3/7-city, 5 seeds each). Read
 `fidings/divergence_investigation.md` in full before doing anything non-trivial here — it's long
-(54 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
+(55 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
 version, newest first:
 
 - **NEW, §54: implemented and piloted `--q_entropy_weight`, the first training-time intervention

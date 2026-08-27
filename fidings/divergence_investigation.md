@@ -2887,10 +2887,72 @@ shift in what the cheap screen catches.
 (qew=0.05). Baseline reused from `results/run_2026_08_18-19_46_23_818099` (§43/§46, no new run).
 All untracked local output, same caveat as every other reproducibility index in this document.
 
-**IN PROGRESS as of this writeup:** 5-seed validation launched for both promising values (seeds
-1/2/4/5 added to the seed-3 pilot above, same `environments_c1_4`/`--dueling --n_step 3
---pad_to_true_holdout`/20-round config), `results/q_entropy_5seed.log`. Results not in yet — see
-§55 (or CLAUDE.md's RESUME HERE) once it finishes for the outcome.
+~~**IN PROGRESS as of this writeup:** 5-seed validation launched for both promising values~~ **Done
+— see [§55](#55-54s-5-seed-q_entropy_weight-validation-complete-reward-gain-doesnt-reach-significance-but-the-lock-in-rate-reduction-does--a-split-result-not-a-clean-win).**
+Neither weight's reward improvement reaches significance at 5 seeds, but `qew=0.05`'s lock-in-rate
+reduction does (z=2.71) — a split result, not the clean win this pilot's single-seed numbers
+suggested.
+
+## 55. §54's 5-seed `--q_entropy_weight` validation complete: reward gain doesn't reach
+    significance, but the lock-in-rate reduction does — a split result, not a clean win
+
+**2026-08-27.** Completed the 5-seed validation §54 launched (seeds 1/2/4/5 added to the seed-3
+pilot, both promising weight values, same `environments_c1_4`/`--dueling --n_step 3
+--pad_to_true_holdout`/20-round config, `results/q_entropy_5seed.log`, all 10 jobs exit=0). Baseline
+5-seed numbers reused directly from §45 (no re-run needed — same config, `q_entropy_weight=0`).
+
+| condition | best-round mean (5 seeds) | mean-reward mean (5 seeds) | \|diff\|/SE vs baseline |
+|---|---:|---:|---:|
+| baseline (§45) | -5278.1 (std 2335.2) | -8317.6 (std 1348.5) | — |
+| `qew=0.001` | -4653.1 (std 1501.5) | **-7071.0** (std 1305.1) | 0.50 (best), **1.49 (mean)** |
+| `qew=0.05` | -4932.3 (std 2140.3) | -7636.0 (std 1411.6) | 0.24 (best), 0.78 (mean) |
+
+**Neither weight clears this project's ≥2 significance bar on reward, on either metric.** `qew=0.001`
+gets closest (1.49 on mean) — a real lead, numerically better than baseline in 3 of 5 seeds
+(seed3, seed5 clearly, seed2 modestly), worse in 2 (seed1, seed4) — but not statistically
+supportable at 5 seeds. This is the same pattern this document has hit repeatedly (§11→§12,
+§30→§31, §46→§47): a clean-looking single-seed pilot (§54: both weights beat baseline on both
+measures, seed 3 only) doesn't survive multi-seed scrutiny.
+
+**The lock-in-frequency claim tells a different, more interesting story.** Counting rounds with
+5-episode std < 50 (the same cheap screen §49/§50 established and confirmed via 30-episode reeval)
+across all 5 seeds:
+
+| condition | low-std rounds | rate | z vs baseline |
+|---|---:|---:|---:|
+| baseline | 7/99 | 7.1% | — |
+| `qew=0.001` | 3/100 | 3.0% | 1.31 (not significant) |
+| `qew=0.05` | 0/100 | **0.0%** | **2.71 (significant)** |
+
+**`qew=0.05` significantly reduces the raw incidence of the confident-lock-in signature (z=2.71),
+even though that reduction doesn't translate into a statistically supportable reward improvement.**
+This isn't a contradiction — it's exactly consistent with §51's earlier finding that confident
+lock-in is a *secondary* factor in the baseline gap, not the main driver (locked vs. not-locked
+rounds differed by only ~29% mean reward in §51, both still 2400-3500x worse than baselines).
+Suppressing the lock-in signature is real and measurable, but the lock-in was never the dominant
+reason this project's trained policies lose so badly to `fixed_time`/`max_pressure` — so fixing it,
+even successfully, doesn't move the headline number much. `--q_entropy_weight` is a genuine,
+verified, working intervention on the *specific mechanism* it targets; it just isn't a fix for the
+larger baseline gap, because that gap isn't primarily caused by this mechanism.
+
+**Reading:** don't adopt `--q_entropy_weight` as a standing default based on this — the reward
+case isn't there. It remains legitimately interesting as confirmation that the confident-lock-in
+mechanism (§34, §53) is real, training-time-controllable, and separable from whatever else is
+producing the much larger baseline-comparison gap. Not yet done: a 30-episode
+`diagnostics/reeval_checkpoint.py` confirmation on `qew=0.05`'s runs specifically (§54 flagged this
+as the natural follow-up for whichever value survived — arguably still worth doing to confirm the
+z=2.71 lock-in-rate reduction holds up the way §50 confirmed the original cheap-screen counts, even
+though the headline reward result is now null).
+
+**Where this data lives:** `results/q_entropy_5seed.log` (all round-by-round data for both
+weights × seeds 1/2/4/5), `results/q_entropy_pilot_s3.log` (seed 3, from §54), baseline reused from
+§45's run dirs. All untracked local output, same caveat as every other reproducibility index here.
+
+**Session note:** this validation was launched by a separate session that was subsequently lost
+(deleted/disconnected) before it could write up the result — the training processes themselves
+kept running independently on the same machine and completed normally, and all prior work through
+§54 was already safely committed to git, so nothing was actually lost. This section completes that
+session's queued next step.
 
 ## Open questions / next steps
 
