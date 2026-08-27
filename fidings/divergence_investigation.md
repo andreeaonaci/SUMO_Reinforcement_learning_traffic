@@ -3247,6 +3247,41 @@ further.
 `environments_c4_only/` (new single-city roster, symlink-based per this project's existing
 `environments_c1_only`/`environments_phase0` convention).
 
+## 60. Launched: extending §45's federated 2-city 5-seed runs to a 1.25x-RESCO-budget training
+    length via `--resume`, to test whether the *true-holdout* gap (not just the in-distribution
+    one §59 already closed) shrinks with adequate training
+
+**2026-08-27.** §59 answered the in-distribution question (single city, no federation). This
+launches the more important remaining one: does the **true-holdout** gap this document has reported
+since §43 — train on 2 cities, evaluate on the genuinely unseen `city_5_holdout` — also shrink with
+more training, when federated? Rather than retraining from round 0, resumed §45's existing 5-seed
+`environments_c1_4`/`--dueling --n_step 3 --pad_to_true_holdout` runs (all already at round 20,
+checkpoints on disk) via `experiments/federated_training.py --resume`, extending each to round 63
+(126 total episodes/city, ≈1.25x RESCO's ~100-episode IDQN convergence point, matching §58's
+budget target on the federated/true-holdout side instead of the single-city/in-distribution side).
+
+**Exact resume mapping** (seed → original run_dir, all confirmed at round 20 before launch):
+seed1→`run_2026_08_18-22_31_10_863898`, seed2→`run_2026_08_18-22_31_10_863894`,
+seed3→`run_2026_08_18-19_46_23_818099` (§43's original), seed4→`run_2026_08_18-22_31_10_863897`,
+seed5→`run_2026_08_19-00_14_20_889188`. Launched via `analyse/run_concurrent_batch.sh` at
+`MAX_CONCURRENT=3` (this project's standard batch runner), log at
+`results/pad_to_true_holdout_extended_5seed.log`. All 5 confirmed via the "Resuming from ...
+completed round 20 -- continuing to round 63" log line before moving on.
+
+**Known caveat with `--resume` on this codebase, worth flagging explicitly (not a bug introduced
+here, an existing property documented in `resolve_resume`'s docstring plus one more found while
+checking it): only the global Q-network weights and an *approximated* epsilon step-counter survive
+a resume** (`experiments/federated_training.py`'s docstring already covers replay
+buffer/optimizer-momentum reset). **The learning-rate schedule also restarts from the base `--lr`
+(3e-4) rather than continuing from wherever `lr_decay=0.97` had already brought it by round 20**
+(~1.67e-4) — each resumed worker is a fresh process whose agent is constructed with the base LR and
+decays from there, `agent.decay_lr()` has no resume-awareness. Net effect: rounds 21+ initially
+train at a higher LR than a truly continuous 63-round run would have used at that point, before
+decaying back down over the next several rounds. Worth keeping in mind when interpreting rounds
+21-30 specifically; unlikely to matter much by round 63.
+
+**Not yet complete as of this write-up — results to follow once the batch finishes.**
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
