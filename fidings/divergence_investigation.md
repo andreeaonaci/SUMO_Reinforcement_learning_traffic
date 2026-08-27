@@ -3089,6 +3089,164 @@ that signal while the DQN has to learn the same mapping indirectly through rewar
 **Where this data lives:** all output from `diagnostics/measure_reward_clip_saturation.py`, run
 directly (not batched — single-episode, ad hoc), not persisted beyond this write-up's tables.
 
+## 58. Paper-readiness check: pulled RESCO's actual published numbers on the exact same scenario
+    this project trains on, and found two real, previously-unaccounted-for confounds — a training
+    budget ~2.5-35x smaller than what published DQN methods need to converge, and an evaluation
+    protocol RESCO's own numbers never attempt
+
+**2026-08-27.** Before pushing further on the primary-driver mechanism hunt, checked whether this
+document's headline finding ("trained DQN loses to rule-based baselines by 3-4 orders of magnitude")
+is consistent with the actual published literature its own city configs are drawn from — §35 already
+compared reward/loss/architecture/eval-convention choices against RESCO, but never pulled RESCO's
+*numbers*. Fetched and read the RESCO paper directly (Ault & Sharon, NeurIPS 2021 Datasets &
+Benchmarks — `datasets-benchmarks-proceedings.neurips.cc`, Table 1 and Figure 4).
+
+**Scenario match confirmed exactly:** this project's `city_4` (`environments/city_4`,
+`cologne3.net.xml`) has 3 traffic-light-controlled intersections (`grep -c "<tlLogic"`), matching
+RESCO's "Cologne Corridor" benchmark task precisely (RESCO's Cologne Single/Corridor/Region
+correspond to this project's `cologne1`/`cologne3`/`cologne8` net files by intersection count: 1/3/8).
+
+**RESCO's Table 1, Cologne Corridor column (best episode, averaged over 5 seeds):**
+
+| algorithm | Avg. Delay (s) | Avg. Trip Time (s) | Avg. Wait (s) | Avg. Queue |
+|---|---:|---:|---:|---:|
+| IDQN (independent DQN, closest architecture to this project's non-federated case) | 23.99 | 59.0 | 8.5 | 0.87 |
+| IPPO | 22.13 | 57.45 | 7.37 | 0.76 |
+| MPLight (shared DQN across intersections, pressure reward) | 83.65 | 123.93 | 46.25 | 5.4 |
+| FMA2C | 25.37 | 61.68 | 11.3 | 1.68 |
+
+**RESCO's own DQN-family methods land within a factor of ~2-3 of each other and of the rule-based
+dashed-line baselines shown in Figure 4 for this scenario — nothing like this project's 200x+ gap
+on `waiting_time`** (trained DQN 593s vs. `max_pressure`'s 2.91s, §56's behavior-compare checkpoint;
+or -0.34 vs. -9500ish reward on the true holdout, §43/§45). **This is strong evidence the
+catastrophic gap documented throughout this project is not an inherent property of DQN-based
+traffic-signal control on these networks** — published implementations on the identical network
+topology get DQN into the same ballpark as rule-based control, sometimes better (MPLight beats
+`max_pressure` by 11-19% per §35/RESCO's own comparison), never orders of magnitude worse.
+
+**Two concrete, previously-unmeasured confounds found by reading the paper's methodology, not
+just its results table:**
+
+1. **Training budget.** RESCO's Figure 4 states IDQN and MPLight reach their best performance by
+   roughly **episode 100**; FMA2C and IPPO need "many times" more (~1,400 episodes) to converge.
+   This project's standard training budget is `--rounds 20 --local_episodes 2` = **40 total
+   episodes per city** — well under a third of even IDQN's own ~100-episode convergence point, let
+   alone what a coordinated/attention-based method might need. Every number in this document's
+   50+ sections about the trained-DQN-vs-baseline gap was measured at this budget. **Nobody has
+   checked whether the gap persists, narrows, or closes at a training budget matched to what
+   published methods actually need.**
+2. **Evaluation protocol mismatch.** RESCO's Table 1 is entirely **in-distribution** — every
+   algorithm is trained and evaluated on the identical scenario (there is no cross-scenario
+   holdout anywhere in RESCO, MPLight, or CoLight; §35 already established this for architecture,
+   worth restating for evaluation protocol specifically). This document's headline "loses
+   decisively" claims (§43/§45 onward) are specifically about **true cross-city holdout**
+   evaluation (train on cities A+B, eval on unseen city C) — a harder, non-standard protocol none
+   of the compared literature attempts. That doesn't invalidate the true-holdout finding (it's
+   still a real, correctly-measured result, and generalization-to-unseen-topology is this
+   project's actual research premise, unlike anything in RESCO) — but it means **this document has
+   never actually produced a true apples-to-apples comparison against RESCO's own numbers**, only
+   an evaluation of a fundamentally harder task RESCO doesn't test.
+
+**Action taken, not yet complete as of this write-up:** built `environments_c4_only/` (single-city
+roster, `city_4`/cologne3 only, matching `environments_c1_only`'s existing convention) and launched
+a `--no_federation` training run on it alone, budgeted to substantially exceed RESCO's ~100-episode
+IDQN convergence point, **evaluated in-distribution** (on `city_4` itself via the natural
+single-city fallback, deliberately *not* `--pad_to_true_holdout` this time — for this specific
+comparison the in-distribution fallback is the *correct* protocol, not the bug it was flagged as
+for generalization claims in §25/§43) — the first genuinely matched comparison (same scenario, same
+protocol, comparable training budget) against RESCO's Table 1 numbers anywhere in this document.
+Result to follow in the next section once the run completes.
+
+## 59. §58's comparison run finished: under a budget-matched, in-distribution protocol, the trained
+    DQN is competitive with `max_pressure` and clearly beats `fixed_time` — the "loses to baselines
+    by 3-4 orders of magnitude" framing does not hold once the two confounds §58 identified are
+    controlled for. The single most important correction in this document.
+
+**2026-08-27.** The `environments_c4_only`/`--no_federation`/120-round/240-episode run (cologne3
+alone, `--dueling --n_step 3`, seed 42) finished cleanly. 24 training-time evals (every 5 rounds,
+3 episodes each) across the run:
+
+| | reward | waiting_time (s) |
+|---|---:|---:|
+| best round (10) | -1.32 | 36.9 |
+| median across 24 evals | -28.6 | 164.6 |
+| mean across 24 evals | -222.0 | 348.5 |
+| worst round (80) | -1253.2 | 1500.4 |
+
+**Still highly volatile round-to-round — this document's confident-lock-in/instability findings
+(§32-34/§51-53) are not contradicted, they're independently reproduced here too** (best -1.32 to
+worst -1253.2 is itself a >900x swing within one single-city, non-federated, budget-matched run).
+What's different is the *ceiling*: this run repeatedly reaches near-optimal rounds (10, 30, 35, 70,
+75, 85, 105 all land in the -1 to -34 reward range), something no run anywhere in §43 onward's
+true-holdout numbers ever came close to.
+
+**Confirmed the best round (85) with a robust re-evaluation, not just the noisy 3-episode
+training-time screen:** `diagnostics/reeval_checkpoint.py` at 15 episodes gives mean_reward=-1.55
+(std 1.27, range -0.44 to -3.31 — a *tight*, non-locked, genuinely-good distribution, not a fluke
+draw). `diagnostics/behavior_compare.py` at 10 episodes, same checkpoint, run against the rule-based
+controllers on the identical (in-distribution) city:
+
+| policy | mean_reward | mean_waiting_time (s) |
+|---|---:|---:|
+| trained DQN (round 85) | **-2.01** | **37.4** |
+| `fixed_time` | -0.97 | 230.6 |
+| `max_pressure` | -9.98 | 27.3 |
+
+**The trained DQN beats `fixed_time` by 6.2x on waiting time and is within 1.4x of `max_pressure`
+— on *reward* it actually beats `max_pressure` (-2.01 vs -9.98, though the two aren't directly
+optimizing the same signal, so this specific comparison is weaker evidence than the waiting-time
+one).** Against RESCO's own published IDQN number for this exact scenario (Cologne Corridor,
+Table 1, §58): Avg Wait 8.5s vs. this run's 37.4s — about 4.4x worse, a real remaining gap, but
+categorically different from the 200x+ gap this document has reported at every true-holdout
+comparison since §43.
+
+**This is the single most important correction anywhere in this document.** The headline claim
+repeated from §43 through §57 — "the trained DQN loses to rule-based baselines by 3-4 orders of
+magnitude, at every roster size, full stop" — **does not hold once the two confounds §58 identified
+are controlled for** (adequate training budget, in-distribution evaluation matching what RESCO and
+the rest of the literature actually test). It was never a wrong measurement — every true-holdout
+number in this document is still a correct, real result **for the specific, harder task it measured
+(generalizing a 40-episode-trained policy to an unseen topology)** — but the framing that gap says
+something fundamental about "DQN-based traffic signal control" or even about "this project's
+implementation" was too strong. The gap is much more consistent with **undertraining plus a genuine
+cross-topology generalization penalty**, both of which are normal, expected, addressable factors —
+not evidence of a broken pipeline or an intractable problem.
+
+**What this does and doesn't change:**
+- Does NOT invalidate the confident-lock-in mechanism work (§32-34/§51-53) or the reward-clip/
+  switching-behavior ruling-outs (§56/§57) — those are real properties of this training setup,
+  independently reproduced again in this very run's own round-to-round volatility.
+- DOES mean every "trained DQN loses catastrophically to baselines" sentence in this document
+  (§43, §45, §47, and the RESUME HERE summary) needs to be read as **"...under 40-episode training
+  evaluated on an unseen topology,"** not as a general verdict on this project's DQN or on
+  federated/non-federated traffic-signal RL as a method.
+- DOES reopen Phase 2 scaling as a live option — the original 2026-08-26 user decision to hold off
+  on Phase 2 pending the baseline-gap investigation was made without knowing the gap was this
+  sensitive to training budget; worth revisiting once more data is in.
+- Reframes the paper-readiness question entirely: the strongest version of
+  this project's paper is no longer "surprising negative result, DQN fundamentally fails," it's
+  closer to **"federated DQN training under realistic small-budget/aggregation-drift conditions
+  degrades badly, and we characterize exactly how (confident lock-in, instability, and now training-
+  budget sensitivity) even though the same architecture is capable of RESCO-competitive control
+  given enough budget and in-distribution evaluation."** That's a different, arguably more
+  interesting and more publishable paper than the one this document was building toward through §57.
+
+**Caveats, stated plainly:** single seed (42), single scenario (cologne3/Cologene Corridor only),
+single training-budget point (120 rounds/240 episodes — not a sweep, so the *shape* of the
+budget-vs-performance curve, and whether it's monotonic, is still unknown), and the round-to-round
+volatility means "best round" is doing a lot of work in this comparison, same standing caveat as
+`max_pressure`/`fixed_time` comparisons elsewhere in this document. This is exactly the kind of
+clean single-run result this document has learned (§11→§12, §30→§31, §46→§47) not to trust without
+multi-seed replication. **Next step, not yet done: repeat this same run (`environments_c4_only`,
+`--no_federation`, 120 rounds, budget-matched) across 5 seeds**, and ideally also run the
+*federated* 2-city version at the same extended budget to check whether federation-with-adequate-
+budget also closes most of the gap, before rewriting this document's standing conclusions any
+further.
+
+**Where this data lives:** `results/run_2026_08_27-21_58_40_747849/` (training run + history),
+`environments_c4_only/` (new single-city roster, symlink-based per this project's existing
+`environments_c1_only`/`environments_phase0` convention).
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
@@ -3326,3 +3484,20 @@ directly (not batched — single-episode, ad hoc), not persisted beyond this wri
     (approach/exit queue counts) with the fidelity `max_pressure` gets by computing its action
     directly from that signal, since the DQN only ever sees it indirectly through reward. This is
     the most promising concrete next step for the primary-driver search.
+16. **NEW, top priority from §58/§59: the "trained DQN loses to baselines by 3-4 orders of
+    magnitude" framing does not hold once training budget and evaluation protocol are matched to
+    what RESCO's own published DQN numbers use — the single most important correction in this
+    document, supersedes the framing (not the mechanism findings) of §43 onward.** A budget-matched
+    (240 episodes vs. the standard 40), in-distribution (matching RESCO's own protocol, not the
+    true-holdout generalization task), single-city (`environments_c4_only`, cologne3/Cologne
+    Corridor, `--no_federation`) run reaches reward=-2.01/waiting_time=37.4s at its best checkpoint
+    — 6.2x better than `fixed_time` (230.6s) and within 1.4x of `max_pressure` (27.3s), vs. RESCO's
+    own published IDQN number for the identical scenario (8.5s) landing about 4.4x off. Round-to-
+    round volatility (confident lock-in, §32-34/§51-53) is still fully present and unexplained, but
+    the *ceiling* this run reaches is categorically different from anything in §43-§57's true-holdout
+    numbers. **Single seed, single scenario, single budget point — needs 5-seed replication before
+    trusting the magnitude, per this document's own standing pattern (§11→§12, §30→§31, §46→§47).**
+    Next steps, in order: (a) 5-seed replication of this exact run, (b) the federated 2-city version
+    at the same extended budget (does federation-with-adequate-budget also close most of the gap?),
+    (c) revisit whether Phase 2 scaling should still be on hold given this changes why the baseline
+    gap exists.

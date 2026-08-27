@@ -198,43 +198,53 @@ which had gone stale):
 
 ## RESUME HERE (as of 2026-08-27 — check this is still current before trusting it)
 
-**No experiment currently running as of this writeup** — §57's diagnostic runs (single-episode,
-ad hoc, no training) finished cleanly and nothing new has been launched since. Safe to start
-something without first checking for a stale in-flight job, though
-`ps aux | grep -E "federated_training|reeval_checkpoint"` costs nothing to confirm.
+**No experiment currently running as of this writeup** — §59's comparison run finished cleanly and
+nothing new has been launched since. Safe to start something without first checking for a stale
+in-flight job, though `ps aux | grep -E "federated_training|reeval_checkpoint"` costs nothing to
+confirm.
 
-**User decision 2026-08-26: don't scale to Phase 2 yet — keep digging into why the trained DQN
-loses so badly to rule-based baselines**, given the 3-4-order-of-magnitude gap confirmed at every
-roster size (§43/§45/§47). §51/§52/§53 narrowed the mechanism; §54/§55 tested
-`--q_entropy_weight` (split result, reward gain not significant); **§56 found the std<50 lock-in
-screen has substantial false negatives on both arms (corrected z drops 2.71→2.24, only a lower
-bound) and separately ruled out switching frequency/action-concentration as the primary driver**
-(a non-locked checkpoint's switch rate is ~identical to `max_pressure`'s, yet 204x worse on
-waiting time). **User decision 2026-08-27: drop the full lock-in recount (§56's remaining
-~190-checkpoint job) — it's confirming a secondary mechanism (§51) either way — and focus
-entirely on hunting the primary driver instead.**
+**MAJOR CORRECTION, §58/§59, 2026-08-27 — read this before trusting any "trained DQN loses to
+baselines by 3-4 orders of magnitude" statement anywhere in this file or the fidings doc (§43
+onward).** Prompted by a paper-readiness check: pulled RESCO's actual published numbers (Ault &
+Sharon, NeurIPS 2021 D&B) for the exact scenario this project's `city_4` config is drawn from
+(confirmed identical: cologne3 = RESCO's "Cologne Corridor", 3 signals). Found two confounds never
+previously checked: (1) **training budget** — RESCO's own IDQN/MPLight need ~100 episodes to
+converge; this document's standard runs use only 40 episodes/city, under a third of that; (2)
+**evaluation protocol** — RESCO is always in-distribution (train==eval scenario); every "loses
+catastrophically" claim in this document is under true cross-city holdout, a harder task RESCO
+never attempts. **Controlling for both (240-episode budget, in-distribution eval, single city
+`environments_c4_only`=cologne3 alone, `--no_federation`, seed 42): best checkpoint reaches
+reward=-2.01/waiting_time=37.4s — 6.2x better than `fixed_time` (230.6s) and within 1.4x of
+`max_pressure` (27.3s)**, vs. RESCO's own published IDQN number for this identical scenario (8.5s)
+landing about 4.4x off — a real remaining gap, but categorically different from the 200x+ gaps
+reported everywhere else in this document. **This does not invalidate the confident-lock-in
+mechanism work (§32-34/§51-53) or the reward-clip/switching-behavior ruling-outs (§56/§57) — the
+same run still shows massive round-to-round volatility (best round -1.32, worst -1253.2, a >900x
+swing) — but it means the "DQN fundamentally fails at this" framing built up from §43 through §57
+does not hold.** The gap looks much more like undertraining plus a genuine (and still real, still
+worth studying) cross-topology generalization penalty, not a broken pipeline or an intractable
+method. **Single seed/scenario/budget-point — needs 5-seed replication before trusting the
+magnitude, per this document's own standing pattern (§11→§12, §30→§31, §46→§47).** Concrete next
+steps, in order: (1) 5-seed replication of this exact run, (2) the federated 2-city version at the
+same extended budget (does federation-with-adequate-budget also close most of the gap?), (3)
+revisit whether the 2026-08-26 decision to hold Phase 2 should still stand, now that the reason for
+the baseline gap looks different than it did when that decision was made.
 
-**§57 (same session) is the most concrete progress yet on that hunt.** Built
-`diagnostics/measure_reward_clip_saturation.py` and definitively ruled out reward-clip saturation
-too (0.00% of ticks exceed `DQNAgent.reward_clip`'s ±10 even on a maximally-locked checkpoint's
-true-holdout trajectory — an assumption from §37 that had never actually been measured until now).
-**Three mechanisms are now ruled out (lock-in §51, switching §56, reward-clip saturation §57).**
-What §57 found instead, precisely for the first time: the trained policy's per-tick reward is a
-small, persistent, whole-episode deficit (mean -0.899 vs. `max_pressure`'s ~0.0000) at every one of
-the holdout's 16 intersections, every tick — never catastrophic, just never zero — and it
-**compounds toward the end of the episode** (2.3x worse in the second half than the first, vs.
-`max_pressure`'s flat ~0 in both halves), and **is already present at round 1 of training**,
-barely changing in character by round 15 (2.6x compounding, similar total). This rules out
-"training reinforces the bad behavior over time" and reframes the question as **why this
-architecture/observation design apparently never learns `max_pressure`-level moment-to-moment
-reactivity at any point in training** — candidate next step: check whether the DQN's observation
-actually contains what `max_pressure` computes its action directly from (approach/exit queue
-counts) with comparable fidelity, since the DQN only ever gets that signal indirectly through
-reward, not started yet.
+**Everything below this paragraph (the mechanism-hunt history, §51-§57) is still factually correct
+and not wasted work — it's real, reproducible properties of this training setup — but should now
+be read as "what's wrong with this project's training dynamics/instability," not as "why does DQN
+lose to baselines," which turned out to be a training-budget/eval-protocol artifact, not a
+mechanism question.** §51/§52/§53 narrowed the instability mechanism; §54/§55 tested
+`--q_entropy_weight` (split result); §56 found the std<50 lock-in screen has substantial false
+negatives on both arms (corrected z drops 2.71→2.24) and ruled out switching frequency as a primary
+driver of the *old* baseline-gap framing; §57 ruled out reward-clip saturation and characterized a
+persistent, compounding per-tick deficit present from round 1 of training. These remain useful,
+verified findings about training instability — just not, as it turns out, the explanation for why
+this project's numbers looked so much worse than RESCO's.
 
 Phase 1 is complete at all three roster sizes (2/3/7-city, 5 seeds each). Read
 `fidings/divergence_investigation.md` in full before doing anything non-trivial here — it's long
-(57 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
+(59 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
 version, newest first:
 
 - **NEW, §54: implemented and piloted `--q_entropy_weight`, the first training-time intervention
