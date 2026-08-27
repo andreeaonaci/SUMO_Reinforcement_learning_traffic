@@ -2954,6 +2954,71 @@ kept running independently on the same machine and completed normally, and all p
 §54 was already safely committed to git, so nothing was actually lost. This section completes that
 session's queued next step.
 
+## 56. §55's follow-up done, but it overturned the thing it was supposed to confirm: the
+    std<50 screen has substantial false negatives on BOTH arms, undermining the reported
+    z=2.71 lock-in-rate reduction
+
+**2026-08-27.** Set out to do the cheap confirmation §55 flagged as its natural next step (a
+30-episode `diagnostics/reeval_checkpoint.py --pad_to_true_holdout` check on `qew=0.05`'s
+screened-zero lock-in claim). Since `qew=0.05` had literally 0/100 rounds below the std<50
+threshold, there was nothing to confirm directly — so, following §49's precedent (checking the
+single lowest-std round in a batch even when nothing crossed the threshold, which is exactly how
+§49 caught a real lock-in the screen had missed), checked the 4 rounds closest to the threshold
+from above (5-episode std 56.9-107.0, all screened as "not locked") instead. **3 of 4 turned out to
+be genuine confident lock-ins at 30-episode rigor** — reward collapsing onto 7-10 distinct values
+with <1% relative spread across 30 different SUMO seeds, matching §50's own confirmation criterion
+exactly. Only one (std=107.0, 30-ep spread 4.09%, the widest of the four) was a clean negative,
+matching the escape signature instead.
+
+**This meant the qew=0.05 side of §55's comparison was undercounting, so for a fair test, ran the
+identical check on baseline's own near-threshold rounds (5-episode std 51.0-63.7, the closest four
+above baseline's own 7 already-screened rounds).** Result: **4 of 4 also confirmed genuine lock-in**
+(1-12 distinct values, spread 0.00-2.0% of magnitude).
+
+| checkpoint | 5-ep std (screen) | 30-ep std | distinct values (of 30) | rel. spread | verdict |
+|---|---:|---:|---:|---:|---|
+| qew05 s2 round7 | 56.94 | 22.32 | 10 | 0.52% | **locked** |
+| qew05 s1 round1 | 93.81 | 34.69 | 7 | 0.97% | **locked** |
+| qew05 s2 round6 | 106.44 | 3.83 | 7 | 0.09% | **locked** |
+| qew05 s5 round9 | 106.96 | 136.37 | 10 | 4.09% | not locked (escape) |
+| baseline round2 | 51.04 | 0.09 | 2 | 0.002% | **locked** |
+| baseline round18 | 56.23 | 2.23 | 2 | 0.04% | **locked** |
+| baseline round9 | 56.46 | 59.51 | 12 | 1.97% | **locked** |
+| baseline round15 | 63.65 | 0.00 | 1 | 0.00% | **locked** |
+
+**Corrected minimum-bound counts** (originally-screened-and-confirmed, §50/§55, plus these newly
+confirmed near-threshold rounds — a lower bound, since only 4 of each side's ~95-96 remaining
+non-flagged rounds were checked, not all of them): baseline 11/99 (11.1%), qew=0.05 3/100 (3.0%),
+**z = 2.24** (pooled-proportion two-proportion test) — still above this project's ≥2 bar, but a
+much weaker and less clean result than §55's reported z=2.71, which rested on an unexamined 0%
+floor for qew=0.05 that this check now shows was an artifact of the screen, not a real zero.
+
+**Reading:** §55's headline "qew=0.05 eliminates the lock-in signature entirely (0/100, z=2.71)" is
+**not reliable as stated** — don't cite that specific number going forward. The qualitative
+direction (qew=0.05 reduces lock-in rate) still holds at the weaker corrected bound (z=2.24), but
+the true rate on both sides is unknown until a full 30-episode recount is done on every non-flagged
+round (baseline: ~95 remaining; qew=0.05: ~96 remaining) — expensive (each 30-episode reeval takes
+several minutes; ~190 checkpoints is a multi-hour batch), not yet done, and not started without
+being asked given the cost. This is the same std<50-screen-has-false-negatives lesson §49 already
+established once (there, on a batch where the screen found *zero* candidates at all); this section
+shows the same failure mode recurs even in a batch where the screen found *some* candidates — the
+threshold is not a reliable dividing line anywhere near it, on either side of the comparison.
+
+**Unrelated, cheap side-finding from the same session (queued together with the above): phase-
+switching frequency is not the primary driver of the baseline gap, on the one non-locked checkpoint
+tested.** Built `diagnostics/behavior_compare.py` (reuses `HoldoutEvaluator`'s existing per-tick
+`action_log`, no new training) to compare the trained DQN's phase-switch rate and dominant-action
+fraction against `max_pressure` on identical holdout episodes, using qew=0.05's best-ever checkpoint
+(seed3 round9, reward -1591.34 — not a locked round). Result: switch rate 0.366/tick (DQN) vs.
+0.368/tick (`max_pressure`) — essentially identical — and dominant-action fraction 0.445 vs. 0.312 —
+same order of magnitude, not the qualitative difference a "thrashing" or "degenerate concentration"
+explanation would predict. Yet mean waiting time is 593s (DQN) vs. 2.91s (`max_pressure`), a 204x
+gap. **Rules out switching frequency/action-concentration as the primary driver on this checkpoint**
+— the trained policy switches about as often as `max_pressure` does, it's simply picking worse
+actions when it does, which narrows (but doesn't yet answer) the open §51/§55 question of what
+*does* primarily drive the gap now that both confident lock-in (§51) and switching behavior (this
+section) are ruled out as the main cause.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
@@ -3166,3 +3231,16 @@ session's queued next step.
     third reward design. Worth a follow-up at a larger `wait_weight` (and/or `stopped_weight`)
     before concluding the idea doesn't work, but given §43's much bigger finding, probably lower
     priority than re-auditing existing claims and extending the true-holdout check to 3-city.
+14. **NEW from §56: §55's z=2.71 lock-in-rate reduction for `--q_entropy_weight=0.05` is not
+    reliable as reported — the std<50 screen has substantial false negatives on both the baseline
+    and qew=0.05 arms.** A targeted near-threshold check (4 rounds per side) found 3/4 qew=0.05
+    "clean" rounds and 4/4 baseline "clean" rounds were actually genuine confident lock-ins at
+    30-episode rigor. Corrected minimum-bound counts (11/99 baseline, 3/100 qew=0.05) give z=2.24 —
+    still above this project's bar, but a much weaker and less clean number, and only a *lower*
+    bound since just 4 of each side's ~95-96 remaining non-flagged rounds were checked. **Not yet
+    done: a full 30-episode recount of every non-flagged round on both sides** (~190 checkpoints,
+    multi-hour batch) — the only way to get the real corrected rate and know whether the qew=0.05
+    lock-in-reduction effect survives at all. Also from §56: phase-switch rate and dominant-action
+    fraction on a non-locked checkpoint are essentially the same as `max_pressure`'s, ruling out
+    switching behavior as the primary driver of the baseline gap — the open "what's the primary
+    driver" question (§51) narrows further but is still unanswered.

@@ -198,34 +198,37 @@ which had gone stale):
 
 ## RESUME HERE (as of 2026-08-27 — check this is still current before trusting it)
 
-**No experiment currently running as of this writeup** — §55's 5-seed `--q_entropy_weight`
-validation finished cleanly (all 10 jobs exit=0) and nothing new has been launched since. Safe to
-start something without first checking for a stale in-flight job, though
-`ps aux | grep -E "federated_training|reeval_checkpoint"` costs nothing to confirm. (Note: a prior
-session that launched this batch was itself lost/disconnected before writing up the result — the
-training processes kept running independently and completed normally regardless; nothing was lost,
-see §55's session note.)
+**No experiment currently running as of this writeup** — §56's near-threshold reeval checks
+finished cleanly and nothing new has been launched since. Safe to start something without first
+checking for a stale in-flight job, though `ps aux | grep -E "federated_training|reeval_checkpoint"`
+costs nothing to confirm.
 
 **User decision 2026-08-26: don't scale to Phase 2 yet — keep digging into why the trained DQN
 loses so badly to rule-based baselines**, given the 3-4-order-of-magnitude gap confirmed at every
 roster size (§43/§45/§47). §51/§52/§53 narrowed the mechanism; §54 found a promising single-seed
-signal for `--q_entropy_weight`; **§55 brought that to 5-seed rigor — split result, not a clean
-win.** Neither weight's reward improvement reaches this project's significance bar (best:
-|diff|/SE 0.50/0.24, mean: 1.49/0.78 for qew=0.001/0.05) — the same single-seed-doesn't-replicate
-pattern hit repeatedly in this document (§11→§12, §30→§31, §46→§47). But the lock-in-frequency
-claim *does* hold up: `qew=0.05` significantly reduces the confident-lock-in signature's raw
-incidence (7.1%→0.0% of rounds, z=2.71). Reading (ties to §51): the mechanism intervention works as
-designed, it just doesn't move the headline reward number much, because §51 already showed
-confident lock-in is a secondary factor in the baseline gap, not the primary one. **`--q_entropy_weight`
-is not ready to adopt as a default based on this.** The 30-episode reeval-checkpoint confirmation
-of the lock-in-rate reduction (§55's flagged follow-up) is the cheapest remaining next step; the
-bigger open question is still what *does* primarily drive the gap, which no tested intervention
-(exploration resets §41/§42, reward shaping §37/§38/§44, pressure/entropy regularization §54/§55)
-has yet resolved.
+signal for `--q_entropy_weight`; §55 brought that to 5-seed rigor (split result — reward gain not
+significant, but lock-in-rate reduction looked clean, z=2.71). **§56 did the cheap follow-up §55
+flagged and it overturned the thing it set out to confirm: the std<50 lock-in screen has
+substantial false negatives on BOTH the baseline and qew=0.05 arms** — checking the 4
+closest-to-threshold "clean" rounds on each side found 3/4 qew=0.05 rounds and 4/4 baseline rounds
+were actually genuine confident lock-ins at 30-episode rigor. **Corrected minimum-bound lock-in
+rates: baseline 11/99 (11.1%), qew=0.05 3/100 (3.0%), z=2.24** — still above this project's bar,
+but far weaker than §55's reported z=2.71, and only a lower bound (just 4 of each side's ~95-96
+remaining non-flagged rounds were checked). **Don't cite §55's "0.0%, z=2.71" number going
+forward.** `--q_entropy_weight` remains not ready to adopt as a default. §56 also ruled out phase-
+switching frequency/action-concentration as the primary driver of the baseline gap (a non-locked
+checkpoint's switch rate and dominant-action fraction are essentially identical to `max_pressure`'s,
+yet it's 204x worse on waiting time) — narrows, but doesn't resolve, what *does* primarily drive the
+gap. **Next steps, cheapest first:** (1) a full 30-episode recount of every non-flagged round on
+both sides (~190 checkpoints, multi-hour batch, not yet started — needed to know if the qew=0.05
+lock-in-reduction effect survives at all), (2) new hypotheses for the primary driver now that
+confident lock-in (§51) and switching behavior (§56) are both ruled out as the main cause — no
+tested intervention (exploration resets §41/§42, reward shaping §37/§38/§44, pressure/entropy
+regularization §54/§55/§56) has yet found it.
 
 Phase 1 is complete at all three roster sizes (2/3/7-city, 5 seeds each). Read
 `fidings/divergence_investigation.md` in full before doing anything non-trivial here — it's long
-(55 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
+(56 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
 version, newest first:
 
 - **NEW, §54: implemented and piloted `--q_entropy_weight`, the first training-time intervention
