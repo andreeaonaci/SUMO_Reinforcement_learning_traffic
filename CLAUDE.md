@@ -198,37 +198,43 @@ which had gone stale):
 
 ## RESUME HERE (as of 2026-08-27 — check this is still current before trusting it)
 
-**No experiment currently running as of this writeup** — §56's near-threshold reeval checks
-finished cleanly and nothing new has been launched since. Safe to start something without first
-checking for a stale in-flight job, though `ps aux | grep -E "federated_training|reeval_checkpoint"`
-costs nothing to confirm.
+**No experiment currently running as of this writeup** — §57's diagnostic runs (single-episode,
+ad hoc, no training) finished cleanly and nothing new has been launched since. Safe to start
+something without first checking for a stale in-flight job, though
+`ps aux | grep -E "federated_training|reeval_checkpoint"` costs nothing to confirm.
 
 **User decision 2026-08-26: don't scale to Phase 2 yet — keep digging into why the trained DQN
 loses so badly to rule-based baselines**, given the 3-4-order-of-magnitude gap confirmed at every
-roster size (§43/§45/§47). §51/§52/§53 narrowed the mechanism; §54 found a promising single-seed
-signal for `--q_entropy_weight`; §55 brought that to 5-seed rigor (split result — reward gain not
-significant, but lock-in-rate reduction looked clean, z=2.71). **§56 did the cheap follow-up §55
-flagged and it overturned the thing it set out to confirm: the std<50 lock-in screen has
-substantial false negatives on BOTH the baseline and qew=0.05 arms** — checking the 4
-closest-to-threshold "clean" rounds on each side found 3/4 qew=0.05 rounds and 4/4 baseline rounds
-were actually genuine confident lock-ins at 30-episode rigor. **Corrected minimum-bound lock-in
-rates: baseline 11/99 (11.1%), qew=0.05 3/100 (3.0%), z=2.24** — still above this project's bar,
-but far weaker than §55's reported z=2.71, and only a lower bound (just 4 of each side's ~95-96
-remaining non-flagged rounds were checked). **Don't cite §55's "0.0%, z=2.71" number going
-forward.** `--q_entropy_weight` remains not ready to adopt as a default. §56 also ruled out phase-
-switching frequency/action-concentration as the primary driver of the baseline gap (a non-locked
-checkpoint's switch rate and dominant-action fraction are essentially identical to `max_pressure`'s,
-yet it's 204x worse on waiting time) — narrows, but doesn't resolve, what *does* primarily drive the
-gap. **Next steps, cheapest first:** (1) a full 30-episode recount of every non-flagged round on
-both sides (~190 checkpoints, multi-hour batch, not yet started — needed to know if the qew=0.05
-lock-in-reduction effect survives at all), (2) new hypotheses for the primary driver now that
-confident lock-in (§51) and switching behavior (§56) are both ruled out as the main cause — no
-tested intervention (exploration resets §41/§42, reward shaping §37/§38/§44, pressure/entropy
-regularization §54/§55/§56) has yet found it.
+roster size (§43/§45/§47). §51/§52/§53 narrowed the mechanism; §54/§55 tested
+`--q_entropy_weight` (split result, reward gain not significant); **§56 found the std<50 lock-in
+screen has substantial false negatives on both arms (corrected z drops 2.71→2.24, only a lower
+bound) and separately ruled out switching frequency/action-concentration as the primary driver**
+(a non-locked checkpoint's switch rate is ~identical to `max_pressure`'s, yet 204x worse on
+waiting time). **User decision 2026-08-27: drop the full lock-in recount (§56's remaining
+~190-checkpoint job) — it's confirming a secondary mechanism (§51) either way — and focus
+entirely on hunting the primary driver instead.**
+
+**§57 (same session) is the most concrete progress yet on that hunt.** Built
+`diagnostics/measure_reward_clip_saturation.py` and definitively ruled out reward-clip saturation
+too (0.00% of ticks exceed `DQNAgent.reward_clip`'s ±10 even on a maximally-locked checkpoint's
+true-holdout trajectory — an assumption from §37 that had never actually been measured until now).
+**Three mechanisms are now ruled out (lock-in §51, switching §56, reward-clip saturation §57).**
+What §57 found instead, precisely for the first time: the trained policy's per-tick reward is a
+small, persistent, whole-episode deficit (mean -0.899 vs. `max_pressure`'s ~0.0000) at every one of
+the holdout's 16 intersections, every tick — never catastrophic, just never zero — and it
+**compounds toward the end of the episode** (2.3x worse in the second half than the first, vs.
+`max_pressure`'s flat ~0 in both halves), and **is already present at round 1 of training**,
+barely changing in character by round 15 (2.6x compounding, similar total). This rules out
+"training reinforces the bad behavior over time" and reframes the question as **why this
+architecture/observation design apparently never learns `max_pressure`-level moment-to-moment
+reactivity at any point in training** — candidate next step: check whether the DQN's observation
+actually contains what `max_pressure` computes its action directly from (approach/exit queue
+counts) with comparable fidelity, since the DQN only ever gets that signal indirectly through
+reward, not started yet.
 
 Phase 1 is complete at all three roster sizes (2/3/7-city, 5 seeds each). Read
 `fidings/divergence_investigation.md` in full before doing anything non-trivial here — it's long
-(56 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
+(57 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
 version, newest first:
 
 - **NEW, §54: implemented and piloted `--q_entropy_weight`, the first training-time intervention

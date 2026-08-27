@@ -3019,6 +3019,76 @@ actions when it does, which narrows (but doesn't yet answer) the open §51/§55 
 *does* primarily drive the gap now that both confident lock-in (§51) and switching behavior (this
 section) are ruled out as the main cause.
 
+## 57. Reward-clip saturation ruled out for the default reward; the actual failure is a small,
+    persistent, whole-episode per-tick deficit at every intersection that compounds toward the
+    end of the episode — the first real quantitative handle on the primary-driver question
+
+**2026-08-27.** §37's writeup asserted `diff-waiting-time` was "already scaled... to roughly fit"
+`DQNAgent.reward_clip`'s hardcoded ±10 range (`agents/dqn.py:116`), by reasoning about the /100
+scaling in `_diff_waiting_time_reward`'s source — but that scaling applies to the *accumulated*
+waiting time before differencing, not to the diff itself, and was never actually measured the way
+raw `pressure`'s saturation was (§37 found 26% of ticks exceeding the clip for unscaled pressure).
+Built `diagnostics/measure_reward_clip_saturation.py` to check this directly, since if the default
+reward is *also* getting clip-saturated during congested episodes, that would be a training-signal-
+destruction mechanism affecting every single non-pressure experiment in this document, with nothing
+to do with confident lock-in (§51) or switching behavior (§56).
+
+**Two checks, both on the true holdout city (`city_5_holdout`, `--pad_to_true_holdout`), replaying
+the exact trajectory that produces this project's catastrophic reported rewards:**
+
+| policy | per-tick reward mean | std | first-half mean | second-half mean | episode-total reward | % ticks \|r\|≥10 |
+|---|---:|---:|---:|---:|---:|---:|
+| trained DQN (baseline round15, confirmed fully locked, §56) | -0.899 | 0.920 | -0.548 | -1.250 | -10356.62 | **0.00%** |
+| `max_pressure` | -0.0000 | 0.093 | -0.0007 | 0.0006 | -0.34 | **0.00%** |
+
+(`max_pressure`'s -0.34 total exactly matches the known baseline number from §43/§45, confirming
+the diagnostic replicates the real eval faithfully.)
+
+**Reward-clip saturation is definitively ruled out as a contributor to the baseline gap — 0.00% of
+ticks exceed the clip on either policy, even for a maximally-locked, catastrophically-bad
+checkpoint.** The assumption in §37 was correct, it just had never actually been checked; now it
+has, on the actual holdout trajectory rather than an assumption from reading the source. Combined
+with §56 (switching behavior ruled out) and §51 (lock-in ruled out as the *primary* driver), this
+closes off three plausible mechanisms.
+
+**What the data does show, precisely for the first time: the trained policy's per-tick reward is
+never catastrophic (max magnitude 3.67, nowhere near the ±10 clip) — it's just persistently,
+ubiquitously slightly negative, at every one of the 16 intersections, every tick of the whole
+episode, while `max_pressure` stays essentially at zero throughout.** And the deficit compounds:
+second-half-of-episode mean (-1.250) is 2.3x worse than first-half (-0.548), while `max_pressure`
+shows no such trend (flat at ~0 in both halves). **This is the first quantitative confirmation of
+the qualitative "not a collapsed policy, residual end-of-episode congestion" reading from way back
+in §26** — congestion genuinely does build up disproportionately later in the episode under the
+trained policy, consistent with small per-tick suboptimality compounding over time in a way
+`max_pressure`'s locally-reactive control never lets happen (SUMO traffic doesn't self-clear;
+un-drained queues only grow).
+
+**Reading:** the primary-driver search has now ruled out three candidate mechanisms (lock-in §51,
+switching behavior §56, reward-clip saturation this section) and converged on a more precise
+picture of the failure itself: a chronic, small, compounding per-tick control deficiency, not an
+intermittent catastrophic event. This points toward a genuinely different class of hypothesis than
+anything tested so far — something about long-horizon credit assignment or value-function quality
+(does the Q-function actually predict the compounding cost of a slightly-wrong action correctly?),
+not exploration, reward scale, or degenerate action selection.
+
+**Follow-up in the same session: the deficit is present essentially from round 1, not something
+training grows in.** Same checkpoint run's `global_round_001.pth` (same seed, same holdout episode)
+gives mean=-0.714, first-half=-0.393, second-half=-1.035 (2.6x compounding) — qualitatively the
+same signature as round 15's fully-locked checkpoint (mean=-0.899, 2.3x compounding), just somewhat
+less severe in total (-8223.57 vs -10356.62). **Training 15 more rounds barely changes the
+qualitative picture and only modestly worsens the total** — this rules out "training progressively
+learns/reinforces the bad behavior" and instead points to "the network never learns effective
+moment-to-moment reactive control the way `max_pressure` gets for free from its hand-computed
+pressure signal, from essentially the start of training onward." That reframes the open question
+again: not "what does training do wrong" but **"why can't this architecture/observation design
+learn `max_pressure`-level local reactivity at all, at any point in training"** — worth checking
+next whether the *observation* actually contains what `max_pressure` uses (approach/exit queue
+counts) with enough fidelity, since `max_pressure` computes its action directly and exactly from
+that signal while the DQN has to learn the same mapping indirectly through reward alone.
+
+**Where this data lives:** all output from `diagnostics/measure_reward_clip_saturation.py`, run
+directly (not batched — single-episode, ad hoc), not persisted beyond this write-up's tables.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
@@ -3244,3 +3314,15 @@ section) are ruled out as the main cause.
     fraction on a non-locked checkpoint are essentially the same as `max_pressure`'s, ruling out
     switching behavior as the primary driver of the baseline gap — the open "what's the primary
     driver" question (§51) narrows further but is still unanswered.
+15. **NEW from §57: reward-clip saturation ruled out (0.00% of ticks on the true holdout, even for
+    a maximally-locked checkpoint) — the real failure is a small, persistent, whole-episode
+    per-tick reward deficit (mean -0.899 vs `max_pressure`'s ~0.0000) that compounds toward the end
+    of the episode (2.3x worse in the second half than the first) — and it's present essentially
+    from round 1 of training, not something that grows in.** Three candidate mechanisms (lock-in
+    §51, switching behavior §56, reward-clip saturation §57) are now ruled out as the primary
+    driver. The open question has sharpened to: **why can't this architecture/observation design
+    ever learn `max_pressure`-level moment-to-moment reactivity, at any point in training** — worth
+    checking next whether the DQN's observation actually contains what `max_pressure` uses
+    (approach/exit queue counts) with the fidelity `max_pressure` gets by computing its action
+    directly from that signal, since the DQN only ever sees it indirectly through reward. This is
+    the most promising concrete next step for the primary-driver search.
