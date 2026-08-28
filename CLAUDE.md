@@ -198,11 +198,17 @@ which had gone stale):
 
 ## RESUME HERE (as of 2026-08-28 — check this is still current before trusting it)
 
-**Running as of this writeup:** a fresh (not resumed — see §60's `--resume` correctness caveat for
-`--no_federation` runs) 5-seed no-federation 2-city true-holdout batch at the same 63-round/126-
-episode budget as §60/§61, `results/no_federation_c1_4_extended_5seed.log`. Also pending: a robust
-15-episode re-evaluation of §61's standout checkpoint (seed3 round 50/59). Check
-`ps aux | grep -E "federated_training|reeval_checkpoint"` before assuming either has finished.
+**Running as of this writeup:** (1) a fresh (not resumed — see §60's `--resume` correctness caveat
+for `--no_federation` runs) 5-seed no-federation 2-city true-holdout batch at the same 63-round/126-
+episode budget as §60/§61, `results/no_federation_c1_4_extended_5seed.log`; (2) a robust 15-episode
+re-evaluation of §61's standout checkpoint (seed3 round 50/59); (3) **§62's pressure-feature
+pilot** (`results/run_2026_08_28-09_38_37_900537`) — the first intervention targeted at the
+true-holdout generalization gap itself: confirmed `max_pressure`'s exact input signal (outgoing-
+lane pressure/density) was structurally missing from the DQN's observation entirely, added it
+(`own_dim` 115→117, `environments/federated_env.py`), pilot matches §60/§61's exact protocol (seed
+3, same budget) for a clean before/after. **This is a real architecture change — no existing
+checkpoint can be `--resume`d into it.** Check `ps aux | grep -E "federated_training|reeval_checkpoint"`
+before assuming any of the three have finished.
 
 **MAJOR CORRECTION AND FOLLOW-UP, §58-§61, 2026-08-27/28 — read this before trusting any "trained
 DQN loses to baselines by 3-4 orders of magnitude" statement anywhere in this file or the fidings
@@ -263,7 +269,7 @@ project's true-holdout numbers looked so much worse than RESCO's in-distribution
 
 Phase 1 is complete at all three roster sizes (2/3/7-city, 5 seeds each). Read
 `fidings/divergence_investigation.md` in full before doing anything non-trivial here — it's long
-(61 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
+(62 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
 version, newest first:
 
 - **NEW, §54: implemented and piloted `--q_entropy_weight`, the first training-time intervention

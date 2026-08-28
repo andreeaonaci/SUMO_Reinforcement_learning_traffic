@@ -333,9 +333,15 @@ class LaneEncoder:
     ]
 
     GLOBAL_FEATURES: List[Tuple[str, Callable]] = [
-        ("current_phase",  lambda phase, elapsed, yellow: phase   / 16.0),
-        ("elapsed_green",  lambda phase, elapsed, yellow: elapsed / 120.0),
-        ("yellow_time",    lambda phase, elapsed, yellow: yellow  / 10.0),
+        ("current_phase",  lambda phase, elapsed, yellow, pressure, out_density: phase    / 16.0),
+        ("elapsed_green",  lambda phase, elapsed, yellow, pressure, out_density: elapsed  / 120.0),
+        ("yellow_time",    lambda phase, elapsed, yellow, pressure, out_density: yellow   / 10.0),
+        # The signal max_pressure computes its action directly from --
+        # already normalized by the caller (SumoLaneExtractor.extract),
+        # passed straight through here. See sec 61-62 in
+        # fidings/divergence_investigation.md for why this was added.
+        ("pressure",       lambda phase, elapsed, yellow, pressure, out_density: pressure),
+        ("out_density",    lambda phase, elapsed, yellow, pressure, out_density: out_density),
     ]
 
 
@@ -375,7 +381,7 @@ class TopKEncoder:
         self.output_dim = self.max_lanes * self.features_per_lane + len(normalizer.encoder.GLOBAL_FEATURES)
 
     def encode(self, lanes: List[Lane], current_phase: float, elapsed_green: float,
-               yellow_time: float = 0.0) -> np.ndarray:
+               yellow_time: float = 0.0, pressure: float = 0.0, out_density: float = 0.0) -> np.ndarray:
         lanes = lanes[: self.max_lanes]
         features: List[float] = []
         for lane in lanes:
@@ -383,7 +389,7 @@ class TopKEncoder:
         padding_lanes = self.max_lanes - len(lanes)
         features.extend([0.0] * (padding_lanes * self.features_per_lane))
         for _, fn in self.normalizer.encoder.GLOBAL_FEATURES:
-            features.append(fn(current_phase, elapsed_green, yellow_time))
+            features.append(fn(current_phase, elapsed_green, yellow_time, pressure, out_density))
         return np.asarray(features, dtype=np.float32)
 
 
@@ -398,9 +404,9 @@ class LaneExtractor(abc.ABC):
         self.env = env
 
     @abc.abstractmethod
-    def extract(self, ts_id: str) -> Tuple[List[Lane], int, float, float]:
-        """Return (lanes, current_phase, elapsed_green, yellow_time) for
-        the given traffic signal id."""
+    def extract(self, ts_id: str) -> Tuple[List[Lane], int, float, float, float, float]:
+        """Return (lanes, current_phase, elapsed_green, yellow_time,
+        pressure, out_density) for the given traffic signal id."""
 
 
 class SumoLaneExtractor(LaneExtractor):
@@ -411,7 +417,7 @@ class SumoLaneExtractor(LaneExtractor):
     traci introspection.
     """
 
-    def extract(self, ts_id: str) -> Tuple[List[Lane], int, float, float]:
+    def extract(self, ts_id: str) -> Tuple[List[Lane], int, float, float, float, float]:
         ts = self.env.traffic_signals[ts_id]
         try:
             import traci
@@ -443,7 +449,29 @@ class SumoLaneExtractor(LaneExtractor):
         elapsed_green = float(getattr(ts, "time_since_last_phase_change", 0.0))
         yellow_time = float(getattr(ts, "yellow_time", 0.0)) if getattr(ts, "is_yellow", False) else 0.0
 
-        return lanes, current_phase, elapsed_green, yellow_time
+        # max_pressure computes its action directly from
+        # (#veh leaving - #veh approaching), i.e. incoming lanes (self.lanes,
+        # already read above) AND outgoing/downstream lanes (self.out_lanes)
+        # -- the DQN's observation never read out_lanes at all before this,
+        # so it structurally couldn't learn the same signal max_pressure
+        # exploits (fidings/divergence_investigation.md sec 61-62). Both
+        # methods already exist on TrafficSignal (get_pressure/
+        # get_out_lanes_density), just never wired into the federated
+        # observation pipeline. Same /10 clip max_pressure's own pilot
+        # reward normalization uses (sec 38, _pressure_norm_reward) --
+        # empirically measured std~12/range -57..+36 for this project's
+        # RESCO city configs -- reused here for consistency, not re-derived.
+        try:
+            pressure = float(np.clip(ts.get_pressure() / 10.0, -5.0, 5.0))
+        except Exception:
+            pressure = 0.0
+        try:
+            out_densities = ts.get_out_lanes_density()
+            out_density = float(np.mean(out_densities)) if out_densities else 0.0
+        except Exception:
+            out_density = 0.0
+
+        return lanes, current_phase, elapsed_green, yellow_time, pressure, out_density
 
 
 def _infer_turn_direction(traci_module, lane_id: str) -> Tuple[bool, bool, bool]:
@@ -634,7 +662,7 @@ class NeighborSummaryExtractor:
         self.max_wait = max_wait
 
     def summarize(self, ts_id: str) -> np.ndarray:
-        lanes, phase, _, _ = self.lane_extractor.extract(ts_id)
+        lanes, phase, *_ = self.lane_extractor.extract(ts_id)
         return self.summarize_from(lanes, phase)
 
     def summarize_from(self, lanes: List[Lane], phase: float) -> np.ndarray:
@@ -732,8 +760,8 @@ class MultiAgentFederatedWrapper(FixedTsForwardingMixin):
 
     # ------------------------------------------------------------------
     def _extract_cached(
-        self, ts_id: str, cache: Dict[str, Tuple[List[Lane], int, float, float]]
-    ) -> Tuple[List[Lane], int, float, float]:
+        self, ts_id: str, cache: Dict[str, Tuple[List[Lane], int, float, float, float, float]]
+    ) -> Tuple[List[Lane], int, float, float, float, float]:
         """Memoized ``lane_extractor.extract`` for one tick.
 
         Every ts_id gets extracted at most once per ``_build_all_obs`` call.
@@ -747,11 +775,11 @@ class MultiAgentFederatedWrapper(FixedTsForwardingMixin):
         return cache[ts_id]
 
     def _build_obs(
-        self, ts_id: str, cache: Dict[str, Tuple[List[Lane], int, float, float]]
+        self, ts_id: str, cache: Dict[str, Tuple[List[Lane], int, float, float, float, float]]
     ) -> Dict[str, np.ndarray]:
-        lanes, phase, elapsed, yellow = self._extract_cached(ts_id, cache)
+        lanes, phase, elapsed, yellow, pressure, out_density = self._extract_cached(ts_id, cache)
         lanes = self.sorter.sort(lanes)
-        own = self.encoder.encode(lanes, phase, elapsed, yellow)
+        own = self.encoder.encode(lanes, phase, elapsed, yellow, pressure, out_density)
 
         neighbors = np.zeros((self.k_max, self.neighbor_dim), dtype=np.float32)
         neighbor_mask = np.zeros(self.k_max, dtype=np.float32)
@@ -759,7 +787,7 @@ class MultiAgentFederatedWrapper(FixedTsForwardingMixin):
 
         nbrs = self.neighbor_graph.neighbors_of(ts_id)[: self.k_max]
         for i, (nbr_ts, hop) in enumerate(nbrs):
-            nbr_lanes, nbr_phase, _, _ = self._extract_cached(nbr_ts, cache)
+            nbr_lanes, nbr_phase, *_ = self._extract_cached(nbr_ts, cache)
             neighbors[i] = self.neighbor_summary.summarize_from(nbr_lanes, nbr_phase)
             neighbor_mask[i] = 1.0
             hop_dist[i] = hop
@@ -775,7 +803,7 @@ class MultiAgentFederatedWrapper(FixedTsForwardingMixin):
         }
 
     def _build_all_obs(self) -> Dict[str, Dict[str, np.ndarray]]:
-        cache: Dict[str, Tuple[List[Lane], int, float, float]] = {}
+        cache: Dict[str, Tuple[List[Lane], int, float, float, float, float]] = {}
         return {ts_id: self._build_obs(ts_id, cache) for ts_id in self.ts_ids}
 
     # ------------------------------------------------------------------

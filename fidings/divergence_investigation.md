@@ -3349,6 +3349,59 @@ to fully close the true-holdout gap.
 `results/run_2026_08_19-00_14_20_889188`), extended in place via `--resume`; batch log
 `results/pad_to_true_holdout_extended_5seed.log`.
 
+## 62. First intervention actually targeted at the true-holdout generalization gap itself: added
+    `max_pressure`'s exact input signal (outgoing-lane pressure/density) to the DQN's observation
+    — it was structurally absent before, not just underused
+
+**2026-08-28.** §61 separated two effects this document had conflated: training budget (mostly
+fixes the in-distribution gap, §59) and cross-topology generalization (real, large, budget-
+resistant on the true holdout, §60/§61). Every intervention tried in §32-§57 targeted symptoms of
+training instability, not this. Before assuming this is a deep, unfixable architectural problem,
+checked something concrete and falsifiable: **does the DQN's observation even contain the signal
+`max_pressure` uses?**
+
+**Confirmed via direct code reading, not assumption: no.** `TrafficSignal.get_pressure()`
+(`sumo_rl/environment/traffic_signal.py:312`) computes `#veh on outgoing lanes − #veh on incoming
+lanes`, using both `self.lanes` (incoming, controlled by the signal) AND `self.out_lanes`
+(downstream, discovered from `getControlledLinks`). `SumoLaneExtractor.extract()`
+(`environments/federated_env.py`, the only lane-feature source for the `--parallel` federated
+training path — NOT `environments/common.py`, a separate/older code path used by
+`local_training.py`/`centralized.py`/`evaluate.py`/etc., left untouched here, out of scope) only
+ever read `ts.lanes` — incoming lanes. **Outgoing-lane information was never extracted anywhere in
+the federated observation pipeline.** The DQN could not have learned to approximate `max_pressure`
+even in principle; the required input didn't exist in its observation. Confirmed this isn't a
+"redundant, would help a little" fix — it's a genuine hole, the same category of finding as this
+project's real bugs (§24's `fixed_time`, §25's holdout fallback).
+
+**Implementation** (`environments/federated_env.py`, all in the `--parallel`/`federated_env.py`
+path only): extended `LaneExtractor.extract()`'s return signature from 4 values
+(`lanes, phase, elapsed_green, yellow_time`) to 6 (`+ pressure, out_density`), computed in
+`SumoLaneExtractor.extract()` via the existing (already-implemented, previously unused by this
+pipeline) `TrafficSignal.get_pressure()`/`get_out_lanes_density()`. `pressure` reuses the exact
+`clip(get_pressure()/10, -5, 5)` normalization §38's `pressure_norm` reward already established
+empirically (std~12, range -57..+36 on this project's RESCO configs) — same scale, different
+purpose (observation feature here, reward there). `out_density` is the mean of
+`get_out_lanes_density()` (already `[0,1]`-clipped per lane). Both added as two new
+`LaneEncoder.GLOBAL_FEATURES` entries, so `TopKEncoder.output_dim` (= `own_dim`) grows automatically
+by 2 — confirmed empirically: **`own_dim` 115→117**. All three call sites that unpack
+`extract()`'s tuple (`NeighborSummaryExtractor.summarize`, `_extract_cached`, `_build_obs`) updated
+to match; the two call sites that don't need the new values use `*_` so future extensions of this
+tuple won't require touching them again. Verified with a raw env probe (no training): fields are 0
+at reset (no traffic yet), populate with real values after a few random-action steps (e.g.
+pressure=0.8, out_density=0.15 after 30 ticks) — confirmed reading real SUMO state, not a stub.
+
+**This is a genuine architecture change, not a resumable tweak — `own_dim` changing breaks
+`load_state_dict` compatibility with every existing checkpoint in this document.** Every pilot from
+here on trains fresh from round 0, no `--resume` from pre-existing runs.
+
+**Pilot launched, matching §60/§61's exact protocol for a clean before/after comparison:**
+`environments_c1_4`, `--pad_to_true_holdout`, `--dueling --n_step 3`, seed 3, 63 rounds (same seed
+and budget as §60/§61's best-performing seed, `run_2026_08_18-19_46_23_818099`, best=-327.10) —
+same everything except the two new observation features. Not yet complete as of this write-up.
+
+**Where this data lives:** code change in `environments/federated_env.py` (committed); pilot run
+dir `results/run_2026_08_28-09_38_37_900537`.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
@@ -3616,3 +3669,11 @@ to fully close the true-holdout gap.
     (c) a real budget-vs-performance curve (more than the 2 points now available: round 20, round
     63) before trusting any extrapolation about how much more training would close the remaining
     true-holdout gap, or whether it's asymptoting well short of baseline performance.
+18. **NEW from §62: the first intervention actually targeted at the true-holdout generalization gap
+    (rather than training-instability symptoms) — added `max_pressure`'s exact input signal
+    (outgoing-lane pressure/density, confirmed structurally absent from the DQN's observation, not
+    just underused) to `own_obs`.** `own_dim` 115→117. Pilot launched matching §60/§61's exact
+    protocol (seed 3, `environments_c1_4`, `--pad_to_true_holdout`, 63 rounds) for a clean
+    before/after comparison against that seed's known result (best=-327.10). Result pending. Given
+    this is a genuine architecture change (`own_dim` changed), no existing checkpoint can be resumed
+    into it — every run from here trains fresh.
