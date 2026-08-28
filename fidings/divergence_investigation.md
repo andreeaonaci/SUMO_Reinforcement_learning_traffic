@@ -3282,6 +3282,73 @@ decaying back down over the next several rounds. Worth keeping in mind when inte
 
 **Not yet complete as of this write-up — results to follow once the batch finishes.**
 
+## 61. §60's batch finished: more training budget DOES significantly improve the true-holdout
+    gap too — but nowhere near as much as it did in-distribution (§59). The cross-topology
+    generalization gap is real, substantial, and NOT primarily a training-budget artifact.
+
+**2026-08-28.** All 5 resumed seeds finished cleanly (exit=0) at round 63 (126 episodes/city,
+≈1.25x RESCO). Compared against §45's original round-20 numbers on the identical true-holdout
+protocol:
+
+| | best-round (mean of 5 seeds) | mean-reward (mean of 5 seeds, matched-window\*) |
+|---|---:|---:|
+| round 20 (§45) | -5278.1 (std 2335.2) | -8317.6 (std 1348.5) |
+| round 63 (§60/§61) | **-2285.2** (std 1558.1) | **-6013.2** (std 1640.9) |
+| \|diff\|/SE vs round 20 | **2.38** | **2.43** |
+| `max_pressure` baseline | -0.34 | -0.34 |
+| ratio, round 63 vs `max_pressure` | ~6721x | ~17686x |
+
+(\*mean-reward for round 63 computed over rounds 21-63 only, to compare like-for-like against
+round 20's "mean across all 20 rounds" rather than diluting it with the already-known rounds 1-20.)
+
+**Both improvements clear this project's ≥2 significance bar — more training budget does help the
+true-holdout generalization gap, not just the in-distribution one (§59).** Per-seed, the pattern is
+consistent: every seed's best round got better (seed3 most dramatically, -2855.95→-327.10, a
+genuine sustained improvement plateau across rounds 45-63, not a single-round spike — round 59 hit
+waiting_time=117.91s, the best true-holdout waiting time anywhere in this document outside the
+single §51/§52 n=1 outlier). **But the remaining gap to `max_pressure` is still enormous — roughly
+6700-17700x, not the ~1.4x §59 found in-distribution.** Going from 20 to 63 rounds roughly halved
+the gap's magnitude; closing the rest would need an amount of further training this document has no
+basis yet for estimating (the improvement rate itself isn't characterized — one budget point added
+to one other budget point isn't a curve).
+
+**This is the cleanest evidence yet that §58's two confounds are not equally responsible for the
+two different comparisons this document has been conflating.** In-distribution (§59): the gap was
+*almost entirely* a training-budget/protocol artifact — controlling for both nearly closed it.
+True-holdout (§60/§61): training budget matters (statistically significant, |diff|/SE > 2 on both
+measures) but is nowhere near sufficient on its own — **the cross-topology generalization penalty
+is real, large, and not explained away by undertraining.** This validates rather than undermines
+this document's and this project's original research premise (generalizing a shared policy across
+topologically different cities is a genuinely hard, unsolved problem) — it just means the specific
+"3-4 orders of magnitude, full stop" framing from §43-§57 was measuring a mix of two effects
+(fixable undertraining + a real generalization gap) without distinguishing them, and this section is
+the first to separate them.
+
+**Reading for the paper-readiness question this whole thread started from:** the strongest version
+of this project's contribution is now reasonably clear — not "federated DQN fails at traffic
+control" (§59 disproves that framing) and not "the true-holdout gap is just a bug" (§61 disproves
+that framing too) — but **"once training-budget and evaluation-protocol confounds are controlled
+for, federated DQN traffic control is competitive in-distribution but still generalizes badly to
+unseen topologies, and that gap persists (though shrinks) with more training."** That's a real,
+publishable, well-evidenced finding, with the mechanism work (§32-34/§51-57) as a serious
+complementary thread on top of it (why the training itself is so unstable/volatile even where it
+eventually reaches good rounds).
+
+**Not yet done:** (1) a robust (15+ episode) re-evaluation of seed3's round 50/59 checkpoints,
+launched but not yet returned as of this write-up — the training-time numbers above use the
+standard 5-episode screen this document has repeatedly found can understate/overstate a single
+round's true performance (§33/§49/§56); (2) the symmetric no-federation comparison at this same
+63-round budget (launched immediately after this section, see next section if present, or check
+`results/no_federation_c1_4_extended_5seed.log`) — needed to know whether federation itself still
+matters at this larger budget, extending §49/§50's 20-round-budget finding (no significant
+difference) to the new budget point; (3) characterizing the actual budget-vs-performance curve
+(more than 2 points) before trusting any extrapolation about how much more training would be needed
+to fully close the true-holdout gap.
+
+**Where this data lives:** same 5 run dirs as §45/§60 (`results/run_2026_08_18-*`,
+`results/run_2026_08_19-00_14_20_889188`), extended in place via `--resume`; batch log
+`results/pad_to_true_holdout_extended_5seed.log`.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
@@ -3536,3 +3603,16 @@ decaying back down over the next several rounds. Worth keeping in mind when inte
     at the same extended budget (does federation-with-adequate-budget also close most of the gap?),
     (c) revisit whether Phase 2 scaling should still be on hold given this changes why the baseline
     gap exists.
+17. **NEW from §60/§61: item 16(b) done — the federated true-holdout gap improves significantly
+    with more training budget (|diff|/SE 2.38 best-round, 2.43 mean) but stays enormous (~6700-
+    17700x vs `max_pressure`), categorically unlike §59's near-total in-distribution closure.**
+    Confirms the two comparisons this document has run (in-distribution vs. true-holdout) are not
+    interchangeable — training budget was nearly the whole story in-distribution, but the
+    cross-topology generalization penalty is real and budget-resistant on the true holdout. Not yet
+    done: (a) a robust 15+-episode re-evaluation of the standout checkpoint (seed3 round 50/59,
+    launched, pending as of §61); (b) the symmetric no-federation-at-63-rounds comparison, launched
+    immediately after §61 (`results/no_federation_c1_4_extended_5seed.log`) — extends §49/§50's
+    20-round-budget "federation doesn't matter" finding to the new budget point, result pending;
+    (c) a real budget-vs-performance curve (more than the 2 points now available: round 20, round
+    63) before trusting any extrapolation about how much more training would close the remaining
+    true-holdout gap, or whether it's asymptoting well short of baseline performance.
