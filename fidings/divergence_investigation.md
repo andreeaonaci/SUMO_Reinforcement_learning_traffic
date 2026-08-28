@@ -3433,6 +3433,49 @@ control and risking seeds 1-3). **This means item 17b lands as a 3-seed result, 
 document's own standing 5-seed rigor bar** — read accordingly, as directional not confirmatory,
 consistent with how partial-seed results are already flagged elsewhere in this document.
 
+## 63. Corrected pressure-feature pilot finished: worse than baseline on this seed, not better —
+    single-seed, needs multi-seed replication before trusting the direction either way
+
+**2026-08-28.** The corrected pilot (§62's fix, `results/run_2026_08_28-17_11_31_1008135`, proper
+`--lr_decay 0.97 --min_lr 1e-5`, same seed 3/budget/protocol as §60/§61's baseline) finished all 63
+rounds cleanly.
+
+| metric | baseline (§60/§61, no pressure feature) | pressure-feature pilot |
+|---|---:|---:|
+| best round | -327.10 (round 50) | -3844.45 (round 50) |
+| mean, rounds 21-63 | -2906.42 | -5115.78 |
+
+**Worse on both measures, by a wide margin — not the hoped-for improvement.** Adding
+`max_pressure`'s exact input signal (confirmed structurally absent, §62) did not help this seed;
+it hurt.
+
+**Read this with real caution, in both directions, before concluding anything:**
+- This is a single seed. This document has hit the "promising/discouraging single-seed result
+  doesn't replicate" pattern repeatedly in both directions (§11→§12, §30→§31, §46→§47) — the same
+  standard that says "don't trust a good single-seed result" also says "don't trust a bad one."
+- **A subtlety specific to this comparison, not present in this document's other single-seed
+  redos: `own_dim` changed (115→117), so this isn't a perfectly matched pair even at the same
+  nominal `--seed 3`.** A wider observation means more parameters in the input layer, which shifts
+  every subsequent draw from the same seeded RNG stream (weight init beyond the input layer,
+  replay sampling order, etc.) — so "same seed, different `own_dim`" is not a true ceteris-paribus
+  A/B pair the way "same seed, same architecture, one flag changed" is elsewhere in this document.
+  Some unknown fraction of this seed-3 comparison's gap could be an artifact of effectively landing
+  on a different draw from the training-instability process this whole document has spent 50+
+  sections characterizing, not the feature itself.
+- Given how volatile this training setup already is at any fixed configuration (§60/§61's own
+  extended run swung >900x within one seed), a single seed moving in the wrong direction is not
+  strong evidence the hypothesis is wrong — but it is also not nothing, and should not be waved
+  away just because it's inconvenient.
+
+**Honest status: the pressure-feature hypothesis is not confirmed helpful, and this one data point
+suggests it may not be — genuinely uncertain pending multi-seed replication, not a case of "just
+needs more seeds to show the win."** Not yet decided/started: whether to spend further seeds on
+this specific feature, or treat this as sufficient signal to deprioritize it in favor of the other
+levers discussed (clustered federation, few-shot calibration, wider training roster) — a call for
+the next session/decision point, not made unilaterally here.
+
+**Where this data lives:** `results/run_2026_08_28-17_11_31_1008135/federated_history.json`.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
@@ -3708,3 +3751,10 @@ consistent with how partial-seed results are already flagged elsewhere in this d
     before/after comparison against that seed's known result (best=-327.10). Result pending. Given
     this is a genuine architecture change (`own_dim` changed), no existing checkpoint can be resumed
     into it — every run from here trains fresh.
+19. **NEW from §63: the pressure-feature pilot result is in — worse than baseline on this seed
+    (best -3844 vs -327, mean(21-63) -5116 vs -2906), not better.** Single seed, and not a perfectly
+    matched pair even at the same nominal seed (`own_dim` change shifts the whole downstream RNG
+    stream — see §63 for why). Genuinely uncertain, not a confirmed refutation. **Not yet decided:
+    whether to run multi-seed replication of this specific feature, or deprioritize it now in favor
+    of the other discussed levers (clustered federation — code already exists, cheapest; few-shot
+    calibration; wider/more diverse training roster) — open decision point for next session.**

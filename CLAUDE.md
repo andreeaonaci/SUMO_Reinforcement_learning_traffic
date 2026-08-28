@@ -198,17 +198,27 @@ which had gone stale):
 
 ## RESUME HERE (as of 2026-08-28 — check this is still current before trusting it)
 
-**Running as of this writeup:** (1) a fresh (not resumed — see §60's `--resume` correctness caveat
-for `--no_federation` runs) 5-seed no-federation 2-city true-holdout batch at the same 63-round/126-
-episode budget as §60/§61, `results/no_federation_c1_4_extended_5seed.log`; (2) a robust 15-episode
-re-evaluation of §61's standout checkpoint (seed3 round 50/59); (3) **§62's pressure-feature
-pilot** (`results/run_2026_08_28-09_38_37_900537`) — the first intervention targeted at the
-true-holdout generalization gap itself: confirmed `max_pressure`'s exact input signal (outgoing-
-lane pressure/density) was structurally missing from the DQN's observation entirely, added it
-(`own_dim` 115→117, `environments/federated_env.py`), pilot matches §60/§61's exact protocol (seed
-3, same budget) for a clean before/after. **This is a real architecture change — no existing
-checkpoint can be `--resume`d into it.** Check `ps aux | grep -E "federated_training|reeval_checkpoint"`
-before assuming any of the three have finished.
+**Running as of this writeup:** only the no-federation batch, and only 3 of its 5 seeds by
+deliberate scope cut — seeds 4-5 were never started and are actively killed on sight by a watcher
+(`results/no_federation_c1_4_extended_5seed.log`; see §63's writeup for why). The robust 15-episode
+re-eval of §61's standout checkpoint finished (folded into §61 already). Check
+`ps aux | grep federated_training` before assuming even that's done.
+
+**§62/§63, 2026-08-28 — the pressure-feature pilot (this session's main event) is complete, and
+the result is negative on this seed, not positive.** §62 confirmed `max_pressure`'s exact input
+signal (outgoing-lane pressure/density) was structurally absent from the DQN's observation
+entirely (not just underused) and added it (`own_dim` 115→117). The first pilot attempt was
+confounded (missing `--lr_decay`/`--min_lr`, defaulted to no LR decay at all) and was killed and
+redone correctly — see §62 for that correction. **The corrected pilot (seed 3, matching §60/§61's
+exact protocol) finished all 63 rounds: best round -3844.45 vs. baseline's -327.10, mean(21-63)
+-5115.78 vs. baseline's -2906.42 — worse on both measures, not better.** Read with real caution in
+both directions (§63): single seed, and not even a perfectly matched pair at the same nominal seed
+since `own_dim` changing shifts the whole downstream RNG stream (weight init, replay order) —
+some unknown fraction of this could be that rather than the feature itself. **Not a confirmed
+refutation, but also not the win hoped for. Open decision, not yet made: multi-seed replication of
+this specific feature, or move on to the other discussed levers (clustered federation — code
+already exists via `ClusteredFedAvgStrategy`, cheapest to try; few-shot calibration on the target
+city before eval; a wider/more diverse training roster).**
 
 **MAJOR CORRECTION AND FOLLOW-UP, §58-§61, 2026-08-27/28 — read this before trusting any "trained
 DQN loses to baselines by 3-4 orders of magnitude" statement anywhere in this file or the fidings
@@ -269,7 +279,7 @@ project's true-holdout numbers looked so much worse than RESCO's in-distribution
 
 Phase 1 is complete at all three roster sizes (2/3/7-city, 5 seeds each). Read
 `fidings/divergence_investigation.md` in full before doing anything non-trivial here — it's long
-(62 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
+(63 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
 version, newest first:
 
 - **NEW, §54: implemented and piloted `--q_entropy_weight`, the first training-time intervention
