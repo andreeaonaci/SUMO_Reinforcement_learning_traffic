@@ -3421,6 +3421,18 @@ pilot run dir `results/run_2026_08_28-17_11_26_1008135`. The killed, invalid fir
 partial data (`results/run_2026_08_28-09_38_37_900537`, 54 rounds) is left on disk for the record
 but should not be used for any comparison.
 
+**Scope cut, same day: §60's no-federation-at-63-rounds batch (item 17b) descoped from 5 seeds to
+3.** Seeds 1-3 were already ~65% done (round 41-42/63) and cheap to let finish; seeds 4-5 hadn't
+started yet (still queued behind `MAX_CONCURRENT=3`). Given this batch answers a lower-priority,
+largely-confirmatory question (§49/§50 already found no significant federation-vs-no-federation
+difference at the original 20-round budget) compared to the pressure-feature pilot's more
+decisive, still-open question, and seeds 4-5 would have cost another ~10+ hours from a standing
+start, let seeds 1-3 run to completion but prevented 4-5 from ever starting (a watcher kills
+either process the instant it would spawn, rather than touching the batch orchestrator's job
+control and risking seeds 1-3). **This means item 17b lands as a 3-seed result, below this
+document's own standing 5-seed rigor bar** — read accordingly, as directional not confirmatory,
+consistent with how partial-seed results are already flagged elsewhere in this document.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
