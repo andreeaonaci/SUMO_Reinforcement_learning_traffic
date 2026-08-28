@@ -3399,8 +3399,27 @@ here on trains fresh from round 0, no `--resume` from pre-existing runs.
 and budget as §60/§61's best-performing seed, `run_2026_08_18-19_46_23_818099`, best=-327.10) —
 same everything except the two new observation features. Not yet complete as of this write-up.
 
-**Where this data lives:** code change in `environments/federated_env.py` (committed); pilot run
-dir `results/run_2026_08_28-09_38_37_900537`.
+**Correction, same day, 2026-08-28 17:11 — the first pilot attempt was confounded and its result
+is invalid; killed and relaunched correctly.** The first launch command omitted `--lr_decay` and
+`--min_lr`. Both default to values nobody in this document has ever actually used:
+`--lr_decay` defaults to **1.0 (no decay at all)**, `--min_lr` defaults to `1e-6` — every other run
+in this document, including the §60/§61 baseline this pilot exists to compare against, explicitly
+passes `--lr_decay 0.97 --min_lr 1e-5`. So the first attempt trained for 54/63 rounds (before this
+was caught) at a **constant, non-decaying 3e-4 learning rate**, an entirely different and
+uncontrolled training dynamic, not an isolated test of the new observation features. Its
+round-by-round numbers looked decisively worse than the §60/§61 baseline at the same round range
+(rounds 49-54 averaged -6453 vs. the baseline's -651 at the same rounds, and the run's best round
+anywhere in 54 rounds was -3866 vs. baseline's -327) — **but that comparison is invalid and was not
+trusted as a finding about the pressure feature.** Killed the process (PID 900537) and relaunched
+identically except with `--lr 3e-4 --lr_decay 0.97 --min_lr 1e-5` explicit, confirmed via the
+new run's own logged arguments (`'lr_decay': 0.97, 'min_lr': 1e-05`) and `own_dim=117` (pressure
+feature still present). New pilot run dir: `results/run_2026_08_28-17_11_26_1008135`. This is the
+run whose result should actually be trusted; the killed one should not be cited.
+
+**Where this data lives:** code change in `environments/federated_env.py` (committed); corrected
+pilot run dir `results/run_2026_08_28-17_11_26_1008135`. The killed, invalid first attempt's
+partial data (`results/run_2026_08_28-09_38_37_900537`, 54 rounds) is left on disk for the record
+but should not be used for any comparison.
 
 ## Open questions / next steps
 
