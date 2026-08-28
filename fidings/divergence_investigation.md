@@ -3476,6 +3476,36 @@ the next session/decision point, not made unilaterally here.
 
 **Where this data lives:** `results/run_2026_08_28-17_11_31_1008135/federated_history.json`.
 
+## 64. No-federation-at-63-rounds batch finished (3 seeds, per the scope cut in §60's addendum):
+    extends §49/§50's "federation doesn't matter" finding to the larger budget too — still no
+    significant difference, if anything a (non-significant) lean the other way
+
+**2026-08-29.** Seeds 1-3 (`environments_c1_4`, `--no_federation`, same 63-round/`--pad_to_true_
+holdout` protocol as §60/§61, trained fresh not resumed per §60's `--resume` correctness note)
+finished cleanly; seeds 4-5 were killed within seconds of starting, as planned, negligible compute
+lost.
+
+| | best-round (mean) | mean-reward, rounds 21-63 (mean) |
+|---|---:|---:|
+| federated, 5 seeds (§60/§61) | -2285.2 (std 1558.1) | -6013.2 (std 1640.9) |
+| no-federation, 3 seeds (this section) | -3690.6 (std 650.8) | -7093.2 (std 304.8) |
+| \|diff\|/SE | 1.78 | 1.43 |
+
+**Neither clears this project's ≥2 significance bar — no statistically supportable difference
+between federated and no-federation training at this extended budget, same conclusion as §49/§50
+found at the original 20-round budget, now extended to 63 rounds.** If anything the raw numbers
+lean toward no-federation being *worse* (not better) than federated here, opposite of any
+"federation is the problem" story, though the gap isn't significant so this shouldn't be
+over-read either. **Read with the caveat already flagged when this batch was scoped down: n=3, not
+this document's standard n=5, so directional, not confirmatory** — but consistent directionally
+with the now twice-replicated (§49/§50, this section) finding that federation itself is not a
+meaningful driver of this project's core instability or generalization problems, at either budget
+tested.
+
+**Where this data lives:** `results/run_2026_08_28-09_17_39_894049` (seed1),
+`results/run_2026_08_28-09_17_39_894045` (seed2), `results/run_2026_08_28-09_17_39_894048` (seed3);
+batch log `results/no_federation_c1_4_extended_5seed.log`.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
@@ -3736,11 +3766,11 @@ the next session/decision point, not made unilaterally here.
     Confirms the two comparisons this document has run (in-distribution vs. true-holdout) are not
     interchangeable — training budget was nearly the whole story in-distribution, but the
     cross-topology generalization penalty is real and budget-resistant on the true holdout. Not yet
-    done: (a) a robust 15+-episode re-evaluation of the standout checkpoint (seed3 round 50/59,
-    launched, pending as of §61); (b) the symmetric no-federation-at-63-rounds comparison, launched
-    immediately after §61 (`results/no_federation_c1_4_extended_5seed.log`) — extends §49/§50's
-    20-round-budget "federation doesn't matter" finding to the new budget point, result pending;
-    (c) a real budget-vs-performance curve (more than the 2 points now available: round 20, round
+    done: (a) ~~a robust 15+-episode re-evaluation of the standout checkpoint (seed3 round 50/59,
+    launched, pending as of §61)~~ **done, see §61's own update**; (b) ~~the symmetric
+    no-federation-at-63-rounds comparison~~ **done, see §64 — still no significant difference,
+    |diff|/SE 1.78/1.43, extending §49/§50's finding to the new budget (3-seed, scoped down, see
+    §60's addendum)**; (c) a real budget-vs-performance curve (more than the 2 points now available: round 20, round
     63) before trusting any extrapolation about how much more training would close the remaining
     true-holdout gap, or whether it's asymptoting well short of baseline performance.
 18. **NEW from §62: the first intervention actually targeted at the true-holdout generalization gap

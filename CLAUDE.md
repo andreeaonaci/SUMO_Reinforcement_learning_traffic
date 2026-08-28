@@ -196,13 +196,20 @@ which had gone stale):
   implemented and tested* FedProx proximal term, `DQNAgent.mu` — see next bullet — which is real
   and unaffected by this deletion.
 
-## RESUME HERE (as of 2026-08-28 — check this is still current before trusting it)
+## RESUME HERE (as of 2026-08-29 — check this is still current before trusting it)
 
-**Running as of this writeup:** only the no-federation batch, and only 3 of its 5 seeds by
-deliberate scope cut — seeds 4-5 were never started and are actively killed on sight by a watcher
-(`results/no_federation_c1_4_extended_5seed.log`; see §63's writeup for why). The robust 15-episode
-re-eval of §61's standout checkpoint finished (folded into §61 already). Check
-`ps aux | grep federated_training` before assuming even that's done.
+**No experiment running as of this writeup.** The no-federation batch (§64) finished — seeds 1-3
+completed all 63 rounds cleanly, seeds 4-5 were killed within seconds of starting as planned
+(negligible compute lost). Safe to start something without checking for a stale job, though
+`ps aux | grep federated_training` costs nothing to confirm.
+
+**§64: the no-federation-vs-federated comparison at the extended (63-round) budget is done —
+still no significant difference (|diff|/SE 1.78 best-round, 1.43 mean), extending §49/§50's
+20-round-budget finding to the new budget point.** 3-seed (scoped down from 5, see §60's addendum),
+so directional not confirmatory, but consistent with the now-twice-replicated conclusion that
+federation itself isn't a meaningful driver of this project's instability or generalization
+problems, at either budget tested. Raw numbers lean slightly toward no-federation being *worse*,
+not better, though not significantly.
 
 **§62/§63, 2026-08-28 — the pressure-feature pilot (this session's main event) is complete, and
 the result is negative on this seed, not positive.** §62 confirmed `max_pressure`'s exact input
@@ -279,7 +286,7 @@ project's true-holdout numbers looked so much worse than RESCO's in-distribution
 
 Phase 1 is complete at all three roster sizes (2/3/7-city, 5 seeds each). Read
 `fidings/divergence_investigation.md` in full before doing anything non-trivial here — it's long
-(63 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
+(64 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
 version, newest first:
 
 - **NEW, §54: implemented and piloted `--q_entropy_weight`, the first training-time intervention
