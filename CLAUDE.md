@@ -198,7 +198,60 @@ which had gone stale):
 
 ## RESUME HERE (as of 2026-08-29 — check this is still current before trusting it)
 
-**No experiment running as of this writeup.** The no-federation batch (§64) finished — seeds 1-3
+**STRATEGIC CONTEXT from the 2026-08-27/29 session (paper-worthiness discussion + the
+clustered-federation decision rule) — read this first, it's not captured anywhere else and won't
+survive if only the experimental sections below are read.**
+
+The user asked directly whether this project is worth publishing and whether it's worth continuing
+vs. starting over in a fresh repo. Answers given, for continuity if this thread is lost:
+- **Publishability verdict:** not yet paper-ready as of §57 (no resolved mechanism, no
+  reconciliation with RESCO's own numbers), but §58-§61's separation of training-budget vs.
+  cross-topology-generalization effects meaningfully improved the story. The realistic framing for
+  a paper is **not** "federated DQN traffic control fails" (disproven by §59) — it's "in-distribution
+  this approach is competitive with published numbers once budget/protocol confounds are controlled
+  for; cross-topology generalization has a real, characterized, partially budget-resistant gap;
+  here is a rigorous mechanism investigation (confident lock-in, §32-34/§51-57) of the instability
+  underneath it." That is judged a legitimate, citable contribution (methodology bug-finding +
+  mechanism + budget/generalization separation) even if the reward number never goes positive — same
+  category as RESCO's own paper, whose headline finding is also "published methods underperform
+  simple baselines in realistic scenarios."
+- **"Is it worth continuing, or is everything garbage, start over in a new repo?" — explicit verdict:
+  not garbage, do not start over.** Reasoning on record: the infrastructure is audited-correct
+  (Phase 0), §59 proves the pipeline works in-distribution (matches RESCO's own published numbers),
+  and every hard-won bug fix (holdout fallback, `fixed_time`, Adam/weight-decay on masked heads,
+  `run_dir` collision, `--resume` LR-reset) would need to be rediscovered from scratch elsewhere,
+  while the actual unresolved problem (cross-topology generalization) is a research problem that
+  would follow to any new repo doing similar RL, not a defect specific to this code.
+- **Agreed plan: one more bounded, targeted experiment (clustered federation) with an explicit
+  stopping rule, not open-ended fishing.** `ClusteredFedAvgStrategy` already exists in this
+  codebase and directly targets the actual named problem (extreme topology heterogeneity forced
+  into one shared policy) — cheapest remaining lever, no new code needed. **Decision rule, agreed
+  with the user: if this does not show a real improvement (this project's own |diff|/SE ≥ 2 bar,
+  once done at proper multi-seed rigor) over plain FedAvg on the true holdout, that is the signal
+  to stop chasing reward-improving interventions and pivot fully to writing up the characterized-gap
+  paper described above — not a reason to try yet another lever indefinitely.**
+- **Why `environments_c1_4` (2-city) can't test this and `environments_c1_4_6` (3-city) is used
+  instead:** `ClusteredFedAvgStrategy` clusters cities by `action_dim` via `federated/clustering.py
+  ::cluster_cities` (deterministic sorted bucketing). Verified directly: with exactly 2 cities and
+  `n_clusters=2`, clustering always degenerates to one city per cluster — identical to
+  `--no_federation`, already tested (§49/§50/§64) with a null result. With 3 cities
+  (`environments_c1_4_6` = arterial4x4/`city_1`, cologne3/`city_4`, ingolstadt7/`city_6`,
+  action_dims 5/4/3 respectively), `n_clusters=2` produces a genuine, non-trivial split
+  (`city_4`+`city_6` cluster together, `city_1` alone — verified by calling `cluster_cities`
+  directly) — this is the roster being used for the pilot below.
+- **Prior data point, not yet at proper rigor:** `clustered_fedavg` was tested once before, on the
+  7-city roster at the original 20-round budget (5 seeds): mean -6494.5, the *best* mean of every
+  aggregation strategy tested there, but |diff|/SE=0.85 vs. plain `fedavg` — not significant. A
+  lead, never followed up on with more budget or a different roster until now.
+- **Host-sleep note (already established elsewhere in this file, repeated here since the user
+  raised it directly this session):** if the machine sleeps mid-run, the training job freezes but
+  does not die — it resumes cleanly once the machine wakes (confirmed multiple times: §30, §42,
+  and implicitly by this session's own multi-hour unattended batches). This document (this file +
+  `fidings/divergence_investigation.md`) is the durable record if the session itself doesn't
+  survive; the training compute itself is not at risk from sleep either way.
+
+**No experiment running as of this writeup, other than what's launched by this same update** — see
+below for what's currently in flight. The no-federation batch (§64) finished — seeds 1-3
 completed all 63 rounds cleanly, seeds 4-5 were killed within seconds of starting as planned
 (negligible compute lost). Safe to start something without checking for a stale job, though
 `ps aux | grep federated_training` costs nothing to confirm.

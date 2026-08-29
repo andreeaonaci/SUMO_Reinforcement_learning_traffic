@@ -3506,6 +3506,61 @@ tested.
 `results/run_2026_08_28-09_17_39_894045` (seed2), `results/run_2026_08_28-09_17_39_894048` (seed3);
 batch log `results/no_federation_c1_4_extended_5seed.log`.
 
+## 65. Real bug found and fixed before it could produce a meaningless result: `ClusteredFedAvgStrategy`
+    has never actually clustered by genuine per-city differences — it silently degenerates to an
+    arbitrary alphabetical split, because every client's live Q-head is always the same padded
+    width by this project's own architecture design
+
+**2026-08-29.** Preparing the "one more bounded shot" agreed with the user (clustered federation,
+the cheapest remaining lever targeting the actual named cross-topology-generalization problem).
+`ClusteredFedAvgStrategy.assign_clusters()` (`federated/aggregation_strategies.py`) is documented
+as "cluster clients by `action_dim`" — reads `info.metadata.get("action_dim")`, falling back to
+the live `head.4.bias` tensor shape if metadata doesn't have it. **`ClientRoundInfo.metadata` is
+never populated anywhere in `federated/parallel_server.py` (the real `--parallel` training path)
+— it's always the dataclass default, an empty dict** — so this always falls through to the
+head-shape fallback. But **every client's live Q-head is always padded to the same shared global
+`action_dim` before training even starts** (`ActionMaskPadder`, the core mechanism that lets one
+Q-head serve every topology) — so the head-shape fallback sees identical widths for every city, in
+every roster, unconditionally, by the fundamental design of this whole federated system, not
+something specific to `--pad_to_true_holdout`. `cluster_cities`'s tie-break on equal values is
+`(action_dim, name)` sorted — with all action_dims tied, this reduces to a pure alphabetical split.
+
+**Caught empirically before trusting it:** manually verified `cluster_cities()` should split
+`environments_c1_4_6` (arterial4x4/`city_1` action_dim 5, cologne3/`city_4` action_dim 4,
+ingolstadt7/`city_6` action_dim 3) as `{city_6: 0, city_4: 0, city_1: 1}` (the two closer native
+widths grouped, the outlier alone). A first smoke-test launch instead logged
+`{'city_1': 0, 'city_4': 0, 'city_6': 1}` — alphabetical, not similarity-based. That mismatch is
+what surfaced the bug, rather than assuming the smoke test's success meant the mechanism was
+correct.
+
+**This means the one prior `clustered_fedavg` result in this document (mentioned in passing
+earlier, 7-city roster, 20-round budget, 5 seeds, mean -6494.5, best mean of every strategy tested
+but |diff|/SE=0.85 vs. plain `fedavg`, not significant) was also measuring an arbitrary alphabetical
+partition, not genuine similarity-based clustering** — the docstring's "cluster by action_dim"
+claim was never actually true for any run in this document's history until the fix below. Worth
+knowing if that number gets cited: it wasn't testing what its name implies.
+
+**Fix** (`federated/parallel_server.py`): captured each city's own native `env.max_action_dim`
+(from `build_federated_env(cfg)`, before `ActionMaskPadder` widens it) in `_client_worker`, threaded
+it through the worker→server IPC queue (extended the result tuple from 8 to 9 fields) into
+`ClientRoundInfo(metadata={"action_dim": native_action_dim}, ...)`. Verified with a second smoke
+test: cluster assignment now correctly reads `{city_6: 0, city_4: 0, city_1: 1}`, matching the
+manually-computed expectation exactly. **Only the `--parallel` path (`federated/parallel_server.py`)
+was fixed — `federated/server.py` (the sequential path, not used for real training per this
+project's own convention) has the identical gap and was left alone, out of scope, same reasoning
+as leaving `environments/common.py` untouched in §62.**
+
+**Pilots launched, now on genuinely-functional clustering:** `environments_c1_4_6` (3-city — the
+2-city roster this session has otherwise used throughout cannot test this at all: with exactly 2
+cities, `cluster_cities` always produces one city per cluster regardless of similarity, identical
+to `--no_federation`), seed 3, 63 rounds, `--dueling --n_step 3 --lr_decay 0.97 --min_lr 1e-5
+--pad_to_true_holdout`, matching this session's established protocol. Two runs: plain `fedavg`
+(no extended-budget 3-city baseline exists yet — §45's only 3-city data point was a single-seed
+20-round pilot) and `clustered_fedavg --n_clusters 2`. Both pending as of this write-up.
+
+**Where this data lives:** code fix in `federated/parallel_server.py` (committed);
+`diagnostics`/smoke-test logs not persisted beyond this write-up; pilot run dirs to follow.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a

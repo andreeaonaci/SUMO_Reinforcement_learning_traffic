@@ -139,6 +139,15 @@ def _client_worker(
     set_seed(seed)
     try:
         env = build_federated_env(cfg)
+        # Captured BEFORE ActionMaskPadder widens this city's own env to the
+        # shared global action_dim -- every client's live Q-head ends up the
+        # same padded width by design (that's the whole point of one shared
+        # architecture across topologies), so ClusteredFedAvgStrategy's
+        # "cluster by action_dim" (federated/aggregation_strategies.py)
+        # would silently see identical widths for every city and degenerate
+        # to an arbitrary alphabetical tie-break if this weren't threaded
+        # through separately. See fidings/divergence_investigation.md sec 65.
+        native_action_dim = env.max_action_dim
         dropout_cfg = dict(comm_dropout_cfg)
         # Offset by a large prime rather than reusing `seed` verbatim: the
         # comm-dropout RNG (its own random.Random/np.random.RandomState
@@ -199,10 +208,10 @@ def _client_worker(
                     name, f"{mean_loss:.6f}" if mean_loss is not None else "n/a",
                     new_lr, eps_start, eps_end, action_counts,
                 )
-                out_queue.put(("ok", name, state_dict, n_samples, mean_loss, action_counts, eps_start, eps_end))
+                out_queue.put(("ok", name, state_dict, n_samples, mean_loss, action_counts, eps_start, eps_end, native_action_dim))
             except Exception as e:
                 logger.exception("Worker '%s' local training failed.", name)
-                out_queue.put(("error", name, str(e), 0, None, None, None, None))
+                out_queue.put(("error", name, str(e), 0, None, None, None, None, None))
     finally:
         try:
             env.close()
@@ -476,7 +485,7 @@ class ParallelFederatedServer:
                 eps_end_by_client: Dict[str, Optional[float]] = {}
 
                 while pending:
-                    status, name, payload, n_samples, mean_loss, action_counts, eps_start, eps_end = self.out_queue.get()
+                    status, name, payload, n_samples, mean_loss, action_counts, eps_start, eps_end, native_action_dim = self.out_queue.get()
                     pending.discard(name)
                     if status == "error":
                         raise RuntimeError(f"Client '{name}' failed: {payload}")
@@ -506,6 +515,7 @@ class ParallelFederatedServer:
                         local_loss=mean_loss,
                         previous_loss=self._previous_loss.get(name),
                         round_num=r,
+                        metadata={"action_dim": native_action_dim},
                     ))
 
                     self._previous_client_state[name] = state_dict
