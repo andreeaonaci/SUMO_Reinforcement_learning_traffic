@@ -3558,8 +3558,12 @@ to `--no_federation`), seed 3, 63 rounds, `--dueling --n_step 3 --lr_decay 0.97 
 (no extended-budget 3-city baseline exists yet — §45's only 3-city data point was a single-seed
 20-round pilot) and `clustered_fedavg --n_clusters 2`. Both pending as of this write-up.
 
-**Where this data lives:** code fix in `federated/parallel_server.py` (committed);
-`diagnostics`/smoke-test logs not persisted beyond this write-up; pilot run dirs to follow.
+**Where this data lives:** code fix in `federated/parallel_server.py` (committed); pilot run dirs:
+`results/run_2026_08_29-07_01_27_1193341` (plain `fedavg`),
+`results/run_2026_08_29-07_01_27_1193340` (`clustered_fedavg`) — both launched 2026-08-29 07:01,
+both targeting round 63, logs at `/home/deea/.claude/jobs/7f50f065/tmp/c146_fedavg_pilot.log` and
+`.../c146_clustered_pilot.log` (job-local, not under version control — read the run dirs'
+`federated_history.json` directly if this job's tmp dir is gone by the time this is read).
 
 ## Open questions / next steps
 

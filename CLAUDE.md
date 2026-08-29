@@ -225,11 +225,15 @@ vs. starting over in a fresh repo. Answers given, for continuity if this thread 
 - **Agreed plan: one more bounded, targeted experiment (clustered federation) with an explicit
   stopping rule, not open-ended fishing.** `ClusteredFedAvgStrategy` already exists in this
   codebase and directly targets the actual named problem (extreme topology heterogeneity forced
-  into one shared policy) — cheapest remaining lever, no new code needed. **Decision rule, agreed
-  with the user: if this does not show a real improvement (this project's own |diff|/SE ≥ 2 bar,
-  once done at proper multi-seed rigor) over plain FedAvg on the true holdout, that is the signal
-  to stop chasing reward-improving interventions and pivot fully to writing up the characterized-gap
-  paper described above — not a reason to try yet another lever indefinitely.**
+  into one shared policy) — cheapest remaining lever. **Turned out NOT to be "no new code needed"
+  after all — see §65: a real bug (`ClusteredFedAvgStrategy` never actually clustered by genuine
+  per-city differences, silently degenerated to an arbitrary alphabetical split) was found and
+  fixed before launching, or this whole experiment would have tested the wrong thing.** **Decision
+  rule, agreed with the user: if this does not show a real improvement (this project's own
+  |diff|/SE ≥ 2 bar, once done at proper multi-seed rigor) over plain FedAvg on the true holdout,
+  that is the signal to stop chasing reward-improving interventions and pivot fully to writing up
+  the characterized-gap paper described above — not a reason to try yet another lever
+  indefinitely.**
 - **Why `environments_c1_4` (2-city) can't test this and `environments_c1_4_6` (3-city) is used
   instead:** `ClusteredFedAvgStrategy` clusters cities by `action_dim` via `federated/clustering.py
   ::cluster_cities` (deterministic sorted bucketing). Verified directly: with exactly 2 cities and
@@ -250,11 +254,22 @@ vs. starting over in a fresh repo. Answers given, for continuity if this thread 
   `fidings/divergence_investigation.md`) is the durable record if the session itself doesn't
   survive; the training compute itself is not at risk from sleep either way.
 
-**No experiment running as of this writeup, other than what's launched by this same update** — see
-below for what's currently in flight. The no-federation batch (§64) finished — seeds 1-3
-completed all 63 rounds cleanly, seeds 4-5 were killed within seconds of starting as planned
-(negligible compute lost). Safe to start something without checking for a stale job, though
-`ps aux | grep federated_training` costs nothing to confirm.
+**RUNNING RIGHT NOW (launched 2026-08-29 07:01, §65): the clustered-federation pilot pair this
+whole section is about.** Two single-seed (seed 3) 63-round `environments_c1_4_6` (3-city:
+arterial4x4/`city_1`, cologne3/`city_4`, ingolstadt7/`city_6`) runs, same protocol as this
+session's other pilots (`--dueling --n_step 3 --lr_decay 0.97 --min_lr 1e-5
+--pad_to_true_holdout --eval_every 1 --eval_episodes 5`):
+- plain `fedavg` baseline: `results/run_2026_08_29-07_01_27_1193341`
+- `clustered_fedavg --n_clusters 2` (now genuinely functional post-§65 fix):
+  `results/run_2026_08_29-07_01_27_1193340`
+
+**If this session doesn't survive to see these finish:** check `federated_history.json` in each
+run dir directly — `eval_reward` list, compare best-round and mean(rounds 21-63) between the two
+run dirs the same way every other pilot this session compared numbers. If both finished (`round`
+list reaches 63) and `clustered_fedavg` doesn't clear |diff|/SE ≥ 2 over `fedavg`, that's the
+agreed stopping signal (see the strategic-context block above) — write up the characterized-gap
+paper rather than launching another lever. `ps aux | grep federated_training` to check if either
+is still running before assuming a result is final.
 
 **§64: the no-federation-vs-federated comparison at the extended (63-round) budget is done —
 still no significant difference (|diff|/SE 1.78 best-round, 1.43 mean), extending §49/§50's
