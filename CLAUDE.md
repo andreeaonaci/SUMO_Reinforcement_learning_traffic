@@ -285,6 +285,20 @@ this at the time). Killed via plain SIGTERM, no issue (results/checkpoints are s
 regardless). Worth a `ps aux | grep spawn_main` sanity check at the start of any future session if
 RAM looks unexpectedly tight.
 
+**QUEUED CONTINGENCY, agreed 2026-08-31: if the fine-tune-on-holdout test above does NOT show a
+real benefit, the next (and — per the exhausted-levers list above plus this one — likely last
+before pivoting fully to the paper writeup) lever to try is training from scratch with a wider,
+more topologically diverse training roster from round 0, not just this session's usual reduced
+2-/3-city rosters.** Rationale (from the 2026-08-31 "what's the actual bottleneck" discussion):
+every pilot in this document that used a small roster (`environments_c1_4`, `environments_c1_4_6`)
+never gave the model a chance to practice generalizing across genuinely different topologies
+during training itself — it only ever sees that at holdout-eval time. The full 7-city
+`environments/` roster (already exists, no new code needed) is the cheapest version of this test;
+if a wider roster than that is wanted, check `sumo_rl/nets/RESCO/` for what other maps are already
+vendored before building anything new. Same protocol as this session's other pilots
+(`--dueling --n_step 3 --lr_decay 0.97 --min_lr 1e-5 --pad_to_true_holdout`), single-seed pilot
+first per this project's standing convention, multi-seed only if it looks promising.
+
 **§64: the no-federation-vs-federated comparison at the extended (63-round) budget is done —
 still no significant difference (|diff|/SE 1.78 best-round, 1.43 mean), extending §49/§50's
 20-round-budget finding to the new budget point.** 3-seed (scoped down from 5, see §60's addendum),
