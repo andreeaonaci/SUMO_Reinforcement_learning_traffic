@@ -3605,6 +3605,58 @@ smoke-tested, not yet run at real settings — see `diagnostics/finetune_on_hold
 writing up the characterized-gap paper described in the STRATEGIC CONTEXT block rather than
 testing further levers.
 
+## 66. Fine-tune-on-holdout (the queued test-time-adaptation lever) shows a large improvement —
+but "large improvement over zero-shot" and "closes the gap to baselines" are very different claims,
+and only the first one is true here.
+
+Ran `diagnostics/finetune_on_holdout.py` against the finished 3-city `fedavg` baseline's
+`global_round_063.pth` checkpoint (§65/§66 above, `results/run_2026_08_29-07_01_27_1193341`):
+5 rounds, `--local_episodes 2`, federated across 5 independent SUMO `randomTrips.py`-generated
+route files on `city_5_holdout`'s own net (grid4x4) — never touching `grid4x4_1.rou.xml`, the real
+route file the eval below is scored against — `--lr 5e-5` (deliberately gentler than the 3e-4 used
+for training from scratch), `--seed 3`, `--eval_episodes 5`.
+
+| round | eval_reward (real holdout traffic) |
+|---:|---:|
+| zero-shot (unmodified checkpoint) | -8668.31 |
+| 1 | -1321.95 |
+| 2 | -636.43 |
+| 3 | -696.86 |
+| 4 | -1691.45 |
+| 5 (final) | **-413.96** |
+
+Final round is a **~20.9x improvement over zero-shot** (-413.96 vs -8668.31), monotonic-ish with
+one dip at round 4 (consistent with this document's standing round-to-round volatility, not a new
+phenomenon). This is the single largest relative improvement any lever in this document has
+produced from a fixed starting checkpoint.
+
+**But scale matters, and this is where the caution comes in.** Pulled `fixed_time`/`max_pressure`
+on the exact same evaluator (same holdout config, same `episodes=5`) for a genuine apples-to-apples
+comparison, rather than trusting older numbers from a possibly-different eval configuration
+elsewhere in this document: `fixed_time` mean_reward=-2.73, `max_pressure` mean_reward=-0.34. The
+fine-tuned checkpoint's -413.96 is still **~152x worse than `fixed_time` and ~1218x worse than
+`max_pressure`** — nowhere near baseline-competitive in absolute terms. What actually happened:
+the gap to `max_pressure` shrank from ~25,500x (zero-shot) to ~1,200x (fine-tuned) — roughly a 21x
+reduction in the size of the gap, which is substantial, but "closing 95% of an enormous log-scale
+gap" still leaves three orders of magnitude on the table. Read this the same way §59-61 taught this
+document to read training-budget improvements: real, worth having, not close to sufficient alone.
+
+**Caveats, same standing pattern as every other single-run result in this document (§11→12,
+§30→31, §46→47, §62→63):** single seed, single starting checkpoint, 5 eval episodes per round (not
+this project's more rigorous 30-episode confirmatory check — worth re-running the winning round-5
+weights through `diagnostics/reeval_checkpoint.py --pad_to_true_holdout --episodes 30` before
+trusting this number further). Not yet tested: whether this generalizes to a DIFFERENT starting
+checkpoint (e.g. the `clustered_fedavg` run's best round, or a completely different seed) or holds
+up at multi-seed rigor.
+
+**Where this leaves the queued plan:** this is not a null result, so the §65 contingency (train
+from scratch on a wider/more diverse roster, queued in CLAUDE.md 2026-08-31) does not trigger yet.
+Next concrete steps, in order: (1) a 30-episode confirmatory re-eval of the round-5 checkpoint
+(`results/finetune_holdout_fedavg_c146_round063/global_round_005.pth`) to rule out the 5-episode
+number being an optimistic screen (§33's standing lesson); (2) if that holds up, multi-seed
+replication of the fine-tune protocol itself before trusting the direction; (3) only if this
+doesn't hold up at rigor does the wider-roster contingency become the next thing to try.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
