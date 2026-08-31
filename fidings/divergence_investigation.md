@@ -3565,6 +3565,15 @@ both targeting round 63, logs at `/home/deea/.claude/jobs/7f50f065/tmp/c146_feda
 `.../c146_clustered_pilot.log` (job-local, not under version control — read the run dirs'
 `federated_history.json` directly if this job's tmp dir is gone by the time this is read).
 
+**Update, 2026-08-31: the plain `fedavg` baseline finished (2 days elapsed wall-clock, including
+at least one host-sleep gap — training itself unaffected, same resilience as documented elsewhere
+in this file).** Best round -4294.87 (round 39), mean(rounds 21-63) -6479.05, worst -10064.61.
+This is the first extended-budget (63-round) 3-city true-holdout data point this document has —
+for reference, §45's single-seed 20-round 3-city pilot got best -3545.41/mean -6111.3, so more
+budget did **not** obviously help here the way it did on the 2-city roster (§60/§61) — a 3-city,
+single-seed comparison, not yet something to read much into. `clustered_fedavg` still running as
+of this update (round 34/63) — comparison pending.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
