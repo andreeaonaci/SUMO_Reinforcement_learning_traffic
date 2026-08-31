@@ -3574,6 +3574,37 @@ budget did **not** obviously help here the way it did on the 2-city roster (§60
 single-seed comparison, not yet something to read much into. `clustered_fedavg` still running as
 of this update (round 34/63) — comparison pending.
 
+**Final update, 2026-08-31: `clustered_fedavg` finished all 63 rounds — no real improvement over
+plain `fedavg`, closing out this experiment per the decision rule agreed 2026-08-29.** Full-run
+comparison (both runs, same 43-round eval cadence extended to 63):
+
+| | best round | mean(rounds 21-63) | std(21-63) |
+|---|---:|---:|---:|
+| `fedavg` | -4294.87 (round 39) | -6479.05 | 1750.37 |
+| `clustered_fedavg` | -4218.43 (round 30) | -6866.61 | 1229.18 |
+
+Best-round: `clustered_fedavg` marginally ahead (+76.45, ~1.8%). Mean(21-63): `fedavg` marginally
+ahead (clustered is -387.56 worse, ~6%). Both differences are small relative to either run's own
+round-to-round std (1200-1750) — a wash, not a signal in either direction. **This is a single seed
+on each side, so no `|diff|/SE` is even computable** (that statistic needs multiple seeds; a
+single run's own across-round std is not a between-seed SE) — but the agreed rule was to treat
+"no real improvement" as the stopping signal regardless, and a result this close, with no
+consistent direction between the two headline metrics, does not clear that bar even informally.
+**Per the 2026-08-29 STRATEGIC CONTEXT decision (CLAUDE.md RESUME HERE): this is the signal to
+stop chasing reward-improving training/aggregation-time interventions for the cross-topology gap.**
+Combined with the now-fully-exhausted list — federation strategy (§49/50/64, null), architecture
+(§46/47, null under true holdout), extra pressure feature (§62/63, negative single-seed), reward
+shaping (§44, inconclusive), and now genuine clustering (this section, null) — no training-time
+lever tested anywhere in this document has closed the true-holdout generalization gap
+characterized in §58-61. One further lever remains queued and is a different *category* of
+intervention (test-time/few-shot adaptation rather than a training-time aggregation choice, so not
+covered by the stopping rule above): fine-tuning a trained checkpoint on synthetic randomized
+traffic on the holdout topology itself before evaluating on its real traffic (implemented,
+smoke-tested, not yet run at real settings — see `diagnostics/finetune_on_holdout.py` and
+`diagnostics/generate_random_routes.py`). If that also comes back null, the honest next step is
+writing up the characterized-gap paper described in the STRATEGIC CONTEXT block rather than
+testing further levers.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a

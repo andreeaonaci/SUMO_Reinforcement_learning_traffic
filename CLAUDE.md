@@ -254,22 +254,36 @@ vs. starting over in a fresh repo. Answers given, for continuity if this thread 
   `fidings/divergence_investigation.md`) is the durable record if the session itself doesn't
   survive; the training compute itself is not at risk from sleep either way.
 
-**RUNNING RIGHT NOW (launched 2026-08-29 07:01, §65): the clustered-federation pilot pair this
-whole section is about.** Two single-seed (seed 3) 63-round `environments_c1_4_6` (3-city:
-arterial4x4/`city_1`, cologne3/`city_4`, ingolstadt7/`city_6`) runs, same protocol as this
-session's other pilots (`--dueling --n_step 3 --lr_decay 0.97 --min_lr 1e-5
---pad_to_true_holdout --eval_every 1 --eval_episodes 5`):
-- plain `fedavg` baseline: `results/run_2026_08_29-07_01_27_1193341`
-- `clustered_fedavg --n_clusters 2` (now genuinely functional post-§65 fix):
-  `results/run_2026_08_29-07_01_27_1193340`
+**DONE, 2026-08-31: the clustered-federation pilot pair (launched 2026-08-29 07:01, §65) finished
+— null result, closes out this lever.** Two single-seed (seed 3) 63-round `environments_c1_4_6`
+runs: `fedavg` baseline (`results/run_2026_08_29-07_01_27_1193341`, best -4294.87/round 39,
+mean(21-63) -6479.05) vs. genuinely-functional `clustered_fedavg` (post-§65 fix,
+`results/run_2026_08_29-07_01_27_1193340`, best -4218.43/round 30, mean(21-63) -6866.61) — a wash,
+clustered marginally ahead on best-round (+1.8%) and marginally behind on mean(21-63) (-6%), both
+small relative to either run's own round-to-round std (1200-1750), no computable |diff|/SE
+(single seed each side) but no consistent direction either — does not clear the agreed bar even
+informally. **Per the 2026-08-29 decision rule: this is the stopping signal for training/
+aggregation-time interventions on the cross-topology gap** — see §65's final update in the fidings
+doc for the full write-up and the now-fully-exhausted list (federation strategy, architecture,
+extra features, reward shaping, clustering — all null or negative).
 
-**If this session doesn't survive to see these finish:** check `federated_history.json` in each
-run dir directly — `eval_reward` list, compare best-round and mean(rounds 21-63) between the two
-run dirs the same way every other pilot this session compared numbers. If both finished (`round`
-list reaches 63) and `clustered_fedavg` doesn't clear |diff|/SE ≥ 2 over `fedavg`, that's the
-agreed stopping signal (see the strategic-context block above) — write up the characterized-gap
-paper rather than launching another lever. `ps aux | grep federated_training` to check if either
-is still running before assuming a result is final.
+**NEXT (in progress as of 2026-08-31, "prio next step #2" from that day's bottleneck discussion,
+queued ahead of #1/a more diverse training roster): fine-tune-on-holdout.** A different *category*
+of lever (test-time/few-shot adaptation, not training/aggregation-time, so not covered by the
+stopping rule above) — take a trained checkpoint, fine-tune briefly on SYNTHETIC randomized
+traffic (SUMO `randomTrips.py`) on the holdout topology itself (never the real eval route file),
+then evaluate on the real holdout traffic as usual. Implemented and smoke-tested:
+`diagnostics/finetune_on_holdout.py` (auto-detects checkpoint architecture from tensor shapes,
+robust to the own_dim 115->117 pressure-feature boundary) +
+`diagnostics/generate_random_routes.py` (wraps `randomTrips.py`). Also found and fixed a resource
+leak while checking room to run this in parallel: ~11 orphaned worker processes from past
+finished runs (dating back to Aug 27) were still alive, holding ~9GB RAM — daemon multiprocessing
+workers don't get cleaned up if their parent `federated_training` process is killed/crashes
+instead of exiting normally (confirmed this happened to the clustered run's *first* launch attempt,
+restarted ~03:45 2026-08-31 after a crash — the earlier "RUNNING RIGHT NOW" text above didn't know
+this at the time). Killed via plain SIGTERM, no issue (results/checkpoints are saved every round
+regardless). Worth a `ps aux | grep spawn_main` sanity check at the start of any future session if
+RAM looks unexpectedly tight.
 
 **§64: the no-federation-vs-federated comparison at the extended (63-round) budget is done —
 still no significant difference (|diff|/SE 1.78 best-round, 1.43 mean), extending §49/§50's
