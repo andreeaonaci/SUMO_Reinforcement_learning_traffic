@@ -285,19 +285,38 @@ this at the time). Killed via plain SIGTERM, no issue (results/checkpoints are s
 regardless). Worth a `ps aux | grep spawn_main` sanity check at the start of any future session if
 RAM looks unexpectedly tight.
 
-**QUEUED CONTINGENCY, agreed 2026-08-31: if the fine-tune-on-holdout test above does NOT show a
-real benefit, the next (and — per the exhausted-levers list above plus this one — likely last
-before pivoting fully to the paper writeup) lever to try is training from scratch with a wider,
-more topologically diverse training roster from round 0, not just this session's usual reduced
-2-/3-city rosters.** Rationale (from the 2026-08-31 "what's the actual bottleneck" discussion):
-every pilot in this document that used a small roster (`environments_c1_4`, `environments_c1_4_6`)
-never gave the model a chance to practice generalizing across genuinely different topologies
-during training itself — it only ever sees that at holdout-eval time. The full 7-city
-`environments/` roster (already exists, no new code needed) is the cheapest version of this test;
-if a wider roster than that is wanted, check `sumo_rl/nets/RESCO/` for what other maps are already
-vendored before building anything new. Same protocol as this session's other pilots
-(`--dueling --n_step 3 --lr_decay 0.97 --min_lr 1e-5 --pad_to_true_holdout`), single-seed pilot
-first per this project's standing convention, multi-seed only if it looks promising.
+**DONE, 2026-09-01: the fine-tune-on-holdout test's 30-episode confirmatory re-eval (queued
+above) is in — real benefit CONFIRMED, more decisively than the 5-episode screen suggested.**
+Zero-shot checkpoint: mean_reward=-8664.73, **std=0.00 across all 30 episodes** — a perfect,
+byte-identical confident lock-in (§34's mechanism, the cleanest instance yet). Fine-tuned round-5
+checkpoint: mean_reward=-1092.10, std=636.86 — not locked at all, and every single one of its 30
+episodes beats zero-shot's constant value (worst case still 3.3x better). Magnitude shrank under
+more rigorous eval (20.9x at 5 episodes → 7.9x at 30, matching §33's "screens are optimistic"
+pattern) but the direction holds robustly. Still ~400-3200x off `fixed_time`/`max_pressure` in
+absolute terms — real, worth having, not close to sufficient alone (same reading as §59-61/§66).
+**Full write-up: fidings/divergence_investigation.md §67.**
+
+**Per this decision, the wider-roster-retrain contingency below does NOT trigger — this was a
+confirmed benefit, not a null.** Following §66/§67's own next-steps ordering instead: multi-seed
+replication of the fine-tune protocol against the same zero-shot starting checkpoint. Launched
+2026-09-01, seeds 7/11/17 (`results/finetune_holdout_fedavg_c146_round063_seed{7,11,17}/`,
+`--rounds 5 --local_episodes 2 --n_variants 5`, same protocol as the original seed-3 run) —
+results pending as of this writeup; once in, decide whether the effect replicates across starting
+seeds before trusting it further (standing single-seed caution, §11→12/30→31/46→47/62→63).
+
+**QUEUED CONTINGENCY, still on the table but now demoted (only reachable if the multi-seed
+fine-tune replication above turns out NOT to hold up, not from the already-passed single-seed
+gate): training from scratch with a wider, more topologically diverse training roster from round
+0, not just this session's usual reduced 2-/3-city rosters.** Rationale (from the 2026-08-31
+"what's the actual bottleneck" discussion): every pilot in this document that used a small roster
+(`environments_c1_4`, `environments_c1_4_6`) never gave the model a chance to practice
+generalizing across genuinely different topologies during training itself — it only ever sees
+that at holdout-eval time. The full 7-city `environments/` roster (already exists, no new code
+needed) is the cheapest version of this test; if a wider roster than that is wanted, check
+`sumo_rl/nets/RESCO/` for what other maps are already vendored before building anything new. Same
+protocol as this session's other pilots (`--dueling --n_step 3 --lr_decay 0.97 --min_lr 1e-5
+--pad_to_true_holdout`), single-seed pilot first per this project's standing convention,
+multi-seed only if it looks promising.
 
 **§64: the no-federation-vs-federated comparison at the extended (63-round) budget is done —
 still no significant difference (|diff|/SE 1.78 best-round, 1.43 mean), extending §49/§50's

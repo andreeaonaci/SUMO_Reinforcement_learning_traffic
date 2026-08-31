@@ -3657,6 +3657,48 @@ number being an optimistic screen (§33's standing lesson); (2) if that holds up
 replication of the fine-tune protocol itself before trusting the direction; (3) only if this
 doesn't hold up at rigor does the wider-roster contingency become the next thing to try.
 
+## 67. §66's step (1), the 30-episode confirmatory re-eval, is done — the fine-tuning benefit
+holds up, more decisively than the 5-episode screen suggested, even though the raw magnitude
+shrank (§33's "screens are optimistic" lesson, confirmed again).
+
+Ran `diagnostics/reeval_checkpoint.py --base_dir environments_c1_4_6 --pad_to_true_holdout
+--dueling --episodes 30` against both the zero-shot checkpoint
+(`results/run_2026_08_29-07_01_27_1193341/global_round_063.pth`) and the fine-tuned round-5
+checkpoint (`results/finetune_holdout_fedavg_c146_round063/global_round_005.pth`) from §66, same
+real-holdout-traffic evaluator both times.
+
+| | mean_reward | std_reward | min / max | mean Q-gap |
+|---|---:|---:|---:|---:|
+| zero-shot | -8664.73 | **0.00** | -8664.73 / -8664.73 | 1.59 |
+| fine-tuned (round 5) | -1092.10 | 636.86 | -2624.82 / -3.49 | 0.03-0.15 |
+
+Two things worth separating. **(a) The zero-shot checkpoint is a perfect, byte-identical
+confident lock-in** — all 30 different SUMO seeds produced the exact same reward, the cleanest
+instance of §34's mechanism anywhere in this document (previous confirmed cases still had a few
+distinct values, e.g. §49's -9584.47/-9587.6 pair). **(b) The fine-tuned checkpoint is not
+locked at all** — high variance, small Q-gaps an order of magnitude below zero-shot's — and even
+its *worst* episode (-2624.82) beats zero-shot's constant value by 3.3x, so this isn't a
+mean-driven result riding on a few lucky episodes; every single one of the 30 fine-tuned episodes
+outperforms every one of zero-shot's. **(c) The magnitude did shrink under more rigorous eval**:
+§66's 5-episode screen showed a 20.9x improvement (-413.96 vs -8668.31); the 30-episode number is
+a 7.9x improvement (-1092.10 vs -8664.73) — real and large, just not as large as the optimistic
+5-episode draw implied, exactly the pattern §33 first flagged and has recurred several times since
+(§62→63, etc.).
+
+Still far from baseline-competitive in absolute terms: `fixed_time`=-2.73, `max_pressure`=-0.34
+(§66's numbers, same evaluator) — fine-tuned is ~400x off `fixed_time` and ~3200x off
+`max_pressure`. Same reading as §59-61 and §66: real, worth having, not close to sufficient alone.
+
+**Decision:** per the CLAUDE.md-recorded rule ("if the fine-tune-on-holdout test does NOT show a
+real benefit, the next lever is training with wider roster"), this is a confirmed real benefit,
+not a null — **the wider-roster-retrain contingency does NOT trigger.** Per §66's own next-steps
+ordering, moving to step (2): multi-seed replication of the fine-tune protocol itself, launched
+same session (seeds 3/7/11/17 against the same zero-shot starting checkpoint, `--rounds 5` each,
+same settings as §66) — see the next section once that lands for whether the effect survives
+multiple starting seeds or was itself a lucky single-seed draw (this document's standing
+single-seed caution, §11→12/30→31/46→47/62→63, applies here too — this is real evidence of a
+benefit, not yet proof it replicates).
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
