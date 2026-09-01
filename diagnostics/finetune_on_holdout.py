@@ -120,12 +120,25 @@ def main():
     ap.add_argument("--target_update", type=int, default=200)
     ap.add_argument("--checkpoint_dir", default=None,
                      help="Default: results/finetune_holdout_<basename of input checkpoint>")
+    ap.add_argument("--random_init", action="store_true",
+                     help="CONTROL ARM: use the checkpoint ONLY to infer the architecture, then "
+                          "throw its weights away and start from a fresh random initialization. "
+                          "Answers the question sec 66-69 cannot on their own: is the federated "
+                          "pre-training actually contributing anything, or is 'fine-tuning' just "
+                          "'training on the holdout city' with the starting point irrelevant? "
+                          "Architecture is inferred from the checkpoint (not hardcoded) so the "
+                          "control is EXACTLY matched to the pretrained arm -- pretrained vs "
+                          "random weights is then the single variable that differs.")
     args = ap.parse_args()
 
     # --- 1. Load checkpoint, auto-detect architecture -----------------
     state = torch.load(args.checkpoint, map_location="cpu")
     arch = infer_arch_from_checkpoint(state)
     print(f"Auto-detected architecture from checkpoint: {arch}")
+    if args.random_init:
+        print("--random_init: DISCARDING the checkpoint's weights, starting from a fresh "
+              "random initialization (architecture kept identical to the checkpoint's). "
+              "This is the control arm for 'does the federated pre-training help at all?'")
 
     with open(REAL_HOLDOUT_CFG_PATH) as f:
         real_cfg = yaml.safe_load(f)
@@ -156,7 +169,13 @@ def main():
         action_dim=arch["action_dim"], dueling=arch["dueling"], head_fix=arch["head_fix"],
         n_step=args.n_step,
     )
-    global_model.load_state_dict(state)
+    if not args.random_init:
+        global_model.load_state_dict(state)
+    # Everything downstream (the zero-shot eval AND the fine-tune's starting
+    # weights) works off start_state, so the control arm's random init is the
+    # SAME random init in both -- the "zero-shot" row for --random_init is a
+    # genuine untrained-network baseline, not a second independent draw.
+    start_state = {k: v.clone() for k, v in global_model.state_dict().items()}
     print(f"Loaded weights from {args.checkpoint}")
 
     # --- 2. Zero-shot baseline on the REAL holdout traffic -------------
@@ -196,7 +215,9 @@ def main():
           f"burst, reaches floor by ~{args.explore_fraction*100:.0f}% of {args.rounds} rounds)")
 
     checkpoint_dir = args.checkpoint_dir or os.path.join(
-        "results", f"finetune_holdout_{os.path.basename(args.checkpoint).replace('.pth', '')}"
+        "results",
+        f"finetune_holdout_{os.path.basename(args.checkpoint).replace('.pth', '')}"
+        f"{'_randominit' if args.random_init else ''}"
     )
     os.makedirs(checkpoint_dir, exist_ok=True)
 
@@ -236,7 +257,7 @@ def main():
     phase1_rounds = min(args.phase1_rounds, args.rounds)
     phase2_rounds = args.rounds - phase1_rounds
 
-    server = build_server(state, args.lr, init_steps_done=0)
+    server = build_server(start_state, args.lr, init_steps_done=0)
     try:
         history = server.run(rounds=phase1_rounds, eval_every=1)
 
