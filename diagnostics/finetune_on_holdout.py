@@ -36,9 +36,18 @@ Protocol:
      caution as every other single-seed result in this document, sec
      11->12/30->31/46->47/62->63).
 
+Two-phase LR schedule (--phase1_rounds/--phase2_lr, sec 69's follow-up): sec 69's 4-seed
+dose-response run showed large round-to-round swings (e.g. seed 7: -1.24 at round 6 ->
+-1335.14 at round 7) suggestive of --lr being too high for the later rounds to hold onto a
+good region once found. Rounds 1..--phase1_rounds run at --lr as before; rounds
+phase1_rounds+1..--rounds continue from that checkpoint at the lower --phase2_lr. Implemented
+as two sequential ParallelFederatedServer instances (round-2 loads round-1's final checkpoint
+off disk) rather than a mid-run LR change inside the shared federated training path --
+--phase1_rounds >= --rounds recovers the original single-phase behavior exactly.
+
 Usage:
     python diagnostics/finetune_on_holdout.py results/run_.../global_round_063.pth \\
-        --rounds 5 --local_episodes 2 --n_variants 5 --seed 3
+        --rounds 8 --phase1_rounds 4 --phase2_lr 1e-5 --local_episodes 2 --n_variants 5 --seed 3
 """
 import argparse
 import os
@@ -90,9 +99,18 @@ def main():
     ap.add_argument("--n_step", type=int, default=3)
     ap.add_argument("--lr", type=float, default=5e-5,
                      help="Deliberately gentler than the 3e-4 used for training from scratch -- "
-                          "this is a SMALL finetune, not a full re-train.")
+                          "this is a SMALL finetune, not a full re-train. Used for rounds "
+                          "1..--phase1_rounds.")
     ap.add_argument("--lr_decay", type=float, default=0.97)
     ap.add_argument("--min_lr", type=float, default=1e-5)
+    ap.add_argument("--phase1_rounds", type=int, default=4,
+                     help="Rounds 1..this run at --lr. Set >= --rounds to disable the two-phase "
+                          "schedule (single phase throughout, original behavior).")
+    ap.add_argument("--phase2_lr", type=float, default=1e-5,
+                     help="LR for rounds phase1_rounds+1..--rounds, once a good region has "
+                          "likely been found and stability matters more than fast progress "
+                          "(sec 69's motivation: large round-to-round swings suggestive of too "
+                          "high an LR for the later rounds).")
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--eval_episodes", type=int, default=5,
                      help="Matches this project's standard per-round eval_episodes. Use a "
@@ -182,38 +200,56 @@ def main():
     )
     os.makedirs(checkpoint_dir, exist_ok=True)
 
-    # Fresh agent for the server: same loaded weights, but eps_decay sized
-    # to the short finetune burst rather than inherited from the checkpoint's
-    # original (already-decayed) schedule -- same reasoning as
-    # recovery_finetune.py's init_steps_done=0.
-    server_model = DQNAgent(
-        own_dim=arch["own_dim"], neighbor_dim=arch["neighbor_dim"], k_max=k_max,
-        action_dim=arch["action_dim"], dueling=arch["dueling"], head_fix=arch["head_fix"],
-        n_step=args.n_step, eps_decay=eps_decay,
-    )
-    server_model.load_state_dict(state)
+    def build_server(start_state: dict, lr: float, init_steps_done: int) -> ParallelFederatedServer:
+        # Fresh agent for the server: loaded weights, but eps_decay sized to the
+        # FULL finetune burst (spans both phases) rather than inherited from the
+        # checkpoint's original (already-decayed) schedule -- same reasoning as
+        # recovery_finetune.py's init_steps_done=0 for a single-phase run;
+        # init_steps_done > 0 here only for phase 2, so epsilon continues
+        # decaying from where phase 1 left off instead of restarting at 1.0.
+        server_model = DQNAgent(
+            own_dim=arch["own_dim"], neighbor_dim=arch["neighbor_dim"], k_max=k_max,
+            action_dim=arch["action_dim"], dueling=arch["dueling"], head_fix=arch["head_fix"],
+            n_step=args.n_step, eps_decay=eps_decay,
+        )
+        server_model.load_state_dict(start_state)
+        return ParallelFederatedServer(
+            global_model=server_model,
+            city_configs=city_configs,
+            own_dim=arch["own_dim"], neighbor_dim=arch["neighbor_dim"], k_max=k_max,
+            action_dim=arch["action_dim"],
+            comm_dropout_cfg={"p_link": 0.0, "p_isolate": 0.0, "p_hop_cutoff": 0.0},
+            local_episodes=args.local_episodes,
+            eps_decay=eps_decay,
+            evaluator=real_evaluator,
+            checkpoint_dir=checkpoint_dir,
+            default_lr=lr, lr_decay=args.lr_decay, min_lr=args.min_lr,
+            head_fix=True,
+            neighbor_attention=arch["head_fix"],
+            tau=args.tau, target_update=args.target_update,
+            seed=args.seed,
+            dueling=arch["dueling"],
+            n_step=args.n_step,
+            init_steps_done=init_steps_done,
+        )
 
-    server = ParallelFederatedServer(
-        global_model=server_model,
-        city_configs=city_configs,
-        own_dim=arch["own_dim"], neighbor_dim=arch["neighbor_dim"], k_max=k_max,
-        action_dim=arch["action_dim"],
-        comm_dropout_cfg={"p_link": 0.0, "p_isolate": 0.0, "p_hop_cutoff": 0.0},
-        local_episodes=args.local_episodes,
-        eps_decay=eps_decay,
-        evaluator=real_evaluator,
-        checkpoint_dir=checkpoint_dir,
-        default_lr=args.lr, lr_decay=args.lr_decay, min_lr=args.min_lr,
-        head_fix=True,
-        neighbor_attention=arch["head_fix"],
-        tau=args.tau, target_update=args.target_update,
-        seed=args.seed,
-        dueling=arch["dueling"],
-        n_step=args.n_step,
-        init_steps_done=0,
-    )
+    phase1_rounds = min(args.phase1_rounds, args.rounds)
+    phase2_rounds = args.rounds - phase1_rounds
+
+    server = build_server(state, args.lr, init_steps_done=0)
     try:
-        history = server.run(rounds=args.rounds, eval_every=1)
+        history = server.run(rounds=phase1_rounds, eval_every=1)
+
+        if phase2_rounds > 0:
+            server.close()
+            print(f"\n=== Phase 2: rounds {phase1_rounds + 1}-{args.rounds} at lr={args.phase2_lr:.1e} "
+                  f"(phase 1 used lr={args.lr:.1e}) ===")
+            phase1_ckpt_path = os.path.join(checkpoint_dir, f"global_round_{phase1_rounds:03d}.pth")
+            phase1_final_state = torch.load(phase1_ckpt_path, map_location="cpu")
+            phase2_init_steps_done = phase1_rounds * args.local_episodes * steps_per_ep
+            server = build_server(phase1_final_state, args.phase2_lr, init_steps_done=phase2_init_steps_done)
+            history = server.run(rounds=args.rounds, eval_every=1,
+                                  start_round=phase1_rounds + 1, initial_history=history)
     finally:
         server.close()
         real_evaluator.close()
