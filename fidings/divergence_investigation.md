@@ -3749,6 +3749,74 @@ route file mid-run without a full env rebuild) if the dose-response curve shows 
 overfitting to the fixed 5 patterns (a plateau or reversal at higher round counts would be that
 signal).
 
+## 69. Fine-tune-duration "dose-response" curve (4 seeds, 7 rounds each) — the benefit keeps
+growing past round 5, two seeds get remarkably close to baseline at their peak, but the
+underlying instability is not fixed by fine-tuning either: round 7 is not reliably better than
+round 6.
+
+**Important methodological caveat, discovered while checking this run — not a clean single-variable
+dose-response curve.** `compute_eps_decay` sizes the exploration schedule from `--rounds`, so a
+`--rounds 7` run spreads epsilon decay more slowly than a `--rounds 5` run — round 5 of a 7-round
+run experienced a *different* (slower) exploration schedule than round 5 of the standalone 5-round
+runs in §66/§68. Confirmed directly: this run's seed-3 rounds 1-5 (-2529.97, -164.57, -1176.60,
+-411.08, -2185.30) do NOT match §66's original seed-3 5-round run (-1321.95, -636.43, -696.86,
+-1691.45, -413.96) at all, despite identical checkpoint, seed, and route files. **So "round N of a
+7-round run" and "round N of a 5-round run" are not directly comparable — this conflates fine-tune
+duration with exploration pace.** The 4 seeds tested here (3/7/11/17) ARE directly comparable to
+each other (same `--rounds 7`, same schedule), so within-this-batch comparisons are valid; a truly
+clean duration-only dose-response curve would need separate standalone runs per duration, not yet
+done.
+
+Same protocol as §66/§68 otherwise (`--local_episodes 2 --n_variants 5 --eval_episodes 5`, same
+`fedavg` round_063 checkpoint, same 5 fixed route files), `--rounds 7`, seeds 3/7/11/17:
+
+| round | seed 3 | seed 7 | seed 11 | seed 17 | mean across seeds |
+|---:|---:|---:|---:|---:|---:|
+| 1 | -2529.97 | -1236.94 | -2243.80 | -2339.19 | -2087.47 |
+| 2 | -164.57 | -283.56 | -212.29 | -494.91 | -288.83 |
+| 3 | -1176.60 | -1495.40 | -705.43 | -292.28 | -917.43 |
+| 4 | -411.08 | -940.85 | -53.58 | -1522.17 | -731.92 |
+| 5 | -2185.30 | -5.61 | -244.66 | -149.08 | -646.16 |
+| 6 | -223.08 | **-1.24** | -213.18 | -150.32 | **-146.96** |
+| 7 | -235.82 | -1335.14 | **-4.31** | -534.76 | -527.51 |
+
+**Round 6 has the best mean reward of any round in this batch (-146.96)** — noticeably better than
+§66/§68's round-5 numbers, so the effect had clearly not plateaued by round 5. Against zero-shot's
+30-episode-confirmed -8664.73: best-of-7-rounds per seed gives mean=-79.80, SE=44.59,
+**|diff|/SE=192.54** (even more extreme than §68's 5-round version); the unbiased round-7-only
+gives mean=-527.51, SE=290.28, **|diff|/SE=28.03**. Both far past this project's ≥2 bar.
+
+**Two seeds reached genuinely near-baseline performance at their peak** — seed 7 round 6: -1.24
+(vs. `max_pressure`'s -0.34, `fixed_time`'s -2.73 — within striking distance of both); seed 11
+round 7: -4.31 (~12.7x off `max_pressure`, ~1.6x off `fixed_time`). These are by far the closest
+any result anywhere in this document has come to rule-based-controller parity.
+
+**But this is not stable, and that's the real finding here.** Seed 7 relapsed sharply the very
+next round after its near-baseline peak: -1.24 (round 6) -> -1335.14 (round 7), a >1000x reversal
+in one round. This is the exact confident-lock-in volatility signature documented throughout this
+project (§32-34, §51-52's "a good policy is reachable by ordinary gradient steps, it just isn't
+retained") — now observed *within* the fine-tune-on-holdout lever too, not just in from-scratch
+federated training. Round-to-round mean also dips after round 6 (mean -527.51 at round 7 vs.
+-146.96 at round 6), driven mostly by seed 7's relapse, not a clean monotonic curve.
+
+**Framing for the paper, updated:** fine-tuning on synthetic random traffic is a real, robust,
+multi-seed-confirmed way to substantially close (and at its peak, nearly eliminate) the
+cross-topology gap — but it does not fix the underlying training instability characterized
+elsewhere in this document. The honest story is "this lever can reach near-baseline performance,
+demonstrating the gap is not fundamentally unclosable, but doesn't reliably stay there any better
+than plain federated training does" — a nuance that strengthens rather than weakens the mechanism
+narrative (§32-57), since it shows the instability is a property of the training dynamics, not
+something fine-tuning-as-currently-implemented incidentally works around.
+
+**Next steps, updated 2026-09-01:** (1) a clean single-duration-variable dose-response curve
+(separate standalone runs at each duration, not one long run) if the exact shape still matters for
+the paper; (2) checkpoint selection strategy — since round 7 isn't reliably better than round 6,
+"best-round-so-far" (as this document already does for federated training) is probably the right
+way to pick a fine-tuned checkpoint to report/deploy, not "final round"; (3) still deferred:
+whether the benefit holds from a different starting checkpoint, and whether per-round traffic
+regeneration helps (no new evidence of overfitting to the fixed 5 patterns from this batch, so
+still not clearly worth the engineering cost yet).
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a

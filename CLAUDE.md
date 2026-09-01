@@ -311,12 +311,26 @@ off `fixed_time`/`max_pressure` in absolute terms even at the single best data p
 seed×round combinations — a real, well-replicated, citable finding, not "solved." Full write-up:
 fidings/divergence_investigation.md §68.
 
-**NOW IN PROGRESS, 2026-09-01: fine-tune-duration dose-response curve on a fixed baseline.** Per
-user request to prioritize "fixed baseline, vary fine-tune duration" over "vary the starting
-checkpoint" — same `fedavg` round_063 checkpoint, same seed=3, `--rounds 7` in a single run
-(`results/finetune_holdout_fedavg_c146_round063_dose7`) — the script evals every round, so one run
-gives the full rounds-1-through-7 curve directly. Also doubles as a determinism check (rounds 1-5
-should reproduce the original seed-3 numbers from §66 almost exactly).
+**DONE, 2026-09-01: fine-tune-duration dose-response curve, 4 seeds (3/7/11/17) x 7 rounds each.**
+Per user request, prioritized "fixed baseline, vary fine-tune duration" — same `fedavg` round_063
+checkpoint throughout. **Caveat discovered while checking it: NOT a clean single-variable curve** —
+`compute_eps_decay` sizes the exploration schedule from `--rounds`, so a 7-round run's early rounds
+use a different (slower) schedule than the standalone 5-round runs in §66/§68; confirmed directly
+(seed-3 rounds 1-5 here don't match §66's original 5-round run at all). The 4 seeds in this batch
+ARE comparable to each other (same schedule), just not round-for-round to §66/§68.
+
+**Result: round 6 has the best mean reward across seeds (-146.96), clearly better than any round-5
+number — the effect had not plateaued at 5 rounds.** best-of-7 per seed |diff|/SE=192.54 (even
+past §68's 5-round 72.78); unbiased round-7-only |diff|/SE=28.03. **Two seeds hit remarkably
+close to baseline at their peak** — seed 7 round 6: -1.24 (vs `max_pressure`'s -0.34,
+`fixed_time`'s -2.73); seed 11 round 7: -4.31 — the closest this document has ever gotten to
+rule-based-controller parity. **But it's not stable: seed 7 relapsed from -1.24 to -1335.14 the
+very next round** — the same confident-lock-in volatility (§32-34/§51-52) showing up inside this
+lever too, not just in from-scratch training. Updated framing: fine-tuning can reach near-baseline
+performance, proving the gap isn't fundamentally unclosable, but doesn't fix the underlying
+instability — "best-round-so-far," not "final round," is probably the right checkpoint-selection
+rule here, same as federated training elsewhere in this document. Full write-up: fidings
+§69.
 
 **QUEUED CONTINGENCY, still on the table but now demoted (only reachable if the multi-seed
 fine-tune replication above turns out NOT to hold up, not from the already-passed single-seed
