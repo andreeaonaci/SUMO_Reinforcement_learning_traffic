@@ -300,9 +300,23 @@ absolute terms — real, worth having, not close to sufficient alone (same readi
 confirmed benefit, not a null.** Following §66/§67's own next-steps ordering instead: multi-seed
 replication of the fine-tune protocol against the same zero-shot starting checkpoint. Launched
 2026-09-01, seeds 7/11/17 (`results/finetune_holdout_fedavg_c146_round063_seed{7,11,17}/`,
-`--rounds 5 --local_episodes 2 --n_variants 5`, same protocol as the original seed-3 run) —
-results pending as of this writeup; once in, decide whether the effect replicates across starting
-seeds before trusting it further (standing single-seed caution, §11→12/30→31/46→47/62→63).
+`--rounds 5 --local_episodes 2 --n_variants 5`, same protocol as the original seed-3 run).
+
+**DONE: multi-seed replication (seeds 3/7/11/17) confirms the benefit decisively — |diff|/SE=72.78
+(best-of-5-rounds) / 32.18 (round-5-only, unbiased) against zero-shot's -8664.73, both more than
+an order of magnitude past this project's ≥2 bar.** Every round of every seed beats zero-shot by
+at least 3.9x. This does NOT fit the "single-seed doesn't replicate" pattern seen everywhere else
+in this document — it's the strongest, most cleanly confirmed positive result here. Still ~20-3200x
+off `fixed_time`/`max_pressure` in absolute terms even at the single best data point across all 20
+seed×round combinations — a real, well-replicated, citable finding, not "solved." Full write-up:
+fidings/divergence_investigation.md §68.
+
+**NOW IN PROGRESS, 2026-09-01: fine-tune-duration dose-response curve on a fixed baseline.** Per
+user request to prioritize "fixed baseline, vary fine-tune duration" over "vary the starting
+checkpoint" — same `fedavg` round_063 checkpoint, same seed=3, `--rounds 7` in a single run
+(`results/finetune_holdout_fedavg_c146_round063_dose7`) — the script evals every round, so one run
+gives the full rounds-1-through-7 curve directly. Also doubles as a determinism check (rounds 1-5
+should reproduce the original seed-3 numbers from §66 almost exactly).
 
 **QUEUED CONTINGENCY, still on the table but now demoted (only reachable if the multi-seed
 fine-tune replication above turns out NOT to hold up, not from the already-passed single-seed

@@ -3653,9 +3653,10 @@ up at multi-seed rigor.
 from scratch on a wider/more diverse roster, queued in CLAUDE.md 2026-08-31) does not trigger yet.
 Next concrete steps, in order: (1) a 30-episode confirmatory re-eval of the round-5 checkpoint
 (`results/finetune_holdout_fedavg_c146_round063/global_round_005.pth`) to rule out the 5-episode
-number being an optimistic screen (§33's standing lesson); (2) if that holds up, multi-seed
-replication of the fine-tune protocol itself before trusting the direction; (3) only if this
-doesn't hold up at rigor does the wider-roster contingency become the next thing to try.
+number being an optimistic screen (§33's standing lesson) — **done, see §67**; (2) if that holds
+up, multi-seed replication of the fine-tune protocol itself before trusting the direction — **done,
+see §68**; (3) only if this doesn't hold up at rigor does the wider-roster contingency become the
+next thing to try — **did not trigger, see §67/§68**.
 
 ## 67. §66's step (1), the 30-episode confirmatory re-eval, is done — the fine-tuning benefit
 holds up, more decisively than the 5-episode screen suggested, even though the raw magnitude
@@ -3698,6 +3699,55 @@ same settings as §66) — see the next section once that lands for whether the 
 multiple starting seeds or was itself a lucky single-seed draw (this document's standing
 single-seed caution, §11→12/30→31/46→47/62→63, applies here too — this is real evidence of a
 benefit, not yet proof it replicates).
+
+## 68. Multi-seed replication (seeds 3/7/11/17) confirms the fine-tune-on-holdout benefit
+decisively — this is now the strongest, most cleanly confirmed positive result anywhere in this
+document, and does not fit the "single-seed story doesn't replicate" pattern seen everywhere else
+(§11→12/30→31/46→47/62→63).
+
+Same protocol as §66 (`--rounds 5 --local_episodes 2 --n_variants 5 --eval_episodes 5`, same
+`fedavg` round_063 starting checkpoint, same 5 fixed randomized-traffic route files reused across
+seeds), varying only `--seed`:
+
+| seed | round 1 | round 2 | round 3 | round 4 | round 5 |
+|---:|---:|---:|---:|---:|---:|
+| 3 | -1321.95 | -636.43 | -696.86 | -1691.45 | -413.96 |
+| 7 | -1674.97 | -1704.26 | -412.01 | -2203.05 | -707.31 |
+| 11 | -1017.97 | -6.66 | -240.73 | -483.74 | -1458.29 |
+| 17 | -2252.63 | -14.74 | -230.88 | -116.87 | -1240.25 |
+
+Against zero-shot's §67-confirmed 30-episode value of -8664.73: best-of-5-rounds per seed gives
+mean=-211.84, SE=116.14, **|diff|/SE=72.78**; the more conservative, selection-bias-free
+round-5-only (final round, not cherry-picked) gives mean=-954.95, SE=239.57, **|diff|/SE=32.18**.
+Both clear this project's ≥2 bar by more than an order of magnitude — nothing else in this document
+comes close to this large a margin. Every single round of every one of the 4 seeds tested is at
+least 3.9x better than zero-shot; several individual data points are 10-1000x better. This is not
+a fragile, lucky-seed effect.
+
+**Still true and worth restating: this closes a huge fraction of the gap without coming close to
+being baseline-competitive.** Even the single best result across all 20 (4 seeds × 5 rounds) data
+points (-6.66, seed 11 round 2) is still ~20x worse than `max_pressure` (-0.34, §66's number, same
+evaluator) and ~2.4x worse than `fixed_time` (-2.73). The honest framing for a paper: a cheap,
+robust, mechanistically-grounded (§67's lock-in-escape mechanism) test-time intervention that
+reliably recovers most of the reward on offer without reaching rule-based-controller parity — a
+real, well-replicated, citable finding on its own, not a "solved it" result.
+
+**Decision, matching §67's: the wider-roster-retrain contingency (queued in CLAUDE.md 2026-08-31)
+continues to NOT trigger** — this lever is confirmed working, not stalled.
+
+**Next steps in progress (agreed 2026-09-01, prioritized as "dose-response on a fixed baseline
+first, vary-the-starting-checkpoint second"):** characterizing the fine-tune-duration dose-response
+curve — same `fedavg` round_063 checkpoint, same seed=3, `--rounds 7` in one run (the script evals
+every round via `eval_every=1`, so one run captures rounds 1-7 directly, no need for 5 separate
+short runs) — launched, in progress as of this writing
+(`results/finetune_holdout_fedavg_c146_round063_dose7`). Deferred until that curve is in: (a)
+whether the benefit holds starting from a *different* federated checkpoint (earlier/weaker, or the
+`clustered_fedavg` run instead of `fedavg`); (b) whether regenerating the random traffic each round
+(rather than the same 5 fixed variants held constant for the whole burst) helps further — only
+worth the engineering cost (`ParallelFederatedServer` workers don't currently support swapping a
+route file mid-run without a full env rebuild) if the dose-response curve shows signs of
+overfitting to the fixed 5 patterns (a plateau or reversal at higher round counts would be that
+signal).
 
 ## Open questions / next steps
 
