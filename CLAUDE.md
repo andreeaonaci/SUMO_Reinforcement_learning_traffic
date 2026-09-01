@@ -332,6 +332,28 @@ instability — "best-round-so-far," not "final round," is probably the right ch
 rule here, same as federated training elsewhere in this document. Full write-up: fidings
 §69.
 
+**CRITICAL, 2026-09-01 — §70, read this before citing §66-69 as support for the foundation-model
+premise: the control those sections were missing came back against us.** Added `--random_init` to
+`diagnostics/finetune_on_holdout.py` (infers architecture from the checkpoint, then discards its
+weights — exactly-matched control, pretrained-vs-random is the only variable) and ran it against
+the pretrained arm with identical settings (round_039 start, 8 rounds, two-phase LR, seed 3).
+**At matched 30-episode rigor the random-init control BEAT the federated-pretrained arm: -406.85
+vs -693.84 (1.71x).** Directional, not established — single training seed per arm, and the
+|diff|/SE=2.15 computable from those 30 episodes is the WRONG statistic (it measures
+episode-level variance within one checkpoint, not the training-seed variance that actually
+dominates here — §69 saw one seed swing -1.24 → -1335 in a round). **Multi-seed replication of
+both arms is now the single highest-value experiment left.**
+
+Two side findings from the same run, both independently useful: **(1) the federated model's FINAL
+checkpoint (round 63, zero-shot -8668.31) is worse on the true holdout than a randomly initialized
+network (-7689.59)** — training past round 39 drove it below random, a concrete instance of the
+confident-lock-in thread and further justification for best-round-not-final-round selection;
+**(2) the two-phase LR schedule did NOT fix the volatility** — both arms degraded through phase 2
+despite a 5x LR cut, which is decent evidence the instability isn't a step-size problem. Does not
+retract §66-69 (fine-tuning genuinely helps vs. zero-shot); it changes the interpretation to
+"training on the target topology helps," not "federated pre-training transfers." Full write-up:
+fidings §70.
+
 **QUEUED CONTINGENCY, still on the table but now demoted (only reachable if the multi-seed
 fine-tune replication above turns out NOT to hold up, not from the already-passed single-seed
 gate): training from scratch with a wider, more topologically diverse training roster from round

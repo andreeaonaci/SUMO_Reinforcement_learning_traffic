@@ -3817,6 +3817,107 @@ whether the benefit holds from a different starting checkpoint, and whether per-
 regeneration helps (no new evidence of overfitting to the fixed 5 patterns from this batch, so
 still not clearly worth the engineering cost yet).
 
+## 70. THE CONTROL §66-69 WAS MISSING: a randomly-initialized network, fine-tuned identically,
+matches or beats the federated-pretrained one. On this evidence the federated pre-training is
+not what produces §66-69's headline improvement — read this section before citing §66-69 as
+evidence for the foundation-model premise.
+
+**Why this section exists.** §66-69 established a large, multi-seed-confirmed improvement from
+fine-tuning a federated checkpoint on synthetic holdout-topology traffic. But none of those runs
+could distinguish three explanations: **(a)** the federated pre-training provides a useful
+starting point that fine-tuning adapts (the premise this whole project rests on); **(b)** the
+starting point is irrelevant and "fine-tuning" is simply "training on the target city", which
+would work as well from scratch; **(c)** a mix — pretraining helps reach a good result
+faster/more reliably without being necessary. Added `--random_init` to
+`diagnostics/finetune_on_holdout.py` to discriminate: it infers the architecture from the
+checkpoint (so the control is *exactly* matched — same own_dim/neighbor_dim/action_dim/dueling/
+head_fix) then discards the weights and starts from a fresh random init. Pretrained-vs-random
+weights is the single variable.
+
+**Protocol (both arms identical apart from starting weights):** starting checkpoint
+`results/run_2026_08_29-07_01_27_1193341/global_round_039.pth` (the `fedavg` baseline's *best*
+training round, not its final one — see the zero-shot table below for why that matters),
+`--rounds 8 --phase1_rounds 4 --phase2_lr 1e-5 --local_episodes 2 --n_variants 5
+--eval_episodes 5 --seed 3`, same 5 fixed randomized route files.
+
+**Zero-shot, before any fine-tuning (5-episode eval, same evaluator):**
+
+| starting point | zero-shot reward |
+|---|---:|
+| federated round 39 (best training round) | -4294.87 |
+| **random init (untrained)** | **-7689.59** |
+| federated round 63 (final training round) | -8668.31 |
+
+**Two findings here, and the second is independently important.** First, pre-training *does* give
+a real head start over random weights (-4294.87 vs -7689.59, ~1.8x) — so hypothesis (b) is not
+true at the starting line. Second, and more damaging: **the federated model's FINAL checkpoint
+(round 63) is worse on the true holdout than a randomly initialized network.** Training from round
+39 to round 63 drove the model below random on the target city. That is a concrete, quantified
+instance of the confident-lock-in thread (§32-34/§51-57), and it converges with §67's finding that
+round 63's 30-episode eval had *exactly zero* variance across SUMO seeds — the model is not merely
+suboptimal, it is confidently locked into behaviour worse than noise. It also independently
+justifies the "best-round, not final-round" checkpoint-selection rule §69 arrived at.
+
+**Fine-tuning curves (5-episode per-round screen):**
+
+| arm | r1 | r2 | r3 | r4 | r5 | r6 | r7 | r8 | best | final |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| pretrained (r39) | -1016.68 | -862.91 | -426.58 | -2372.52 | -526.58 | **-275.38** | -1156.64 | -1338.06 | -275.38 (r6) | -1338.06 |
+| random init | -876.39 | -282.84 | -581.94 | **-0.41** | -1060.33 | -1573.63 | -2661.61 | -1726.84 | -0.41 (r4) | -1726.84 |
+
+**Matched 30-episode confirmatory re-eval of each arm's best checkpoint** (the 5-episode screen is
+known to run optimistic — §33, re-confirmed here: the control's headline -0.41 became -406.85):
+
+| arm | mean_reward | std | min / max |
+|---|---:|---:|---:|
+| pretrained r39 → fine-tune round 6 | -693.84 | 531.12 | -1853.50 / -1.25 |
+| **random init → fine-tune round 4** | **-406.85** | 501.56 | -1375.79 / **-0.03** |
+
+**The random-init control is 1.71x better than the federated-pretrained arm** at matched
+30-episode rigor. Both arms have enormous within-checkpoint variance (std ~500 on means of
+-400/-700; both have single episodes reaching essentially perfect play, -0.03 and -1.25, alongside
+episodes near -1400/-1850) — these are not stable policies, they are policies that *sometimes*
+find a near-optimal region.
+
+**On statistical rigor, stated precisely because it matters for how far this can be pushed.**
+Computing |diff|/SE from the 30 episodes gives 2.15, nominally past this project's ≥2 bar — **but
+that is the wrong statistic for this claim and should not be quoted as if it settled the
+question.** Those 30 episodes measure episode-to-episode (SUMO-seed) variance *within one fixed
+checkpoint*; the claim "pre-training does/doesn't help" needs variance across *training* seeds,
+which §69 showed is enormous (one seed swung -1.24 → -1335.14 in a single round). With one training
+seed per arm, the dominant uncertainty is unmeasured. **Correct reading: directionally, random init
+matches or beats federated pre-training at this budget; NOT established at this project's own
+standard of rigor.** The decisive experiment — multi-seed replication of both arms — is not yet
+run and is the single highest-value thing left in this thread.
+
+**Also relevant: the two-phase LR schedule (this section's other change) did not work.** It was
+added on the hypothesis that §69's large round-to-round swings meant the LR was too high to hold a
+good region once found. Rounds 5-8 ran at 1e-5 (5x lower). Both arms nonetheless *degraded* through
+phase 2 — the control monotonically (-1060 → -1573 → -2662 → -1727), the pretrained arm still
+swinging ~4x — and both ended 5-6x worse than their own best round. **Two independent arms failing
+to stabilize under a 5x LR cut is reasonable evidence the volatility is not a step-size problem**,
+pushing the explanation back toward the confident-lock-in mechanism rather than optimizer
+settings.
+
+**What this does and does not overturn.** It does NOT retract §66-69: fine-tuning on
+holdout-topology traffic really does produce a large improvement over the zero-shot federated
+model, replicated across seeds. What it changes is the *interpretation* — that improvement is
+evidence for "training on the target city's topology helps", not for "federated pre-training
+transfers usefully." Given this project's premise is a shared foundation policy across topologies,
+that distinction is central rather than incidental, and it is the honest headline: **at this
+budget, on this holdout, the federated pre-training is not measurably the source of the benefit.**
+For the paper this is a legitimate and publishable negative control — arguably a more interesting
+contribution than the positive result it qualifies, and squarely in the same category as RESCO's
+own "published methods underperform simple baselines" finding.
+
+**Next steps, in priority order:** (1) **multi-seed replication of both arms** (3-5 seeds each,
+same matched protocol) — the decisive experiment, converts this from directional to established
+or refutes it; (2) if the control holds, re-examine whether *any* claim in this document depends
+on federated pre-training contributing beyond a better starting point; (3) a fair-budget caveat
+worth testing eventually — this compares arms at a *fixed* 8-round fine-tune budget, which is the
+decision-relevant comparison given the lever's selling point is cheapness, but does not establish
+what happens if the random-init arm is given substantially more training.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
