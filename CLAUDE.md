@@ -354,19 +354,34 @@ retract §66-69 (fine-tuning genuinely helps vs. zero-shot); it changes the inte
 "training on the target topology helps," not "federated pre-training transfers." Full write-up:
 fidings §70.
 
-**QUEUED CONTINGENCY, still on the table but now demoted (only reachable if the multi-seed
-fine-tune replication above turns out NOT to hold up, not from the already-passed single-seed
-gate): training from scratch with a wider, more topologically diverse training roster from round
-0, not just this session's usual reduced 2-/3-city rosters.** Rationale (from the 2026-08-31
-"what's the actual bottleneck" discussion): every pilot in this document that used a small roster
-(`environments_c1_4`, `environments_c1_4_6`) never gave the model a chance to practice
-generalizing across genuinely different topologies during training itself — it only ever sees
-that at holdout-eval time. The full 7-city `environments/` roster (already exists, no new code
-needed) is the cheapest version of this test; if a wider roster than that is wanted, check
-`sumo_rl/nets/RESCO/` for what other maps are already vendored before building anything new. Same
-protocol as this session's other pilots (`--dueling --n_step 3 --lr_decay 0.97 --min_lr 1e-5
---pad_to_true_holdout`), single-seed pilot first per this project's standing convention,
-multi-seed only if it looks promising.
+**DONE 2026-09-02, §71 — the wider-roster contingency was run and came back NULL, which together
+with §70 closes off "the training data isn't diverse enough" as an explanation.** Built
+`diagnostics/generate_grid_cities.py` (netgenerate a perfect lattice → delete a fraction of
+interior traffic-light nodes + their edges → netconvert rebuild, so junctions around each hole
+become 3-way/dead-end) and generated 8 irregular-grid cities: 116 intersections, action-count
+spread {2: 8, 3: 42, 4: 66}, with within-city mixing. `environments_wide/` = those 8 + the 6 real
+RESCO training cities = **14 training cities** (vs. the 3-city comparison roster's 26
+intersections). Two gotchas measured and encoded as script defaults, either of which would have
+silently invalidated the test: SUMO's default `--tls.layout opposites` collapses every junction to
+2 actions regardless of shape (so varied geometry would still have given an action-space
+monoculture — `incoming` makes phase count follow junction degree), and at `--lanes 1` netconvert
+doesn't signalize junctions at all. Holdout resolution verified as a real `city_5_holdout`
+(`is_true_holdout=True`), not a §25-style silent fallback.
+
+**Result (identical protocol/seed/budget to §65's 3-city `fedavg` baseline; stopped at round 58/63
+by user request, matched rounds-21-58 window on both sides, n=38 each): mean -6304.85 (wide) vs
+-6110.73 (narrow), |diff|/SE = 0.60 — a clean null, narrow nominally ahead.** The wide roster did
+take the best-ever true-holdout round in this document (-3451.49 at round 41, vs the narrow
+roster's -4294.87, ~20% better), but that's one round out of 58 in a run swinging -3451 to -9588 —
+the "reachable but not retained" pattern of §51/§52/§69, so weak evidence of a better basin against
+a mean that didn't move. **Conclusion: 3 → 14 cities (26 → 116 intersections, uniform → mixed
+2/3/4-way) produced no mean improvement in cross-topology generalization. Two independent lines
+(§70's random-init control, §71's roster diversity) now point at the same thing — the binding
+constraint is the algorithm's failure to retain/transfer, not the training data.** That's the
+sharpest form of this project's central negative result and the right axis for the paper. Full
+write-up: fidings §71. Caveats: single seed (directional, though a |diff|/SE of 0.60 needs a large
+seed effect to reach 2), synthetic grids so this tests topological — not demand-pattern —
+diversity.
 
 **§64: the no-federation-vs-federated comparison at the extended (63-round) budget is done —
 still no significant difference (|diff|/SE 1.78 best-round, 1.43 mean), extending §49/§50's

@@ -3918,6 +3918,82 @@ worth testing eventually — this compares arms at a *fixed* 8-round fine-tune b
 decision-relevant comparison given the lever's selling point is cheapness, but does not establish
 what happens if the random-init arm is given substantially more training.
 
+## 71. The roster-diversity hypothesis tested directly and comes back NULL: 14 topologically
+diverse cities perform no better on the true holdout than 3. Together with §70 this closes off
+"the training data isn't diverse enough" as the explanation.
+
+**The hypothesis.** §70's random-init control found the federated pre-training wasn't transferring
+anything useful. The most obvious benign explanation: every roster this project has trained on is
+small and topologically narrow (2-7 cities, mostly uniform intersection shapes), so the model never
+*practices* generalizing across genuinely different topologies during training — it only meets a
+different one at holdout-eval time. If that were the constraint, a much wider and more varied
+roster should help. This section tests exactly that.
+
+**New tooling (`diagnostics/generate_grid_cities.py`, committed).** Generates synthetic cities by
+`netgenerate`-ing a perfect NxM lattice, deleting a `--drop_fraction` of interior traffic-light
+nodes plus every edge touching them, and rebuilding with `netconvert`
+(`--keep-edges.components 1`, so a deletion that splits the lattice still yields one routable net).
+Junctions around each hole become 3-way T-junctions and dead-ends, so one city contains a genuine
+mix of 2-, 3- and 4-way intersections rather than netgenerate's uniform 4-way monoculture.
+
+**Two measured facts encoded as defaults in that script, both of which would have silently
+invalidated this experiment:** (1) SUMO's default `--tls.layout opposites` collapses *every*
+junction to 2 actions regardless of its shape (measured: a 4x4 grid gives `{2: 16}`) — i.e. the
+default would have produced an action-space monoculture even though the *geometry* was varied;
+`incoming` makes phase count follow junction degree (3-way→3 actions, 4-way→4). (2) At
+`--lanes 1`, netconvert declines to signalize the junctions at all (zero `tlLogic` elements).
+
+**Roster built:** 8 generated cities (3x3/4x4/5x5/6x6, drop 0-30%), 116 intersections total,
+action-count spread `{2-action: 8, 3-action: 42, 4-action: 66}`, with genuine *within-city* mixing
+(e.g. `grid_4x4_drop20` = 1/5/7 intersections at 2/3/4 actions). `environments_wide/` combines
+these with the 6 real RESCO training cities = **14 training cities**, roster action_dim spread
+2/3/4/5 (holdout 8), vs. the 3-city comparison roster's 26 intersections. Verified before
+launching, given §25's silent-fallback incident: `resolve_city_configs_and_dims` agrees on
+(117, 3, 8) across all 14, and `make_holdout_evaluator` resolves to `city_5_holdout` with
+`is_true_holdout=True` — a real holdout, not a compatibility fallback.
+
+**Result.** Identical protocol/seed/budget to the 3-city `fedavg` baseline of §65
+(`--dueling --n_step 3 --lr 3e-4 --lr_decay 0.97 --min_lr 1e-5 --pad_to_true_holdout --seed 3
+--eval_every 1 --eval_episodes 5`). Run stopped by user request at round 58/63; all numbers below
+use the **matched** rounds-21-58 window on both sides, n=38 each:
+
+| | mean(21-58) | std | best round ever |
+|---|---:|---:|---:|
+| wide (14 cities) | -6304.85 | 1311.43 | **-3451.49** (round 41) |
+| narrow (3 cities) | -6110.73 | 1488.81 | -4294.87 |
+
+**Mean: a clean null — |diff|/SE = 0.60**, far below this project's ≥2 bar, with the narrow roster
+nominally *ahead*. **Best-round: the wide roster wins** (-3451.49 vs -4294.87, ~20% better) — the
+best true-holdout round anywhere in this document.
+
+**How to read the split.** The best-round edge is a single round out of 58 in a run whose rewards
+swing from -3451 to -9588. §51/§52 established precisely this pattern (good policies are
+*reachable* by ordinary gradient steps but not *retained*), and §69 saw the same thing inside the
+fine-tune lever. A better single peak is therefore weak evidence of a better basin; the mean is the
+more robust statistic and it says nothing changed. Worth noting the wide run's best came at round
+41 and its second-best stretch was rounds 50-52, i.e. late — so "wide roster needs more rounds" is
+not fully excluded by stopping at 58, but 38 matched rounds showing no mean separation makes a
+large late effect unlikely.
+
+**Conclusion, and it is a substantive one.** Going from 3 → 14 cities (26 → 116 intersections,
+uniform → genuinely mixed 2/3/4-way, action_dim spread 2-5) produced **no mean improvement in
+cross-topology generalization**. A 30-city roster behaving differently when 14 behaves like 3 is
+not a good bet. **Combined with §70's random-init control, two independent lines of evidence now
+point the same way: the binding constraint is not the training data — not its quantity, not its
+topological diversity — but the algorithm's failure to retain and transfer what it learns.**
+That is a much sharper statement of the project's central negative result than §43-§61's
+"generalization gap" framing, and it is the right one to build the paper's argument around.
+
+**Caveats:** single seed (§69 showed seed-to-seed variation here is enormous, so this is
+directional, not confirmatory — though note it would take a *large* seed effect to move a
+|diff|/SE of 0.60 past 2); stopped at 58/63 rounds by user request, with matched windows used
+throughout so no comparison is biased by the early stop; the generated cities are synthetic grids,
+so this tests *topological* diversity, not real-world demand-pattern diversity.
+
+**Data:** `results/run_2026_09_01-22_46_01_1690128` (wide, 58 rounds + per-round checkpoints),
+`results/run_2026_08_29-07_01_27_1193341` (narrow 3-city baseline, full 63). Rosters:
+`environments_wide/`, `environments_grid/`; nets under `sumo_rl/nets/generated/`.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
