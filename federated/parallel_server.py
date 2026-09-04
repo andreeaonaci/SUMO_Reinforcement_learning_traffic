@@ -61,6 +61,7 @@ from federated.aggregation_strategies import (
 from federated.comm_dropout import CommDropoutWrapper
 from environments.federated_env import build_federated_env, ActionMaskPadder
 from agents.dqn import DQNAgent
+from agents.ppo import PPOAgent
 from federated.utils import set_seed
 
 logger = logging.getLogger(__name__)
@@ -93,6 +94,7 @@ def _client_worker(
     seed: Optional[int] = None,
     init_steps_done: int = 0,
     epsilon_reset_every: int = 0,
+    algo: str = "dqn",
 ):
     """Runs inside its own process for the ENTIRE training run.
 
@@ -157,16 +159,23 @@ def _client_worker(
         # independent-looking -- pseudorandom sequences.
         dropout_cfg.setdefault("seed", None if seed is None else seed + 1_000_003)
         env = CommDropoutWrapper(ActionMaskPadder(env, action_dim), **dropout_cfg)
-        agent = DQNAgent(
-            own_dim=own_dim, neighbor_dim=neighbor_dim, k_max=k_max,
-            action_dim=action_dim, eps_decay=eps_decay,
-            lr=lr, lr_decay=lr_decay, min_lr=min_lr,
-            head_fix=neighbor_attention,
-            tau=tau, target_update=target_update,
-            mu=mu, dueling=dueling, n_step=n_step,
-            init_steps_done=init_steps_done,
-            q_entropy_weight=q_entropy_weight,
-        )
+        if algo == "ppo":
+            agent = PPOAgent(
+                own_dim=own_dim, neighbor_dim=neighbor_dim, k_max=k_max,
+                action_dim=action_dim, lr=lr, lr_decay=lr_decay, min_lr=min_lr,
+                head_fix=neighbor_attention,
+            )
+        else:
+            agent = DQNAgent(
+                own_dim=own_dim, neighbor_dim=neighbor_dim, k_max=k_max,
+                action_dim=action_dim, eps_decay=eps_decay,
+                lr=lr, lr_decay=lr_decay, min_lr=min_lr,
+                head_fix=neighbor_attention,
+                tau=tau, target_update=target_update,
+                mu=mu, dueling=dueling, n_step=n_step,
+                init_steps_done=init_steps_done,
+                q_entropy_weight=q_entropy_weight,
+            )
 
         while True:
             msg = in_queue.get()  # blocks until the main process sends something
@@ -192,7 +201,7 @@ def _client_worker(
             # recovery bursts used a similar-order eps_decay) to reach the
             # floor again well before the next reset at typical round
             # lengths.
-            if epsilon_reset_every > 0 and round_num % epsilon_reset_every == 0:
+            if algo == "dqn" and epsilon_reset_every > 0 and round_num % epsilon_reset_every == 0:
                 agent.steps_done = 0
                 logger.info("Worker '%s' round %d: periodic epsilon reset (steps_done -> 0)",
                             name, round_num)
@@ -282,7 +291,9 @@ class ParallelFederatedServer:
         eval_ema_decay: float = 0.0,
         init_steps_done: int = 0,
         epsilon_reset_every: int = 0,
+        algo: str = "dqn",
     ):
+        self.algo = algo
         self.global_model = global_model
         self.evaluator = evaluator
         self.checkpoint_dir = checkpoint_dir
@@ -298,10 +309,16 @@ class ParallelFederatedServer:
         # "masked-head ablation" result was silently also an
         # attention-vs-pooling comparison. Now independent so each can be
         # tested in isolation.
-        self.head_fix = bool(head_fix)
+        # Forced off under PPO regardless of the requested flag: masked-head
+        # aggregation's key names (head_key_names(dueling) below) are DQN
+        # Q-head-specific ("advantage_head.*"/"head.4.*") and don't exist in
+        # PPOAgent's state dict (policy_head/ac_value_head) -- plain full-
+        # state FedAvg is used instead, same as the sequential path's
+        # matching guard in experiments/federated_training.py.
+        self.head_fix = bool(head_fix) and algo == "dqn"
         self.neighbor_attention = bool(neighbor_attention)
         self.fedavg_blend = float(max(0.0, min(1.0, fedavg_blend)))
-        self._head_weight_key, self._head_bias_key = head_key_names(dueling)
+        self._head_weight_key, self._head_bias_key = head_key_names(dueling and algo == "dqn")
         self.server_momentum = float(server_momentum)
         self._momentum_buffer: Optional[Dict[str, torch.Tensor]] = None
         self.pseudo_grad_clip = float(pseudo_grad_clip)
@@ -360,6 +377,7 @@ class ParallelFederatedServer:
                     self.in_queues[name], self.out_queue,
                     city_seed, init_steps_done,
                     self.epsilon_reset_every,
+                    self.algo,
                 ),
                 daemon=True,
             )

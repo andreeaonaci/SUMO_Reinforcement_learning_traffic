@@ -696,10 +696,10 @@ def main(args):
         }
         logger.info("Reward shaping (training only, not eval): %s", reward_shaping_cfg)
 
-    if args.parallel and args.algo != "dqn":
+    if args.algo != "dqn" and args.resume:
         raise ValueError(
-            f"--algo {args.algo} is only wired into the sequential path (no --parallel) as of "
-            "this writeup -- see agents/ppo.py's module docstring. Drop --parallel to run it."
+            f"--resume is not supported with --algo {args.algo} yet -- resume_ckpt loading "
+            "(main()'s resume block below) assumes a DQNAgent-shaped checkpoint/schedule."
         )
 
     if args.parallel:
@@ -730,6 +730,7 @@ def main(args):
             dueling=args.dueling,
             n_step=args.n_step,
             q_entropy_weight=args.q_entropy_weight,
+            algo=args.algo,
         )
 
         start_round = 1
@@ -814,6 +815,7 @@ def main(args):
             eval_ema_decay=args.eval_ema_decay,
             init_steps_done=init_steps_done,
             epsilon_reset_every=args.epsilon_reset_every,
+            algo=args.algo,
         )
         history = server.run(
             rounds=args.rounds,
