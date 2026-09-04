@@ -378,10 +378,14 @@ class FederatedServer:
                 self.strategy.record_global_gradient(new_global_gradient)
 
             if r % eval_every == 0:
+                # state_dict(), not .q.parameters() -- agent-agnostic (both
+                # DQNAgent and PPOAgent, agents/ppo.py, implement
+                # state_dict(); only DQNAgent has a `.q` network by that
+                # exact name).
                 total_norm = (
                     sum(
-                        p.data.norm(2).item() ** 2
-                        for p in self.global_model.q.parameters()
+                        v.float().norm(2).item() ** 2
+                        for v in self.global_model.state_dict().values()
                     )
                     ** 0.5
                 )
@@ -466,7 +470,7 @@ class FederatedServer:
                     f"global_round_{r:03d}.pth",
                 )
 
-                torch.save(self.global_model.q.state_dict(), ckpt_path)
+                torch.save(self.global_model.state_dict(), ckpt_path)
                 logger.info("Checkpoint saved: %s", ckpt_path)
 
         return history

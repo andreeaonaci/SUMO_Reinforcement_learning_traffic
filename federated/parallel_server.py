@@ -709,7 +709,12 @@ class ParallelFederatedServer:
                     )
 
                     ckpt_path = os.path.join(self.checkpoint_dir, f"global_round_{r:03d}.pth")
-                    torch.save(self.global_model.q.state_dict(), ckpt_path)
+                    # state_dict(), not .q.state_dict() -- agent-agnostic
+                    # (see federated/server.py's matching fix); identical
+                    # behavior for DQNAgent today, and needed if/when a
+                    # non-DQN agent (agents/ppo.py) is wired into this
+                    # (parallel) path.
+                    torch.save(self.global_model.state_dict(), ckpt_path)
                     logger.info("Checkpoint saved: %s", ckpt_path)
         finally:
             self.close()

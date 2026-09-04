@@ -24,7 +24,7 @@ The network never sees which city or topology an observation came from --
 that's the whole point. Everything topology-specific is expressed purely
 through the masks.
 """
-from typing import Optional
+from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 
@@ -72,13 +72,17 @@ class NeighborAttentionQNetwork(nn.Module):
         n_hops: int = 4,
         head_fix: bool = True,
         dueling: bool = False,
+        actor_critic: bool = False,
     ):
         super().__init__()
+        if dueling and actor_critic:
+            raise ValueError("dueling and actor_critic are mutually exclusive head types.")
         self.k_max = k_max
         self.d_model = d_model
         self.n_hops = n_hops
         self.head_fix = head_fix
         self.dueling = dueling
+        self.actor_critic = actor_critic
 
         self.own_encoder = nn.Sequential(
             nn.Linear(own_dim, d_model),
@@ -137,6 +141,15 @@ class NeighborAttentionQNetwork(nn.Module):
             # (see federated/aggregation.py) still applies to this one.
             self.value_head = nn.Linear(d_model, 1)
             self.advantage_head = nn.Linear(d_model, action_dim)
+        elif self.actor_critic:
+            # Same shared trunk as the dueling head, split into a policy
+            # (action logits, masked+softmaxed by the caller -- this class
+            # never applies action_mask itself, matching the plain/dueling
+            # Q-head convention) and a state-value scalar. Kept as two
+            # separate Linears (not fused) so PPOAgent can read raw logits
+            # and value independently without slicing one tensor apart.
+            self.policy_head = nn.Linear(d_model, action_dim)
+            self.ac_value_head = nn.Linear(d_model, 1)
         else:
             self.head.append(nn.Linear(d_model, action_dim))
 
@@ -157,13 +170,17 @@ class NeighborAttentionQNetwork(nn.Module):
         advantage = self.advantage_head(feat)
         return value + (advantage - advantage.mean(dim=-1, keepdim=True))
 
-    def forward(
+    def _combined_features(
         self,
         own_obs: torch.Tensor,
         neighbor_obs: torch.Tensor,
         neighbor_mask: torch.Tensor,
         hop_dist: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        """Own-obs + attended (or mean-pooled, if not head_fix) neighbor
+        summary, concatenated -- everything upstream of ``self.head``.
+        Factored out of ``forward`` so ``forward_actor_critic`` can reuse
+        the exact same trunk instead of duplicating this logic."""
         B, K, _ = neighbor_obs.shape
 
         own_emb = self.own_encoder(own_obs)  # (B, d_model)
@@ -175,8 +192,7 @@ class NeighborAttentionQNetwork(nn.Module):
             nbr_count = valid.sum(dim=1, keepdim=True).clamp(min=1.0)
             nbr_pool = nbr_pool / nbr_count
             nbr_pool = self.pool_head(nbr_pool)
-            combined = torch.cat([own_emb, nbr_pool], dim=-1)
-            return self._q_from_features(combined)
+            return torch.cat([own_emb, nbr_pool], dim=-1)
 
         if hop_dist is not None:
             hop_dist = hop_dist.clamp(0, self.n_hops)
@@ -208,5 +224,36 @@ class NeighborAttentionQNetwork(nn.Module):
 
         attn_out = self.attn_norm(attn_out + own_emb)  # residual
 
-        combined = torch.cat([own_emb, attn_out], dim=-1)
+        return torch.cat([own_emb, attn_out], dim=-1)
+
+    def forward(
+        self,
+        own_obs: torch.Tensor,
+        neighbor_obs: torch.Tensor,
+        neighbor_mask: torch.Tensor,
+        hop_dist: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """DQN entry point: own+neighbor obs -> masked-ready Q-values
+        (plain or dueling-combined depending on ``self.dueling``)."""
+        combined = self._combined_features(own_obs, neighbor_obs, neighbor_mask, hop_dist)
         return self._q_from_features(combined)
+
+    def forward_actor_critic(
+        self,
+        own_obs: torch.Tensor,
+        neighbor_obs: torch.Tensor,
+        neighbor_mask: torch.Tensor,
+        hop_dist: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """PPO entry point: own+neighbor obs -> (action logits, state
+        value). Only valid when ``self.actor_critic=True``. Logits are
+        raw (not masked/softmaxed) -- the caller applies action_mask,
+        matching the convention ``forward``'s Q-values follow with
+        ``_mask_q`` in agents/dqn.py."""
+        if not self.actor_critic:
+            raise RuntimeError("forward_actor_critic() called on a non-actor-critic network.")
+        combined = self._combined_features(own_obs, neighbor_obs, neighbor_mask, hop_dist)
+        feat = self.head(combined)
+        logits = self.policy_head(feat)
+        value = self.ac_value_head(feat).squeeze(-1)
+        return logits, value
