@@ -205,7 +205,12 @@ def main():
         gen = torch.Generator().manual_seed(args.seed if args.seed is not None else 0)
         for k, v in start_state.items():
             if v.dtype.is_floating_point:
-                noise = torch.randn(v.shape, generator=gen) * v.std() * args.perturb_std
+                # unbiased=False: a size-1 tensor (e.g. the dueling value
+                # head's scalar bias) makes the default (ddof=1) estimator
+                # divide by zero and return NaN, silently corrupting that
+                # weight into NaN for the rest of the run.
+                v_std = v.std(unbiased=False) if v.numel() > 1 else v.new_zeros(())
+                noise = torch.randn(v.shape, generator=gen) * v_std * args.perturb_std
                 start_state[k] = args.shrink_alpha * v + noise
 
     # --- 2. Zero-shot baseline on the REAL holdout traffic -------------
