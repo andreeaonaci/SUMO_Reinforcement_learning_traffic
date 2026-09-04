@@ -90,7 +90,8 @@ def resolve_resume(resume_arg: str) -> tuple:
 def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: bool = True,
                 tau: float = 0.005, target_update: int = 200, mu: float = 0.0,
                 dueling: bool = False, n_step: int = 1, q_entropy_weight: float = 0.0,
-                algo: str = "dqn", d_model: int = 128, n_heads: int = 4):
+                algo: str = "dqn", d_model: int = 128, n_heads: int = 4,
+                munchausen_temp: float = 0.03, munchausen_alpha: float = 0.9):
     """Single place that constructs the local/global agent -- DQNAgent
     (default, unchanged), PPOAgent (--algo ppo, agents/ppo.py), or
     MunchausenDQNAgent (--algo munchausen, agents/munchausen_dqn.py; see
@@ -123,6 +124,7 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
             dueling=dueling,
             n_step=n_step,
             d_model=d_model, n_heads=n_heads,
+            munchausen_temp=munchausen_temp, munchausen_alpha=munchausen_alpha,
         )
     return DQNAgent(
         own_dim=own_dim,
@@ -163,6 +165,8 @@ def load_clients(
     algo: str = "dqn",
     d_model: int = 128,
     n_heads: int = 4,
+    munchausen_temp: float = 0.03,
+    munchausen_alpha: float = 0.9,
 ) -> tuple:
     """Build one FederatedClient per city directory.
 
@@ -241,11 +245,13 @@ def load_clients(
             _head_fix=head_fix,
             _tau=tau, _tu=target_update, _mu=mu, _dueling=dueling, _n_step=n_step,
             _qew=q_entropy_weight, _algo=algo, _dm=d_model, _nh=n_heads,
+            _mtemp=munchausen_temp, _malpha=munchausen_alpha,
         ):
             return _make_agent(_own, _nbr, _k, _act, _eps, head_fix=_head_fix,
                                tau=_tau, target_update=_tu, mu=_mu, dueling=_dueling,
                                n_step=_n_step, q_entropy_weight=_qew, algo=_algo,
-                               d_model=_dm, n_heads=_nh)
+                               d_model=_dm, n_heads=_nh,
+                               munchausen_temp=_mtemp, munchausen_alpha=_malpha)
 
         clients.append(
             FederatedClient(
@@ -756,6 +762,8 @@ def main(args):
             algo=args.algo,
             d_model=args.d_model,
             n_heads=args.n_heads,
+            munchausen_temp=args.munchausen_temp,
+            munchausen_alpha=args.munchausen_alpha,
         )
 
         start_round = 1
@@ -843,6 +851,8 @@ def main(args):
             algo=args.algo,
             d_model=args.d_model,
             n_heads=args.n_heads,
+            munchausen_temp=args.munchausen_temp,
+            munchausen_alpha=args.munchausen_alpha,
         )
         history = server.run(
             rounds=args.rounds,
@@ -873,6 +883,8 @@ def main(args):
             algo=args.algo,
             d_model=args.d_model,
             n_heads=args.n_heads,
+            munchausen_temp=args.munchausen_temp,
+            munchausen_alpha=args.munchausen_alpha,
         )
         own_dim, neighbor_dim, k_max = obs_dims
 
@@ -894,6 +906,8 @@ def main(args):
             algo=args.algo,
             d_model=args.d_model,
             n_heads=args.n_heads,
+            munchausen_temp=args.munchausen_temp,
+            munchausen_alpha=args.munchausen_alpha,
         )
         evaluator = make_holdout_evaluator(
             base,
@@ -995,6 +1009,17 @@ if __name__ == "__main__":
     parser.add_argument("--n_heads", type=int, default=4,
                          help="Attention heads in the neighbor-attention trunk. Must evenly "
                               "divide --d_model (torch.nn.MultiheadAttention requirement).")
+    parser.add_argument("--munchausen_temp", type=float, default=0.03,
+                         help="--algo munchausen only: temperature used inside the soft-Bellman "
+                              "target math (both the log-policy bonus and the next-state soft "
+                              "value) -- see agents/munchausen_dqn.py. Distinct from the "
+                              "action-selection temperature schedule, which is not yet CLI-"
+                              "exposed (uses that module's temp_start=1.0/temp_end=0.3 "
+                              "defaults). Ignored under dqn/ppo.")
+    parser.add_argument("--munchausen_alpha", type=float, default=0.9,
+                         help="--algo munchausen only: weight on the Munchausen bonus term "
+                              "(the target network's own clipped log-policy of the action "
+                              "taken). Paper default 0.9. Ignored under dqn/ppo.")
     parser.add_argument("--eval_every",            type=int,   default=1)
     parser.add_argument("--eval_episodes",         type=int,   default=5)
     parser.add_argument("--log_loss_every_steps",  type=int,   default=50,

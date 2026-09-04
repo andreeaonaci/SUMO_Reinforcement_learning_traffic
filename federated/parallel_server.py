@@ -98,6 +98,8 @@ def _client_worker(
     algo: str = "dqn",
     d_model: int = 128,
     n_heads: int = 4,
+    munchausen_temp: float = 0.03,
+    munchausen_alpha: float = 0.9,
 ):
     """Runs inside its own process for the ENTIRE training run.
 
@@ -177,6 +179,7 @@ def _client_worker(
                 tau=tau, dueling=dueling, n_step=n_step,
                 init_steps_done=init_steps_done,
                 d_model=d_model, n_heads=n_heads,
+                munchausen_temp=munchausen_temp, munchausen_alpha=munchausen_alpha,
             )
         else:
             agent = DQNAgent(
@@ -308,10 +311,14 @@ class ParallelFederatedServer:
         algo: str = "dqn",
         d_model: int = 128,
         n_heads: int = 4,
+        munchausen_temp: float = 0.03,
+        munchausen_alpha: float = 0.9,
     ):
         self.algo = algo
         self.d_model = d_model
         self.n_heads = n_heads
+        self.munchausen_temp = munchausen_temp
+        self.munchausen_alpha = munchausen_alpha
         self.global_model = global_model
         self.evaluator = evaluator
         self.checkpoint_dir = checkpoint_dir
@@ -397,6 +404,7 @@ class ParallelFederatedServer:
                     self.epsilon_reset_every,
                     self.algo,
                     self.d_model, self.n_heads,
+                    self.munchausen_temp, self.munchausen_alpha,
                 ),
                 daemon=True,
             )
