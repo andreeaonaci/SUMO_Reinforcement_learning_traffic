@@ -4132,6 +4132,29 @@ this section for the exact job list and results as they land. The higher-value b
 multi-seed replication (random-init vs. pretrained across more seeds) remains queued but
 deprioritized for tonight per that same steer.
 
+**Overnight sweep, batch 1 (Munchausen temperature/alpha, 5 rounds each, environments_c1_4_6,
+seed 3) — first real lead found:**
+
+| config | best | mean |
+|---|---:|---:|
+| DQN+qew baseline (rounds 1-5, reused from above) | **-5933.60** | -8016.66 |
+| Munchausen temp=0.1, alpha=0.9 | -7932.27 | -9127.86 |
+| **Munchausen temp=0.01, alpha=0.9** | -6382.16 | **-7490.44** |
+| Munchausen temp=0.03, alpha=0.5 | -8016.12 | -9097.92 |
+
+`temp=0.01` (crisper/less-soft target than the paper-default 0.03 tried earlier) is the first
+config in this entire algorithm-swap effort (this section, all of PPO and default-hyperparameter
+Munchausen) to beat the DQN baseline on any measure — it wins on mean reward (-7490.44 vs
+-8016.66) though still loses on best-round (-6382.16 vs -5933.60). Single trial, no seed
+replication yet — read as a lead, not a result, same standing caution as everywhere else in this
+document. Also observed directly in this batch: both temp=0.1 and alpha=0.5 showed the
+confident-lock-in signature mid-run (std collapsing to 1.8-5.7 across rounds 1-3) then escaped it
+by round 3-4 (std back up to 150-175) -- the same lock-in/escape pattern already documented at
+length in §32-34/§51-53, now also reproduced under Munchausen-DQN, not just plain DQN.
+
+**Batch 2 launched (exploiting the temp=0.01 lead):** temp=0.01+dueling, temp=0.01+n_step=3,
+temp=0.005 (pushing the temperature axis further). Results to follow.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
