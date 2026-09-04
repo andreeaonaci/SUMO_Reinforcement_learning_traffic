@@ -37,6 +37,7 @@ from federated.comm_dropout import CommDropoutWrapper
 from environments.federated_env import build_federated_env, ActionMaskPadder
 from agents.dqn import DQNAgent
 from agents.ppo import PPOAgent
+from agents.munchausen_dqn import MunchausenDQNAgent
 from federated.utils import compute_eps_decay, set_seed
 
 run_dir = None
@@ -89,14 +90,19 @@ def resolve_resume(resume_arg: str) -> tuple:
 def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: bool = True,
                 tau: float = 0.005, target_update: int = 200, mu: float = 0.0,
                 dueling: bool = False, n_step: int = 1, q_entropy_weight: float = 0.0,
-                algo: str = "dqn"):
+                algo: str = "dqn", d_model: int = 128, n_heads: int = 4):
     """Single place that constructs the local/global agent -- DQNAgent
-    (default, unchanged) or PPOAgent when --algo ppo (agents/ppo.py; see
-    that module's docstring for why -- a stochastic policy can't collapse
-    into the confident-lock-in failure mode sec 32-34/51-57/70
-    characterized in the DQN pipeline the same way argmax(Q) can).
-    DQN-only knobs (tau, target_update, mu, dueling, n_step,
-    q_entropy_weight) are simply not forwarded to PPOAgent."""
+    (default, unchanged), PPOAgent (--algo ppo, agents/ppo.py), or
+    MunchausenDQNAgent (--algo munchausen, agents/munchausen_dqn.py; see
+    that module's docstring -- off-policy like DQN, same sample efficiency,
+    but an entropy-regularized soft-Bellman target so the policy can't
+    collapse into the confident-lock-in failure mode sec 32-34/51-57/70
+    characterized in the DQN pipeline the way argmax(Q) can). DQN-only
+    knobs (target_update, mu, q_entropy_weight) are simply not forwarded
+    to the other two; tau/dueling/n_step are shared with munchausen but
+    not ppo. d_model/n_heads (network capacity) are shared by all three --
+    part of the sec 72 top-down capacity sanity check (does a much bigger
+    network learn faster/better at all, independent of which algorithm)."""
     if algo == "ppo":
         return PPOAgent(
             own_dim=own_dim,
@@ -104,6 +110,19 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
             k_max=k_max,
             action_dim=action_dim,
             head_fix=head_fix,
+            d_model=d_model, n_heads=n_heads,
+        )
+    if algo == "munchausen":
+        return MunchausenDQNAgent(
+            own_dim=own_dim,
+            neighbor_dim=neighbor_dim,
+            k_max=k_max,
+            action_dim=action_dim,
+            head_fix=head_fix,
+            tau=tau,
+            dueling=dueling,
+            n_step=n_step,
+            d_model=d_model, n_heads=n_heads,
         )
     return DQNAgent(
         own_dim=own_dim,
@@ -114,6 +133,7 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
         head_fix=head_fix,
         tau=tau,
         target_update=target_update,
+        d_model=d_model, n_heads=n_heads,
         mu=mu,
         dueling=dueling,
         n_step=n_step,
@@ -141,6 +161,8 @@ def load_clients(
     q_entropy_weight: float = 0.0,
     reward_shaping: dict | None = None,
     algo: str = "dqn",
+    d_model: int = 128,
+    n_heads: int = 4,
 ) -> tuple:
     """Build one FederatedClient per city directory.
 
@@ -218,11 +240,12 @@ def load_clients(
             _act=action_dim, _eps=eps_decay,
             _head_fix=head_fix,
             _tau=tau, _tu=target_update, _mu=mu, _dueling=dueling, _n_step=n_step,
-            _qew=q_entropy_weight, _algo=algo,
+            _qew=q_entropy_weight, _algo=algo, _dm=d_model, _nh=n_heads,
         ):
             return _make_agent(_own, _nbr, _k, _act, _eps, head_fix=_head_fix,
                                tau=_tau, target_update=_tu, mu=_mu, dueling=_dueling,
-                               n_step=_n_step, q_entropy_weight=_qew, algo=_algo)
+                               n_step=_n_step, q_entropy_weight=_qew, algo=_algo,
+                               d_model=_dm, n_heads=_nh)
 
         clients.append(
             FederatedClient(
@@ -731,6 +754,8 @@ def main(args):
             n_step=args.n_step,
             q_entropy_weight=args.q_entropy_weight,
             algo=args.algo,
+            d_model=args.d_model,
+            n_heads=args.n_heads,
         )
 
         start_round = 1
@@ -816,6 +841,8 @@ def main(args):
             init_steps_done=init_steps_done,
             epsilon_reset_every=args.epsilon_reset_every,
             algo=args.algo,
+            d_model=args.d_model,
+            n_heads=args.n_heads,
         )
         history = server.run(
             rounds=args.rounds,
@@ -844,6 +871,8 @@ def main(args):
             q_entropy_weight=args.q_entropy_weight,
             reward_shaping=reward_shaping_cfg,
             algo=args.algo,
+            d_model=args.d_model,
+            n_heads=args.n_heads,
         )
         own_dim, neighbor_dim, k_max = obs_dims
 
@@ -863,6 +892,8 @@ def main(args):
             n_step=args.n_step,
             q_entropy_weight=args.q_entropy_weight,
             algo=args.algo,
+            d_model=args.d_model,
+            n_heads=args.n_heads,
         )
         evaluator = make_holdout_evaluator(
             base,
@@ -890,10 +921,10 @@ def main(args):
             # names head_key_names() looks for -- forcing this off (rather
             # than relying on masked-head aggregation's silent no-op
             # fallback) makes the plain-full-state-FedAvg behavior explicit.
-            use_masked_head=(not args.disable_head_fix) and args.algo == "dqn",
+            use_masked_head=(not args.disable_head_fix) and args.algo != "ppo",
             no_federation=args.no_federation,
             fedavg_blend=args.fedavg_blend,
-            dueling=args.dueling and args.algo == "dqn",
+            dueling=args.dueling and args.algo != "ppo",
             server_momentum=args.server_momentum,
             pseudo_grad_clip=args.pseudo_grad_clip,
             eval_ema_decay=args.eval_ema_decay,
@@ -935,21 +966,35 @@ if __name__ == "__main__":
              "(e.g. the same --rounds 40), not a remaining-rounds count.",
     )
     parser.add_argument("--local_episodes",        type=int,   default=1)
-    parser.add_argument("--algo", type=str, default="dqn", choices=["dqn", "ppo"],
+    parser.add_argument("--algo", type=str, default="dqn", choices=["dqn", "ppo", "munchausen"],
                          help="Local training algorithm. 'dqn' (default): agents/dqn.py, "
                               "unchanged. 'ppo': agents/ppo.py, an on-policy actor-critic with "
-                              "an entropy-regularized stochastic policy -- targets the "
-                              "confident-lock-in failure mode characterized in "
-                              "fidings/divergence_investigation.md sec 32-34/51-57/70 (argmax(Q) "
-                              "can collapse to one repeating action; a sampled policy can't the "
-                              "same way). SEQUENTIAL PATH ONLY as of this writeup -- not yet "
-                              "wired into --parallel. DQN-only flags (--dueling, --n_step, "
-                              "--q_entropy_weight, --fedprox_mu, --tau, --target_update) are "
-                              "ignored under --algo ppo. Masked-head aggregation "
-                              "(--disable_head_fix) is forced off under ppo regardless of that "
-                              "flag -- PPO's policy/value heads don't use the DQN head-key "
-                              "naming masked-head aggregation looks for, so plain full-state "
-                              "FedAvg is used instead.")
+                              "an entropy-regularized stochastic policy. 'munchausen': "
+                              "agents/munchausen_dqn.py, an OFF-policy Boltzmann-policy DQN "
+                              "variant (Vieillard et al. 2020) -- same replay buffer/sample "
+                              "efficiency as plain DQN (directly comparable at the same episode "
+                              "budget, unlike ppo), but the target is entropy-regularized so "
+                              "the policy structurally resists collapsing to one action, same "
+                              "motivation as ppo (see that module's docstring and "
+                              "fidings/divergence_investigation.md sec 32-34/51-57/70/72). Wired "
+                              "into both --parallel and the sequential path. DQN-only flags "
+                              "(--q_entropy_weight, --fedprox_mu) are ignored under both "
+                              "non-dqn algos; --dueling/--n_step/--tau/--target_update are "
+                              "honored under munchausen but not ppo. Masked-head aggregation is "
+                              "forced off under ppo only -- munchausen uses the same DQN Q-head "
+                              "naming, so masked-head aggregation (--disable_head_fix) still "
+                              "applies normally.")
+    parser.add_argument("--d_model", type=int, default=128,
+                         help="Network hidden width (own/neighbor encoders, attention, head "
+                              "trunk) for whichever --algo is selected. Default 128 matches "
+                              "this project's standing config. Bumping this up is a top-down "
+                              "capacity sanity check (sec 72) -- independent of --algo, tests "
+                              "whether a much bigger network learns faster/better at all on "
+                              "this task before assuming any particular algorithm is the "
+                              "bottleneck.")
+    parser.add_argument("--n_heads", type=int, default=4,
+                         help="Attention heads in the neighbor-attention trunk. Must evenly "
+                              "divide --d_model (torch.nn.MultiheadAttention requirement).")
     parser.add_argument("--eval_every",            type=int,   default=1)
     parser.add_argument("--eval_episodes",         type=int,   default=5)
     parser.add_argument("--log_loss_every_steps",  type=int,   default=50,

@@ -62,6 +62,7 @@ from federated.comm_dropout import CommDropoutWrapper
 from environments.federated_env import build_federated_env, ActionMaskPadder
 from agents.dqn import DQNAgent
 from agents.ppo import PPOAgent
+from agents.munchausen_dqn import MunchausenDQNAgent
 from federated.utils import set_seed
 
 logger = logging.getLogger(__name__)
@@ -95,6 +96,8 @@ def _client_worker(
     init_steps_done: int = 0,
     epsilon_reset_every: int = 0,
     algo: str = "dqn",
+    d_model: int = 128,
+    n_heads: int = 4,
 ):
     """Runs inside its own process for the ENTIRE training run.
 
@@ -164,6 +167,16 @@ def _client_worker(
                 own_dim=own_dim, neighbor_dim=neighbor_dim, k_max=k_max,
                 action_dim=action_dim, lr=lr, lr_decay=lr_decay, min_lr=min_lr,
                 head_fix=neighbor_attention,
+                d_model=d_model, n_heads=n_heads,
+            )
+        elif algo == "munchausen":
+            agent = MunchausenDQNAgent(
+                own_dim=own_dim, neighbor_dim=neighbor_dim, k_max=k_max,
+                action_dim=action_dim, lr=lr, lr_decay=lr_decay, min_lr=min_lr,
+                head_fix=neighbor_attention,
+                tau=tau, dueling=dueling, n_step=n_step,
+                init_steps_done=init_steps_done,
+                d_model=d_model, n_heads=n_heads,
             )
         else:
             agent = DQNAgent(
@@ -175,6 +188,7 @@ def _client_worker(
                 mu=mu, dueling=dueling, n_step=n_step,
                 init_steps_done=init_steps_done,
                 q_entropy_weight=q_entropy_weight,
+                d_model=d_model, n_heads=n_heads,
             )
 
         while True:
@@ -201,7 +215,7 @@ def _client_worker(
             # recovery bursts used a similar-order eps_decay) to reach the
             # floor again well before the next reset at typical round
             # lengths.
-            if algo == "dqn" and epsilon_reset_every > 0 and round_num % epsilon_reset_every == 0:
+            if algo != "ppo" and epsilon_reset_every > 0 and round_num % epsilon_reset_every == 0:
                 agent.steps_done = 0
                 logger.info("Worker '%s' round %d: periodic epsilon reset (steps_done -> 0)",
                             name, round_num)
@@ -292,8 +306,12 @@ class ParallelFederatedServer:
         init_steps_done: int = 0,
         epsilon_reset_every: int = 0,
         algo: str = "dqn",
+        d_model: int = 128,
+        n_heads: int = 4,
     ):
         self.algo = algo
+        self.d_model = d_model
+        self.n_heads = n_heads
         self.global_model = global_model
         self.evaluator = evaluator
         self.checkpoint_dir = checkpoint_dir
@@ -315,10 +333,10 @@ class ParallelFederatedServer:
         # PPOAgent's state dict (policy_head/ac_value_head) -- plain full-
         # state FedAvg is used instead, same as the sequential path's
         # matching guard in experiments/federated_training.py.
-        self.head_fix = bool(head_fix) and algo == "dqn"
+        self.head_fix = bool(head_fix) and algo != "ppo"
         self.neighbor_attention = bool(neighbor_attention)
         self.fedavg_blend = float(max(0.0, min(1.0, fedavg_blend)))
-        self._head_weight_key, self._head_bias_key = head_key_names(dueling and algo == "dqn")
+        self._head_weight_key, self._head_bias_key = head_key_names(dueling and algo != "ppo")
         self.server_momentum = float(server_momentum)
         self._momentum_buffer: Optional[Dict[str, torch.Tensor]] = None
         self.pseudo_grad_clip = float(pseudo_grad_clip)
@@ -378,6 +396,7 @@ class ParallelFederatedServer:
                     city_seed, init_steps_done,
                     self.epsilon_reset_every,
                     self.algo,
+                    self.d_model, self.n_heads,
                 ),
                 daemon=True,
             )
