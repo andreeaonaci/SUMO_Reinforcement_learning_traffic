@@ -4152,8 +4152,23 @@ confident-lock-in signature mid-run (std collapsing to 1.8-5.7 across rounds 1-3
 by round 3-4 (std back up to 150-175) -- the same lock-in/escape pattern already documented at
 length in §32-34/§51-53, now also reproduced under Munchausen-DQN, not just plain DQN.
 
-**Batch 2 launched (exploiting the temp=0.01 lead):** temp=0.01+dueling, temp=0.01+n_step=3,
-temp=0.005 (pushing the temperature axis further). Results to follow.
+**Batch 2 results — a real winner: `temp=0.01 + n_step=3` beats DQN+qew on BOTH measures:**
+
+| config | best | mean |
+|---|---:|---:|
+| DQN+qew baseline | -5933.60 | -8016.66 |
+| Munchausen temp=0.01 + dueling | -9738.03 | -9862.08 (locked the entire run, dud) |
+| **Munchausen temp=0.01 + n_step=3** | **-5514.84** | **-6561.87** |
+| Munchausen temp=0.005 (no n_step) | -6516.09 | -7286.82 |
+
+`temp=0.01 + n_step=3` beats the baseline on both best-round and mean, and was still improving
+every single round through round 5 (round-by-round: -9599.70, -6024.02, -5925.14, -5745.67,
+-5514.84 — monotonically improving, no lock-in, no relapse) — the cleanest trajectory of any
+config tried in this document's algorithm-swap effort. Dueling, by contrast, actively hurt this
+combo: `temp=0.01 + dueling` locked immediately (std 24-33 every round) and never escaped.
+Single trial, not yet replicated. **Launched next: the same config extended to the full 20-round
+budget (fair comparison to DQN's own 20-round numbers, not just its 5-round ones), plus 2 more
+seeds (7, 11) at 5 rounds for a quick robustness check before reading too much into one seed.**
 
 ## Open questions / next steps
 
