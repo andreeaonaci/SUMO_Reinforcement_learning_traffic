@@ -4052,8 +4052,85 @@ multi-seed validation before any larger training commitment; a mechanism that do
 single-seed lead here is deprioritized without further seeds, consistent with how this document has
 handled every other candidate lever (§37, §41, §54, §65).
 
-**Status: all three launched 2026-09-04, running in background. Results not yet in — do not cite
-any outcome for A/B/C until this section is updated with actual numbers.**
+**Status: all three finished 2026-09-04/05 — B and C are clean single-seed misses, A's real
+comparison (the fine-tune step, not the raw pretrain reward) came back close to a wash.**
+
+- **B (shrink-perturb, `shrink_alpha=0.5 perturb_std=0.1`):** best round -1985.37, final round
+  -4922.88 — both worse than the zero-shot baseline it started from (-4294.87), and far worse than
+  either of §70's existing arms (pretrained -693.84, random-init -406.85). Clean miss, deprioritized
+  per the decision rule above.
+- **C (`--fedavg_blend 0.5`, environments_c1_4, 20 rounds):** best -5414.22, mean -7507.08, vs. the
+  existing seed-3 baseline's best -2855.95 / mean -6624.90 — worse on both measures, single seed.
+  Clean miss, deprioritized.
+- **A (q_entropy=0.05 pretrain on environments_c1_4_6, round-20 checkpoint, then the standard
+  §66-70 fine-tune protocol):** the three-way comparison at matched round 20 — plain-FedAvg
+  pretrained→fine-tuned: best -0.41, final -0.49; q_entropy=0.05 pretrained→fine-tuned: best -2.88,
+  final -114.44; random-init→fine-tuned (§70, reused): -406.85. **Plain FedAvg remains the best
+  pretraining choice at this checkpoint round, and both real-pretraining arms clearly beat
+  random-init here** — note this does NOT reproduce §70's finding at round 39, where random-init
+  won; round 20 vs. round 39 is itself a candidate explanation (round 39 may already be past the
+  point where more federated training starts hurting retention, consistent with §70's own
+  round-63-worse-than-random finding), not yet disentangled.
+
+**Net effect on the standing question:** none of A/B/C reversed the §70/§71 diagnosis. Per the
+agreed decision rule, this closes out B and C without further seeds; A's own next step (why does
+round 20 disagree with round 39 on pretrained-vs-random) is a new, narrower open question, not
+pursued further as of this writeup in favor of §73 below.
+
+## 73. Algorithm swap (DQN → PPO / Munchausen-DQN): three short pilots, none beat DQN yet
+
+**2026-09-04/05.** Direct response to the user's question "can we keep FedAvg but replace DQN with
+something that works better for this task" (prompted by §70's retention-failure diagnosis and the
+observation that DQN's `argmax(Q)` policy can collapse into the confident-lock-in failure mode,
+§32-34/§51-57, in a way a stochastic policy structurally can't). FedAvg itself is untouched in all
+of this — only the local agent/network changes.
+
+**Implemented:** `agents/ppo.py` (on-policy actor-critic, clipped surrogate + GAE + entropy bonus,
+reuses the existing attention trunk via new `policy_head`/`ac_value_head` outputs on
+`NeighborAttentionQNetwork`) and `agents/munchausen_dqn.py` (off-policy — same replay buffer/
+sample-efficiency as DQN, unlike PPO — Boltzmann policy over Q with an entropy-regularized soft-
+Bellman target, Vieillard et al. 2020). Both match `DQNAgent`'s external interface exactly, so
+`federated/client.py`/`FederatedServer` needed zero changes; a new `--algo {dqn,ppo,munchausen}`
+flag selects the agent in both the sequential and `--parallel` paths. Two real pre-existing bugs
+found and fixed along the way: `federated/server.py` and `federated/parallel_server.py` both
+hardcoded `global_model.q.state_dict()`/`.q.parameters()` (DQNAgent-specific attribute access) for
+checkpoint-saving and weight-norm logging, which would crash for any non-DQN agent — switched to
+the already-existing agent-agnostic `state_dict()` interface. Also added `--d_model`/`--n_heads`
+(previously hardcoded at 128/4) and `--munchausen_temp`/`--munchausen_alpha` as CLI flags.
+
+**Results so far, all `environments_c1_4_6`, seed 3, true holdout:**
+
+| config | rounds | best | mean |
+|---|---:|---:|---:|
+| DQN + q_entropy=0.05 (baseline, §72 pilot A) | 5 (of 20) | **-5933.60** | **-8016.66** |
+| DQN + q_entropy=0.05 (same run, full budget) | 20 | -3288.73 | -6093.66 |
+| PPO (default hyperparams) | 20 | -7273.83 | -9382.94 |
+| Munchausen-DQN (default: temp=0.03, alpha=0.9, d_model=128) | 5 | -7198.59 | -8539.36 |
+| Munchausen-DQN (d_model=512, n_heads=8 -- "big model" check) | 5 | -8417.92 | -9611.91 (got *worse* every round after round 1) |
+
+**Reading:** neither alternative has beaten plain DQN yet, at either matched budget tested.
+PPO's shortfall has a known, uncontrolled confound — it's on-policy (discards each round's
+rollout after one use) while DQN reuses a persistent replay buffer, so at this project's standard
+tiny `--local_episodes 2`, DQN gets far more gradient signal per round for reasons that have
+nothing to do with which algorithm suits the task better; not yet tested with a larger episode
+budget that would remove this confound. Munchausen-DQN has no such confound (same off-policy
+replay-buffer training as DQN) and still lost at matched 5-round budget with default
+hyperparameters — a real, if preliminary, negative data point. The "bigger model" variant is the
+more interesting finding: capacity did not help and the run actively degraded round-over-round,
+suggesting more parameters without more data/rounds to fit them may hurt at this tiny budget
+rather than being neutral.
+
+**Not yet a verdict on either algorithm** — only default/one-off hyperparameters have been tried
+for Munchausen, and PPO hasn't been tested with a fairer (larger) episode budget. Per the user's
+explicit steer (2026-09-05, "short training with different model and types of models" — prefer
+breadth of many short trials over one long multi-seed replication), the immediate next step is a
+broad overnight sweep of short (5-round) trials across Munchausen hyperparameters (temp, alpha,
+dueling, n_step, d_model in {64,256}), a plain-DQN capacity check (d_model=256), the untested
+`--dueling --n_step 3 --q_entropy_weight 0.05` combo, and one PPO run with `--local_episodes 8` to
+directly test the on-policy sample-efficiency confound — see the batch launched immediately after
+this section for the exact job list and results as they land. The higher-value but slower §70
+multi-seed replication (random-init vs. pretrained across more seeds) remains queued but
+deprioritized for tonight per that same steer.
 
 ## Open questions / next steps
 
