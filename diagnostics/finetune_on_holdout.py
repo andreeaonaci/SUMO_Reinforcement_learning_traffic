@@ -129,6 +129,26 @@ def main():
                           "Architecture is inferred from the checkpoint (not hardcoded) so the "
                           "control is EXACTLY matched to the pretrained arm -- pretrained vs "
                           "random weights is then the single variable that differs.")
+    ap.add_argument("--shrink_alpha", type=float, default=1.0,
+                     help="Shrink-and-perturb (Ash & Adams 2020, 'On Warm-Starting Neural "
+                          "Network Training') plasticity-restoration knob, ignored under "
+                          "--random_init. Before fine-tuning (NOT before the zero-shot eval, "
+                          "which still reflects the untouched checkpoint), each pretrained "
+                          "weight tensor W is replaced with shrink_alpha*W + noise -- see "
+                          "--perturb_std. Default 1.0 (paired with --perturb_std 0.0) is an "
+                          "exact no-op, recovering plain pretrained fine-tuning. Tests sec 70's "
+                          "anomaly directly: pretrained-then-finetune lost to "
+                          "random-init-then-finetune, consistent with the pretrained checkpoint "
+                          "having lost plasticity (locked into an overconfident state, sec "
+                          "32-34) rather than having bad features. If shrinking+perturbing it "
+                          "toward a fresher init before fine-tuning recovers some of random "
+                          "init's advantage while keeping pretrained features, that's evidence "
+                          "for the plasticity-loss explanation specifically.")
+    ap.add_argument("--perturb_std", type=float, default=0.0,
+                     help="Std of the Gaussian noise added per weight tensor in shrink-and-"
+                          "perturb, expressed as a multiple of that tensor's own std (so it "
+                          "scales sensibly across layers of very different magnitude). See "
+                          "--shrink_alpha. 0.0 = no noise.")
     args = ap.parse_args()
 
     # --- 1. Load checkpoint, auto-detect architecture -----------------
@@ -178,6 +198,16 @@ def main():
     start_state = {k: v.clone() for k, v in global_model.state_dict().items()}
     print(f"Loaded weights from {args.checkpoint}")
 
+    if not args.random_init and (args.shrink_alpha != 1.0 or args.perturb_std != 0.0):
+        print(f"Applying shrink-and-perturb to the fine-tune starting point only "
+              f"(zero-shot eval below still uses the untouched checkpoint): "
+              f"shrink_alpha={args.shrink_alpha}, perturb_std={args.perturb_std}")
+        gen = torch.Generator().manual_seed(args.seed if args.seed is not None else 0)
+        for k, v in start_state.items():
+            if v.dtype.is_floating_point:
+                noise = torch.randn(v.shape, generator=gen) * v.std() * args.perturb_std
+                start_state[k] = args.shrink_alpha * v + noise
+
     # --- 2. Zero-shot baseline on the REAL holdout traffic -------------
     real_evaluator = make_holdout_evaluator(
         "environments", (arch["own_dim"], arch["neighbor_dim"], k_max), arch["action_dim"],
@@ -214,10 +244,14 @@ def main():
     print(f"\nFine-tune eps_decay={eps_decay:.1f} (epsilon restarts at 1.0 for this "
           f"burst, reaches floor by ~{args.explore_fraction*100:.0f}% of {args.rounds} rounds)")
 
+    shrink_perturb_suffix = (
+        f"_sp_a{args.shrink_alpha}_n{args.perturb_std}"
+        if (args.shrink_alpha != 1.0 or args.perturb_std != 0.0) else ""
+    )
     checkpoint_dir = args.checkpoint_dir or os.path.join(
         "results",
         f"finetune_holdout_{os.path.basename(args.checkpoint).replace('.pth', '')}"
-        f"{'_randominit' if args.random_init else ''}"
+        f"{'_randominit' if args.random_init else ''}{shrink_perturb_suffix}"
     )
     os.makedirs(checkpoint_dir, exist_ok=True)
 

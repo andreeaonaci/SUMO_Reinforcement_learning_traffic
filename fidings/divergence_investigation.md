@@ -3994,6 +3994,67 @@ so this tests *topological* diversity, not real-world demand-pattern diversity.
 `results/run_2026_08_29-07_01_27_1193341` (narrow 3-city baseline, full 63). Rosters:
 `environments_wide/`, `environments_grid/`; nets under `sumo_rl/nets/generated/`.
 
+## 72. Three candidate mechanisms for the §70/§71 transfer/retention problem, launched as small
+    pilots in parallel, pre-registered here before results are known
+
+**2026-09-04.** §70/§71 converged on a sharper diagnosis than "generalization gap": the algorithm
+isn't retaining/transferring what it learns (random-init beat federated-pretrained at fine-tune
+time, §70; 3→14 training cities didn't help, §71). Per the user's request, three concrete
+mechanisms that could plausibly fix *that specific* problem are being piloted small/cheap, one
+seed each, before committing to a bigger run on whichever survives. **Pre-registering the designs
+and decision rule here, before any run has finished**, per this project's own standing discipline
+(see the |diff|/SE ≥ 2 bar used everywhere else in this doc) — results get added once in.
+
+**A. Does training with `--q_entropy_weight` (already implemented, §54-56) produce a checkpoint
+that transfers *better* under fine-tuning than plain FedAvg, even though §55/§56 already showed it
+doesn't improve raw federated reward?** Not previously tested — §54-56 only ever measured the
+q_entropy-trained checkpoint's own federated-eval reward, never ran it through the §66-70
+fine-tune-on-holdout pipeline. New training run: `environments_c1_4_6`, seed 3,
+`--dueling --n_step 3 --pad_to_true_holdout --q_entropy_weight 0.05` (the value that survived
+§55/§56), `--rounds 20` (matches an existing checkpoint round number so the comparison arm below
+needs no rerun) — otherwise identical to the §70/§71 baseline run's config
+(`results/run_2026_08_29-07_01_27_1193341`). Then fine-tune its round-20 checkpoint with the exact
+§66-70 protocol (`diagnostics/finetune_on_holdout.py --rounds 8 --phase1_rounds 4 --phase2_lr 1e-5
+--local_episodes 2 --n_variants 5 --seed 3`). Three-way comparison at matched round 20: this new
+qew-pretrained arm vs. plain-fedavg-round-20 fine-tuned (new fine-tune run, reusing the *existing*
+`global_round_020.pth` from the baseline run — no retrain needed) vs. random-init fine-tuned
+(reusing §70's existing result directly — architecture is round-independent, so that arm doesn't
+need to be re-run at round 20 specifically).
+
+**B. Shrink-and-perturb (Ash & Adams 2020) before fine-tuning.** New `--shrink_alpha`/
+`--perturb_std` flags added to `diagnostics/finetune_on_holdout.py` this session: right before the
+fine-tune burst starts (NOT before the zero-shot eval, which stays comparable to every past
+number), each pretrained weight tensor `W` becomes `shrink_alpha*W + perturb_std*std(W)*noise`.
+Tests §70's actual anomaly directly — if pretrained-then-finetune loses to random-init-then-
+finetune because the pretrained checkpoint has lost plasticity (locked into an overconfident state,
+§32-34), partially shrinking+perturbing it toward a fresher init before fine-tuning should recover
+some of random-init's advantage while keeping the pretrained features, landing somewhere between
+the plain-pretrained arm (-693.84) and the random-init arm (-406.85) rather than at either extreme
+(or beyond either, which would itself be informative). Pilot: `global_round_039.pth`
+(the exact checkpoint §70 used), `shrink_alpha=0.5 perturb_std=0.1`, otherwise identical protocol
+to §70 (`--rounds 8 --phase1_rounds 4 --phase2_lr 1e-5 --local_episodes 2 --n_variants 5 --seed 3`).
+
+**C. `--fedavg_blend` (Reptile-style damped server update) — implemented since at least
+2026-08-15, cited in the CLI help, never once tested anywhere in this document.**
+`federated/parallel_server.py`/`server.py`: `agg_state = blend*agg_state + (1-blend)*prev_global`
+each round, `blend=1.0` (default) an exact no-op. This is mechanically the "meta-learning" lever
+discussed with the user — a damped step toward each round's aggregate optimizes the global model to
+be a good *starting point for local adaptation* rather than a fixed policy good on average, which
+matters more now that fine-tuning (§66-70) is the thing that actually gets deployed downstream.
+Pilot: `environments_c1_4`, seed 3, `--dueling --n_step 3 --pad_to_true_holdout --rounds 20
+--fedavg_blend 0.5`, otherwise identical to the existing seed-3 baseline
+(`results/run_2026_08_18-19_46_23_818099`, §43/§46: best=-2855.95, mean=-6624.90) — no rerun needed
+for the baseline side of this comparison.
+
+**Decision rule (agreed pattern, same bar used throughout this doc):** each pilot is single-seed,
+read as a lead not a result. Whichever of A/B/C shows a real lead on this cheap pilot goes to
+multi-seed validation before any larger training commitment; a mechanism that doesn't clear even a
+single-seed lead here is deprioritized without further seeds, consistent with how this document has
+handled every other candidate lever (§37, §41, §54, §65).
+
+**Status: all three launched 2026-09-04, running in background. Results not yet in — do not cite
+any outcome for A/B/C until this section is updated with actual numbers.**
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
