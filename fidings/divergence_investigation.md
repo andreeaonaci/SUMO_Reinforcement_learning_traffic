@@ -4744,6 +4744,46 @@ neighbors are good; adds noise-from-disagreement when neighbors are already conv
 differ by chance) but not a deployable mitigation as originally hoped. Item 21 closed.** Moving to
 item 22 (potential-based reward shaping) per the agreed ordering.
 
+## 80. Item 22 (potential-based reward shaping using `max_pressure`'s own formula) implemented,
+    3-seed pilot launched
+
+**2026-09-05/06.** Implementation: `TrafficSignal.get_pressure()` (#veh leaving - #veh
+approaching, already existed for the standalone `pressure`/`pressure_norm` reward functions and
+for §62/63's pressure-observation-feature pilot) is now also exposed per-tick as `{ts}_pressure`
+in `sumo_rl/environment/env.py::_get_per_agent_info`. `RewardShapingWrapper`
+(`environments/federated_env.py`) gained `potential_weight`/`potential_gamma`, implementing the
+actual Ng, Harada & Russell (1999) potential-based form `F(s,a,s') = gamma*Phi(s') - Phi(s)` with
+`Phi(s) = potential_weight * {ts}_pressure` -- **mathematically guaranteed not to change the
+optimal policy**, for any weight or any Phi, unlike the ad hoc `--reward_shaping_wait_weight`/
+`--reward_shaping_stopped_weight` tried once before (sec 44, inconclusive single pilot, no such
+guarantee). This isolates a pure learning-*dynamics* effect (denser per-tick signal, correlated
+with the exact quantity `max_pressure` itself greedily optimizes) from a different-optimal-policy
+effect, which sec 44's ad hoc attempt could not do. New CLI flags: `--potential_shaping_weight`
+(0.0 default, exact no-op), `--potential_shaping_gamma` (0.99 default, matching `DQNAgent`'s own
+discount -- the invariance guarantee is exact only when these match).
+
+**A real bug was found and fixed before it could contaminate the result, same pattern as sec 65's
+clustering bug and sec 79's checkpoint-loading regression:** the initial `_potential_bonus`
+implementation defaulted the "no previous tick" case to `phi_old = phi_new`, which gives
+`gamma*phi_new - phi_new = phi_new*(gamma-1)` -- NOT zero unless gamma=1, silently injecting a
+spurious non-zero bonus on the first tick of every single episode, self-reinforcing over the whole
+training run. Caught immediately by a new unit test
+(`test_potential_bonus_is_zero_on_first_tick_of_an_episode`) before any real compute was spent --
+fixed by explicitly special-casing the missing-entry branch to return exactly `0.0` and only
+compute the diff from the second tick onward. Four new tests added
+(`tests/test_flag_wiring.py`), all passing, plus a real end-to-end SUMO smoke run (1 round, 3
+cities, `--potential_shaping_weight 0.05`) confirming no crash and the config reaching the log as
+expected before launching real comparison compute.
+
+**Pilot launched:** 3 seeds (3/7/11) x 2 arms (baseline vs. `--potential_shaping_weight 0.1`), same
+protocol as item 20/21's own baseline (`environments_c1_4_6`, `--rounds 5 --local_episodes 2
+--pad_to_true_holdout --q_entropy_weight 0.05`, i.e. layered on top of §54's already-adopted
+q-entropy improvement rather than plain vanilla FedAvg). `potential_shaping_weight=0.1` chosen so
+`Phi(s)`'s typical magnitude (pressure is a small vehicle-count difference, single-to-low-double
+digits per intersection) sits well inside the `reward_clip=10.0` window the shaped reward gets
+clipped to before the agent ever sees it (sec 57's reward-clip-saturation caution) -- dense enough
+to matter, not large enough to dominate or saturate the clip on its own. Results to follow.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
@@ -4770,12 +4810,13 @@ one at a time, before moving to the next:**
     hurt (ensemble, worse than every individual member). Telling the two cases apart in advance
     needs the same per-round eval sweep that would let you just pick the best round directly, so
     the original "near-best without knowing which round" value proposition doesn't hold up.
-22. **Potential-based reward shaping using `max_pressure`'s own formula.** Unlike the ad hoc
-    `--reward_shaping_wait_weight`/`--reward_shaping_stopped_weight` (§44, inconclusive single
-    pilot, arbitrary weights), potential-based shaping (Ng, Harada & Russell 1999) is
-    mathematically guaranteed not to change the optimal policy -- so injecting `max_pressure`'s
-    exact pressure signal this way isolates a *learning-dynamics* effect from a *different-optimal-
-    policy* effect, unlike every reward-shaping attempt so far.
+22. ~~Potential-based reward shaping using `max_pressure`'s own formula.~~ **IN PROGRESS, §80:
+    implemented, 3-seed pilot launched.** Unlike the ad hoc `--reward_shaping_wait_weight`/
+    `--reward_shaping_stopped_weight` (§44, inconclusive single pilot, arbitrary weights),
+    potential-based shaping (Ng, Harada & Russell 1999) is mathematically guaranteed not to change
+    the optimal policy -- so injecting `max_pressure`'s exact pressure signal this way isolates a
+    *learning-dynamics* effect from a *different-optimal-policy* effect, unlike every reward-shaping
+    attempt so far.
 23. **Recurrent policy (LSTM/GRU over recent ticks).** Every architecture tested in §73-76 (wider,
     deeper, more attention layers) was still a purely reactive function of one tick's snapshot.
     Temporal memory is a genuinely different axis (time, not space/capacity) and a policy with

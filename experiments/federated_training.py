@@ -731,10 +731,16 @@ def main(args):
         return
 
     reward_shaping_cfg = None
-    if args.reward_shaping_wait_weight != 0.0 or args.reward_shaping_stopped_weight != 0.0:
+    if (
+        args.reward_shaping_wait_weight != 0.0
+        or args.reward_shaping_stopped_weight != 0.0
+        or args.potential_shaping_weight != 0.0
+    ):
         reward_shaping_cfg = {
             "wait_weight": args.reward_shaping_wait_weight,
             "stopped_weight": args.reward_shaping_stopped_weight,
+            "potential_weight": args.potential_shaping_weight,
+            "potential_gamma": args.potential_shaping_gamma,
         }
         logger.info("Reward shaping (training only, not eval): %s", reward_shaping_cfg)
 
@@ -1298,6 +1304,25 @@ if __name__ == "__main__":
         help="Subtract stopped_weight * {ts}_stopped (queue length) from each intersection's "
              "training reward. See --reward_shaping_wait_weight. 0.0 (default) is an exact "
              "no-op.",
+    )
+    parser.add_argument(
+        "--potential_shaping_weight", type=float, default=0.0,
+        help="Potential-based reward shaping (Ng, Harada & Russell 1999) using max_pressure's "
+             "own state signal: adds potential_shaping_gamma*Phi(s') - Phi(s) to each "
+             "intersection's training reward, where Phi(s) = potential_shaping_weight * "
+             "{ts}_pressure (#veh leaving - #veh approaching, TrafficSignal.get_pressure()). "
+             "Unlike --reward_shaping_wait_weight/--reward_shaping_stopped_weight (an ad hoc "
+             "additive term, sec 44, inconclusive), this form is mathematically GUARANTEED not "
+             "to change the optimal policy -- isolates a learning-dynamics effect (denser "
+             "gradient signal) from a different-optimal-policy effect. See "
+             "fidings/divergence_investigation.md item 22. Training-only, NOT applied during "
+             "holdout evaluation. 0.0 (default) is an exact no-op.",
+    )
+    parser.add_argument(
+        "--potential_shaping_gamma", type=float, default=0.99,
+        help="Discount used in the potential-based shaping term above -- should match the "
+             "agent's own gamma (0.99 default, matching DQNAgent's default) for the "
+             "policy-invariance guarantee to be exact. Ignored if --potential_shaping_weight=0.",
     )
     parser.add_argument(
         "--pad_to_true_holdout", action="store_true",

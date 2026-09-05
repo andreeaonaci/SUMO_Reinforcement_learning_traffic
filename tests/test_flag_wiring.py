@@ -377,3 +377,56 @@ def test_reward_shaping_raises_loudly_on_missing_key_instead_of_silently_default
     real_info = {"nt1_stopped": 3, "nt1_accumulated_waiting_time": 42.0}
     with pytest.raises(KeyError):
         wrapper._shape_reward(reward=0.0, info=real_info, ts_id="nt1")
+
+
+# ---------------------------------------------------------------------------
+# 6. Potential-based reward shaping (item 22): F(s,a,s') = gamma*Phi(s') -
+# Phi(s), guaranteed policy-invariant for any Phi, unlike wait_weight/
+# stopped_weight above. Phi(s) = potential_weight * {ts}_pressure.
+# ---------------------------------------------------------------------------
+
+def _make_potential_wrapper(weight=1.0, gamma=0.5):
+    wrapper = RewardShapingWrapper.__new__(RewardShapingWrapper)
+    wrapper.wait_weight = 0.0
+    wrapper.stopped_weight = 0.0
+    wrapper.queue_weight = 0.0
+    wrapper.raw_weight = 1.0
+    wrapper.potential_weight = weight
+    wrapper.potential_gamma = gamma
+    wrapper._prev_potential = {}
+    return wrapper
+
+
+def test_potential_bonus_is_zero_on_first_tick_of_an_episode():
+    wrapper = _make_potential_wrapper()
+    bonus = wrapper._potential_bonus({"nt1_pressure": 7.0}, "nt1")
+    assert bonus == pytest.approx(0.0), (
+        "first tick of an episode has no previous Phi(s) to diff against -- "
+        "must be defined as exactly 0, not e.g. gamma*phi_new."
+    )
+
+
+def test_potential_bonus_matches_ng_harada_russell_formula_on_second_tick():
+    wrapper = _make_potential_wrapper(weight=2.0, gamma=0.5)
+    wrapper._potential_bonus({"nt1_pressure": 3.0}, "nt1")  # phi_old = 6.0, primes state
+    bonus = wrapper._potential_bonus({"nt1_pressure": 5.0}, "nt1")
+    # phi_new = 2.0*5.0 = 10.0, phi_old = 2.0*3.0 = 6.0 -> 0.5*10.0 - 6.0 = -1.0
+    assert bonus == pytest.approx(-1.0), (
+        "potential bonus must be exactly gamma*Phi(s') - Phi(s), the Ng/Harada/"
+        "Russell 1999 form -- any other combination breaks the policy-"
+        "invariance guarantee this feature exists to provide."
+    )
+
+
+def test_potential_bonus_is_exact_noop_when_weight_is_zero():
+    wrapper = _make_potential_wrapper(weight=0.0)
+    assert wrapper._potential_bonus({}, "nt1") == 0.0, (
+        "potential_weight=0.0 must be an exact no-op even with an empty info "
+        "dict -- it must not look up {ts}_pressure at all when disabled."
+    )
+
+
+def test_potential_bonus_raises_loudly_on_missing_pressure_key():
+    wrapper = _make_potential_wrapper(weight=1.0)
+    with pytest.raises(KeyError):
+        wrapper._potential_bonus({"nt1_stopped": 3}, "nt1")

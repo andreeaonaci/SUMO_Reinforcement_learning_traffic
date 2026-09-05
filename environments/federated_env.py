@@ -956,11 +956,34 @@ class RewardShapingWrapper(FixedTsForwardingMixin):
     the default): ``{ts}_stopped`` (queue length -- SumoEnvironment computes
     this via ``get_total_queued()``, i.e. it IS the queue-length signal
     despite the name), ``{ts}_accumulated_waiting_time``,
-    ``{ts}_average_speed``. There is no separate ``{ts}_queue_length`` key
-    distinct from ``{ts}_stopped`` -- ``queue_weight`` is kept as a knob for
-    if/when a distinct queue-length metric is added, but is intentionally
-    NOT a silent no-op if enabled with nothing to read: see
+    ``{ts}_average_speed``, ``{ts}_pressure`` (#veh leaving - #veh
+    approaching, `TrafficSignal.get_pressure()` -- the same formula family
+    `max_pressure` maximizes per-action, exposed here as a per-tick STATE
+    signal). There is no separate ``{ts}_queue_length`` key distinct from
+    ``{ts}_stopped`` -- ``queue_weight`` is kept as a knob for if/when a
+    distinct queue-length metric is added, but is intentionally NOT a
+    silent no-op if enabled with nothing to read: see
     ``_extract_local_metric``.
+
+    ``potential_weight``/``potential_gamma`` implement POTENTIAL-BASED reward
+    shaping (Ng, Harada & Russell 1999): ``F(s,a,s') = gamma*Phi(s') -
+    Phi(s)``, added on top of everything else. Unlike ``wait_weight``/
+    ``stopped_weight`` above (an ad hoc additive term on the raw per-tick
+    metric, already tried once at sec 44 with an inconclusive result), this
+    form is mathematically GUARANTEED not to change the optimal policy for
+    any choice of Phi -- so it isolates a pure learning-*dynamics* effect
+    (denser, better-shaped gradient signal) from a different-optimal-policy
+    effect, which the sec 44 attempt could not. Phi(s) = ``{ts}_pressure``
+    (the state-level max_pressure signal above) times ``potential_weight``.
+    ``potential_gamma`` should match the agent's own discount (0.99 default
+    here, matching ``DQNAgent``'s default) -- the invariance guarantee is
+    exact only when they match. The very first transition of each episode
+    has no previous-tick Phi(s) available (`SumoEnvironment.reset()` returns
+    only observations, not info, in multi-agent mode) so its shaping term is
+    defined as exactly 0 (Phi(s_0) := Phi(s_1) for that one transition only)
+    -- a standard practical convention, and irrelevant to the invariance
+    guarantee since a per-episode additive constant on Phi cannot change
+    which action is optimal within the episode.
     """
 
     def __init__(
@@ -970,12 +993,17 @@ class RewardShapingWrapper(FixedTsForwardingMixin):
         wait_weight: float = 0.0,
         stopped_weight: float = 0.0,
         raw_weight: float = 1.0,
+        potential_weight: float = 0.0,
+        potential_gamma: float = 0.99,
     ):
         self.env = env
         self.queue_weight = float(queue_weight)
         self.wait_weight = float(wait_weight)
         self.stopped_weight = float(stopped_weight)
         self.raw_weight = float(raw_weight)
+        self.potential_weight = float(potential_weight)
+        self.potential_gamma = float(potential_gamma)
+        self._prev_potential: Dict[str, float] = {}
 
     def _extract_local_metric(self, info: Dict[str, Any], key: str, weight_name: str) -> float:
         # Loud, not silent, when a configured non-zero weight has nothing to
@@ -1017,16 +1045,41 @@ class RewardShapingWrapper(FixedTsForwardingMixin):
         return float(shaped)
 
     def reset(self, *a, **kw):
+        self._prev_potential = {}
         return self.env.reset(*a, **kw)
+
+    def _potential_bonus(self, info: Dict[str, Any], ts_id: str) -> float:
+        if self.potential_weight == 0.0:
+            return 0.0
+        phi_new = self.potential_weight * self._extract_local_metric(
+            info, f"{ts_id}_pressure", "potential_weight"
+        )
+        if ts_id not in self._prev_potential:
+            # First tick of the episode: no previous Phi(s) to diff against.
+            # Must be exactly 0.0 here, NOT gamma*phi_new - phi_new (which is
+            # only 0 when gamma==1) -- caught by
+            # test_potential_bonus_is_zero_on_first_tick_of_an_episode.
+            self._prev_potential[ts_id] = phi_new
+            return 0.0
+        phi_old = self._prev_potential[ts_id]
+        self._prev_potential[ts_id] = phi_new
+        return self.potential_gamma * phi_new - phi_old
 
     def step(self, actions):
         obs, rewards, dones, info = self.env.step(actions)
         if isinstance(rewards, dict):
             shaped_rewards = {
-                ts_id: self._shape_reward(float(r), info, ts_id=ts_id)
+                ts_id: self._shape_reward(float(r), info, ts_id=ts_id) + self._potential_bonus(info, ts_id)
                 for ts_id, r in rewards.items()
             }
         else:
+            if self.potential_weight != 0.0:
+                raise NotImplementedError(
+                    "potential_weight requires per-intersection reward dicts "
+                    "(multi-agent mode) -- the single-agent reward path has no "
+                    "ts_id to key {ts}_pressure off of. Same restriction as "
+                    "wait_weight/stopped_weight above."
+                )
             shaped_rewards = self._shape_reward(float(rewards), info)
         return obs, shaped_rewards, dones, info
 

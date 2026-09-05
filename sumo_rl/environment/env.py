@@ -596,11 +596,18 @@ class SumoEnvironment(gym.Env):
             sum(self.traffic_signals[ts].get_accumulated_waiting_time_per_lane()) for ts in self.ts_ids
         ]
         average_speed = [self.traffic_signals[ts].get_average_speed() for ts in self.ts_ids]
+        # get_pressure() (#veh leaving - #veh approaching) already existed for the
+        # standalone "pressure"/"pressure_norm" reward functions (see
+        # TrafficSignal._pressure_reward) -- exposed here too so RewardShapingWrapper's
+        # potential-based shaping term (fidings/divergence_investigation.md item 22)
+        # can read it as a per-tick state signal without a second TraCI query path.
+        pressure = [self.traffic_signals[ts].get_pressure() for ts in self.ts_ids]
         info = {}
         for i, ts in enumerate(self.ts_ids):
             info[f"{ts}_stopped"] = stopped[i]
             info[f"{ts}_accumulated_waiting_time"] = accumulated_waiting_time[i]
             info[f"{ts}_average_speed"] = average_speed[i]
+            info[f"{ts}_pressure"] = pressure[i]
         info["agents_total_stopped"] = sum(stopped)
         info["agents_total_accumulated_waiting_time"] = sum(accumulated_waiting_time)
         return info
