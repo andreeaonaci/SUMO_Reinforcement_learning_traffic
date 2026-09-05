@@ -4362,7 +4362,45 @@ target), not in anything fixable by changing what the network itself looks like.
 n_step, capacity 64/256/512, and now BatchNorm/activation) has earned a place ahead of the
 existing plain-ReLU, no-batchnorm default. Keep it.
 
-## Open questions / next steps
+**CORRECTION, 2026-09-05, found while implementing §75 below:** the batchnorm runs above had an
+uncontrolled confound. `NeighborAttentionQNetwork`'s `_mlp_block` inserts a `_FlattenBatchNorm1d`
+module between every Linear and its activation when `use_batchnorm=True`, which shifts the plain
+(non-dueling) head's appended output Linear from state-dict key `head.4.weight` to `head.6.weight`.
+`federated/aggregation.py::head_key_names()` still hardcodes `"head.4.*"`, so **masked-head
+aggregation silently found no matching key and fell back to plain full-state FedAvg for every
+`--batchnorm` run above, while the DQN+q_entropy baseline it was compared against used real
+masked-head aggregation.** Fixed in `federated/parallel_server.py`/`experiments/
+federated_training.py`: `use_masked_head` (and the dueling head-key lookup) are now explicitly
+forced off whenever `use_batchnorm=True`, matching the existing PPO precedent, so this is a
+controlled, documented choice going forward rather than a silent accident. **Does this change
+§74's conclusion?** Probably not by much, and the direction argues the null result understates
+Upgraded DQN's case if anything: it was handicapped by silently losing whatever benefit masked-head
+aggregation provides at this 3-city roster size (documented elsewhere in this file as shrinking
+with roster size, `|diff|/SE` 3.42→0.71→0.23 going 2→3→7 cities, so plausibly small but not zero
+here) — not re-run given the small expected effect size and this session's time budget, but flagged
+so this comparison isn't cited as fully clean.
+
+## 75. "Deeper DQN": more Linear layers in the own/neighbor feature encoders, launched as an
+    autonomous multi-hour campaign (user handed over full run/stop authority for ~8h)
+
+**2026-09-05.** Direct follow-up to §73/§74: with algorithm swaps (PPO, Munchausen-DQN) and
+network-internals changes (BatchNorm, activation) both landing as statistical ties, the user asked
+for the next axis — network **depth** (distinct from the capacity/width axis already tested via
+`d_model` in §73's batch 5, which found 64/256/512 all worse than the default 128) — and handed
+over autonomous run/stop/pivot authority for approximately 8 hours ("you are chief and in
+command... I'm waiting for a promising result when i come back").
+
+**Implementation:** `NeighborAttentionQNetwork` gains `encoder_depth: int = 2` (default reproduces
+the original 2-Linear `own_encoder`/`neighbor_encoder` exactly), applied to `own_encoder`,
+`neighbor_encoder`, and `pool_head` (the `head_fix=False` mean-pooling alternative) via the
+existing `_mlp_block` helper. **Deliberately NOT applied to `self.head`'s own depth** — its
+structure is depended on by masked-head aggregation's fixed `head.4.*` key lookup (exactly the
+class of bug the §74 correction above just found for BatchNorm); deepening the encoders instead of
+the head trunk gets a genuine "more layers" test without reintroducing that same confound. Wired
+as `--encoder_depth`, `--algo dqn` only, through both training paths. Smoke-tested (synthetic
+shapes + a real tiny `--parallel` run) before committing to real comparison compute.
+
+**Status: pilots launched, in progress — see below for results as they land.**
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
    real multi-seed run in §6.** Parallel workers were never seeded; fixed and verified

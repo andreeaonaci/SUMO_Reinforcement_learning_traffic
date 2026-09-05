@@ -102,6 +102,7 @@ def _client_worker(
     munchausen_alpha: float = 0.9,
     use_batchnorm: bool = False,
     activation: str = "relu",
+    encoder_depth: int = 2,
 ):
     """Runs inside its own process for the ENTIRE training run.
 
@@ -195,6 +196,7 @@ def _client_worker(
                 q_entropy_weight=q_entropy_weight,
                 d_model=d_model, n_heads=n_heads,
                 use_batchnorm=use_batchnorm, activation=activation,
+                encoder_depth=encoder_depth,
             )
 
         while True:
@@ -318,12 +320,14 @@ class ParallelFederatedServer:
         munchausen_alpha: float = 0.9,
         use_batchnorm: bool = False,
         activation: str = "relu",
+        encoder_depth: int = 2,
     ):
         self.algo = algo
         self.d_model = d_model
         self.n_heads = n_heads
         self.munchausen_temp = munchausen_temp
         self.munchausen_alpha = munchausen_alpha
+        self.encoder_depth = encoder_depth
         self.use_batchnorm = use_batchnorm
         self.activation = activation
         self.global_model = global_model
@@ -347,10 +351,26 @@ class ParallelFederatedServer:
         # PPOAgent's state dict (policy_head/ac_value_head) -- plain full-
         # state FedAvg is used instead, same as the sequential path's
         # matching guard in experiments/federated_training.py.
-        self.head_fix = bool(head_fix) and algo != "ppo"
+        #
+        # ALSO forced off under --batchnorm (found 2026-09-05, after §74's
+        # comparison had already run): NeighborAttentionQNetwork's
+        # _mlp_block inserts a _FlattenBatchNorm1d module between every
+        # Linear and its activation when use_batchnorm=True, which shifts
+        # the plain (non-dueling) head's appended output Linear from index
+        # 4 to index 6 ("head.4.weight" -> "head.6.weight"). head_key_names()
+        # still hardcodes "head.4.*", so with batchnorm on, masked-head
+        # aggregation was silently finding no matching key and falling back
+        # to plain full-state FedAvg -- an uncontrolled confound in every
+        # --batchnorm run so far (the baseline it was compared against DID
+        # get real masked-head aggregation). See fidings sec 74's
+        # correction note and sec 75 for the batchnorm-off depth
+        # experiments run instead once this was caught.
+        self.head_fix = bool(head_fix) and algo != "ppo" and not use_batchnorm
         self.neighbor_attention = bool(neighbor_attention)
         self.fedavg_blend = float(max(0.0, min(1.0, fedavg_blend)))
-        self._head_weight_key, self._head_bias_key = head_key_names(dueling and algo != "ppo")
+        self._head_weight_key, self._head_bias_key = head_key_names(
+            dueling and algo != "ppo" and not use_batchnorm
+        )
         self.server_momentum = float(server_momentum)
         self._momentum_buffer: Optional[Dict[str, torch.Tensor]] = None
         self.pseudo_grad_clip = float(pseudo_grad_clip)
@@ -413,6 +433,7 @@ class ParallelFederatedServer:
                     self.d_model, self.n_heads,
                     self.munchausen_temp, self.munchausen_alpha,
                     self.use_batchnorm, self.activation,
+                    self.encoder_depth,
                 ),
                 daemon=True,
             )

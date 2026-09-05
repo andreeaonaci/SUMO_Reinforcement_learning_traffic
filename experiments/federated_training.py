@@ -92,7 +92,8 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
                 dueling: bool = False, n_step: int = 1, q_entropy_weight: float = 0.0,
                 algo: str = "dqn", d_model: int = 128, n_heads: int = 4,
                 munchausen_temp: float = 0.03, munchausen_alpha: float = 0.9,
-                use_batchnorm: bool = False, activation: str = "relu"):
+                use_batchnorm: bool = False, activation: str = "relu",
+                encoder_depth: int = 2):
     """Single place that constructs the local/global agent -- DQNAgent
     (default, unchanged), PPOAgent (--algo ppo, agents/ppo.py), or
     MunchausenDQNAgent (--algo munchausen, agents/munchausen_dqn.py; see
@@ -143,6 +144,7 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
         q_entropy_weight=q_entropy_weight,
         use_batchnorm=use_batchnorm,
         activation=activation,
+        encoder_depth=encoder_depth,
     )
 
 
@@ -172,6 +174,7 @@ def load_clients(
     munchausen_alpha: float = 0.9,
     use_batchnorm: bool = False,
     activation: str = "relu",
+    encoder_depth: int = 2,
 ) -> tuple:
     """Build one FederatedClient per city directory.
 
@@ -251,14 +254,14 @@ def load_clients(
             _tau=tau, _tu=target_update, _mu=mu, _dueling=dueling, _n_step=n_step,
             _qew=q_entropy_weight, _algo=algo, _dm=d_model, _nh=n_heads,
             _mtemp=munchausen_temp, _malpha=munchausen_alpha,
-            _bn=use_batchnorm, _act_fn=activation,
+            _bn=use_batchnorm, _act_fn=activation, _depth=encoder_depth,
         ):
             return _make_agent(_own, _nbr, _k, _act, _eps, head_fix=_head_fix,
                                tau=_tau, target_update=_tu, mu=_mu, dueling=_dueling,
                                n_step=_n_step, q_entropy_weight=_qew, algo=_algo,
                                d_model=_dm, n_heads=_nh,
                                munchausen_temp=_mtemp, munchausen_alpha=_malpha,
-                               use_batchnorm=_bn, activation=_act_fn)
+                               use_batchnorm=_bn, activation=_act_fn, encoder_depth=_depth)
 
         clients.append(
             FederatedClient(
@@ -773,6 +776,7 @@ def main(args):
             munchausen_alpha=args.munchausen_alpha,
             use_batchnorm=args.batchnorm,
             activation=args.activation,
+            encoder_depth=args.encoder_depth,
         )
 
         start_round = 1
@@ -864,6 +868,7 @@ def main(args):
             munchausen_alpha=args.munchausen_alpha,
             use_batchnorm=args.batchnorm,
             activation=args.activation,
+            encoder_depth=args.encoder_depth,
         )
         history = server.run(
             rounds=args.rounds,
@@ -898,6 +903,7 @@ def main(args):
             munchausen_alpha=args.munchausen_alpha,
             use_batchnorm=args.batchnorm,
             activation=args.activation,
+            encoder_depth=args.encoder_depth,
         )
         own_dim, neighbor_dim, k_max = obs_dims
 
@@ -923,6 +929,7 @@ def main(args):
             munchausen_alpha=args.munchausen_alpha,
             use_batchnorm=args.batchnorm,
             activation=args.activation,
+            encoder_depth=args.encoder_depth,
         )
         evaluator = make_holdout_evaluator(
             base,
@@ -950,7 +957,10 @@ def main(args):
             # names head_key_names() looks for -- forcing this off (rather
             # than relying on masked-head aggregation's silent no-op
             # fallback) makes the plain-full-state-FedAvg behavior explicit.
-            use_masked_head=(not args.disable_head_fix) and args.algo != "ppo",
+            # Also forced off under --batchnorm: it shifts the plain head's
+            # output Linear from index 4 to 6 (see the matching, more
+            # detailed comment in federated/parallel_server.py's __init__).
+            use_masked_head=(not args.disable_head_fix) and args.algo != "ppo" and not args.batchnorm,
             no_federation=args.no_federation,
             fedavg_blend=args.fedavg_blend,
             dueling=args.dueling and args.algo != "ppo",
@@ -1054,6 +1064,15 @@ if __name__ == "__main__":
                          help="Activation function throughout the network (own/neighbor "
                               "encoders, head trunk). 'relu' (default) reproduces the original "
                               "architecture exactly. Applies to --algo dqn only.")
+    parser.add_argument("--encoder_depth", type=int, default=2,
+                         help="'Deeper DQN' (fidings sec 75): number of Linear layers in the "
+                              "own-intersection and neighbor feature encoders (2 = original "
+                              "architecture exactly). Does NOT change the head trunk's depth "
+                              "(deliberately -- federated/aggregation.py's masked-head "
+                              "aggregation depends on the plain head's output Linear landing at "
+                              "a fixed 'head.4.*' key name; changing head depth would shift that "
+                              "index and silently break it, the same class of bug --batchnorm "
+                              "was found to cause). Applies to --algo dqn only.")
     parser.add_argument("--eval_every",            type=int,   default=1)
     parser.add_argument("--eval_episodes",         type=int,   default=5)
     parser.add_argument("--log_loss_every_steps",  type=int,   default=50,

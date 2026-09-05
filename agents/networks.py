@@ -125,6 +125,7 @@ class NeighborAttentionQNetwork(nn.Module):
         actor_critic: bool = False,
         use_batchnorm: bool = False,
         activation: str = "relu",
+        encoder_depth: int = 2,
     ):
         super().__init__()
         if dueling and actor_critic:
@@ -143,9 +144,19 @@ class NeighborAttentionQNetwork(nn.Module):
         # hardcoded Sequential blocks byte-for-byte at those defaults.
         self.use_batchnorm = use_batchnorm
         self.activation = activation
+        # "Deeper DQN" (fidings sec 75): more Linear layers in the own/
+        # neighbor feature encoders -- deliberately NOT applied to `head`
+        # (see below), whose structure federated/aggregation.py's masked-
+        # head aggregation depends on by fixed index ("head.4.weight" is
+        # looked up by name, not derived from depth -- changing head's
+        # layer count would silently break that lookup, a confound this
+        # experiment specifically avoids by only deepening the encoders).
+        # encoder_depth=2 (default) reproduces the original 2-Linear
+        # own_encoder/neighbor_encoder exactly.
+        self.encoder_depth = encoder_depth
 
         self.own_encoder = _mlp_block(
-            [own_dim, d_model, d_model], activation, use_batchnorm, final_activation=False
+            [own_dim] + [d_model] * encoder_depth, activation, use_batchnorm, final_activation=False
         )
 
         # +1 so "padding" (hop 0) gets its own embedding, distinct from a
@@ -153,7 +164,7 @@ class NeighborAttentionQNetwork(nn.Module):
         self.hop_embedding = nn.Embedding(n_hops + 1, d_model)
 
         self.neighbor_encoder = _mlp_block(
-            [neighbor_dim, d_model, d_model], activation, use_batchnorm, final_activation=False
+            [neighbor_dim] + [d_model] * encoder_depth, activation, use_batchnorm, final_activation=False
         )
 
         try:
@@ -208,7 +219,7 @@ class NeighborAttentionQNetwork(nn.Module):
 
         if not self.head_fix:
             self.pool_head = _mlp_block(
-                [d_model, d_model, d_model], activation, use_batchnorm, final_activation=False
+                [d_model] + [d_model] * encoder_depth, activation, use_batchnorm, final_activation=False
             )
 
     def _q_from_features(self, combined: torch.Tensor) -> torch.Tensor:
