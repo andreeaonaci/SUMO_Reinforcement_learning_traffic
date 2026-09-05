@@ -51,6 +51,7 @@ Usage:
 """
 import argparse
 import os
+import re
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -69,17 +70,48 @@ REAL_HOLDOUT_CFG_PATH = os.path.join("environments", "city_5_holdout", "config.y
 
 
 def infer_arch_from_checkpoint(state: dict) -> dict:
-    """Recover own_dim/neighbor_dim/action_dim/dueling/head_fix straight from
-    tensor shapes so this script doesn't need to be told which architecture
-    variant produced a given checkpoint (see module docstring point 1)."""
+    """Recover own_dim/neighbor_dim/action_dim/dueling/head_fix/encoder_depth/
+    n_attn_layers straight from tensor shapes so this script (and anything
+    else reusing this function, e.g. diagnostics/swa_reeval.py) doesn't
+    need to be told which architecture variant produced a given checkpoint
+    (see module docstring point 1).
+
+    NOTE a real limitation, not yet solved: this does NOT detect
+    use_batchnorm or activation. use_batchnorm additionally shifts the
+    plain (non-dueling) head's output Linear from "head.4.*" to "head.6.*"
+    (fidings sec 74's masked-head confound, same root cause) -- loading a
+    --batchnorm checkpoint through this function will raise a clear
+    load_state_dict error rather than silently mis-load, but won't
+    auto-recover. activation can't be recovered from tensor shapes at all
+    (it doesn't change any parameter's shape) -- defaults to "relu" here,
+    which is only correct if the checkpoint wasn't trained with
+    --activation relu6/leaky_relu.
+    """
     own_dim = state["own_encoder.0.weight"].shape[1]
     neighbor_dim = state["neighbor_encoder.0.weight"].shape[1]
     dueling = "advantage_head.weight" in state
     action_dim = (state["advantage_head.weight"].shape[0] if dueling
                   else state["head.4.weight"].shape[0])
     head_fix = "pool_head.0.weight" not in state
+    # encoder_depth (fidings sec 75): count of distinct Linear layers in
+    # own_encoder -- each contributes exactly one "own_encoder.<i>.weight"
+    # key (activation layers have no learnable params, so don't appear;
+    # BatchNorm's params nest under ".bn.weight", not directly ".weight",
+    # so this count is unaffected by --batchnorm).
+    encoder_depth = len([k for k in state if re.fullmatch(r"own_encoder\.\d+\.weight", k)])
+    # n_attn_layers (fidings sec 76): count of distinct "attn_layers.<i>."
+    # groups -- each attention layer has exactly one in_proj_weight. Old-
+    # style checkpoints (pre-sec76, flat "attn.in_proj_weight" key, no
+    # index) predate this option entirely and are always single-layer --
+    # NeighborAttentionQNetwork.load_state_dict's backward-compat shim
+    # remaps them to attn_layers.0.* at load time, so n_attn_layers=1 is
+    # the correct reconstruction for them too.
+    n_attn_layers = len([k for k in state if re.fullmatch(r"attn_layers\.\d+\.in_proj_weight", k)])
+    if n_attn_layers == 0 and "attn.in_proj_weight" in state:
+        n_attn_layers = 1
     return dict(own_dim=own_dim, neighbor_dim=neighbor_dim,
-                action_dim=action_dim, dueling=dueling, head_fix=head_fix)
+                action_dim=action_dim, dueling=dueling, head_fix=head_fix,
+                encoder_depth=encoder_depth, n_attn_layers=n_attn_layers)
 
 
 def main():
@@ -188,6 +220,7 @@ def main():
         own_dim=arch["own_dim"], neighbor_dim=arch["neighbor_dim"], k_max=k_max,
         action_dim=arch["action_dim"], dueling=arch["dueling"], head_fix=arch["head_fix"],
         n_step=args.n_step,
+        encoder_depth=arch["encoder_depth"], n_attn_layers=arch["n_attn_layers"],
     )
     if not args.random_init:
         global_model.load_state_dict(state)
@@ -271,6 +304,7 @@ def main():
             own_dim=arch["own_dim"], neighbor_dim=arch["neighbor_dim"], k_max=k_max,
             action_dim=arch["action_dim"], dueling=arch["dueling"], head_fix=arch["head_fix"],
             n_step=args.n_step, eps_decay=eps_decay,
+            encoder_depth=arch["encoder_depth"], n_attn_layers=arch["n_attn_layers"],
         )
         server_model.load_state_dict(start_state)
         return ParallelFederatedServer(

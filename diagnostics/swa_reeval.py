@@ -146,6 +146,7 @@ def main():
         agent = DQNAgent(
             own_dim=arch["own_dim"], neighbor_dim=arch["neighbor_dim"], k_max=k_max,
             action_dim=arch["action_dim"], dueling=arch["dueling"], head_fix=arch["head_fix"],
+            encoder_depth=arch["encoder_depth"], n_attn_layers=arch["n_attn_layers"],
         )
         agent.load_state_dict(state)
         return agent
