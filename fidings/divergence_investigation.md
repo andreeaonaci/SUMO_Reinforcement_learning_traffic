@@ -4784,6 +4784,24 @@ digits per intersection) sits well inside the `reward_clip=10.0` window the shap
 clipped to before the agent ever sees it (sec 57's reward-clip-saturation caution) -- dense enough
 to matter, not large enough to dominate or saturate the clip on its own. Results to follow.
 
+**3-seed pilot result: borderline, one measure clears this project's bar and one doesn't --
+extending to 6 seeds before drawing any conclusion, per this document's own standing rule.**
+
+| | best-round (3-seed avg) | mean(5 rounds, 3-seed avg) |
+|---|---:|---:|
+| baseline (`q_entropy_weight=0.05` only) | -9180.0 (std 158.3) | -9515.7 (std 124.3) |
+| `+ potential_shaping_weight=0.1` | -8939.8 (std 167.4) | -9285.3 (std 91.1) |
+| \|diff\|/SE | 1.47 | **2.11** |
+
+Potential shaping is ahead on both measures, and the mean-reward comparison nominally clears the
+project's own |diff|/SE >= 2 bar for the first time on ANY item-2X lever so far (items 20/21 were
+both clean nulls, |diff|/SE well under 1). But best-round does not clear it, and this document has
+seen a 3-seed pass evaporate on more seeds more times than it has held (§11->§12, §30->§31,
+§46->§47, §79's own window-2 reversal) -- a barely-over-2.0 result on one of two measures, at the
+smallest seed count this document treats as informative at all, is exactly the profile that has
+historically NOT replicated. **Not calling this a finding yet.** Extending to 6 seeds (3/7/11 +
+17/21/25) on both arms before any conclusion, matching the rigor already applied to items 20/21.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
