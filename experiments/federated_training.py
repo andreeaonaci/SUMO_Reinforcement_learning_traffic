@@ -744,6 +744,13 @@ def main(args):
             "(main()'s resume block below) assumes a DQNAgent-shaped checkpoint/schedule."
         )
 
+    if args.lockin_reset_std_threshold > 0.0 and not args.parallel:
+        raise ValueError(
+            "--lockin_reset_std_threshold requires --parallel -- it needs the server to signal "
+            "each worker process at the start of a round, which the sequential path's direct "
+            "method-call flow (FederatedServer/FederatedClient) isn't wired up for."
+        )
+
     if args.parallel:
         city_configs, obs_dims, action_dim, steps_per_ep = resolve_city_configs_and_dims(
             base, reward_shaping=reward_shaping_cfg
@@ -874,6 +881,7 @@ def main(args):
             activation=args.activation,
             encoder_depth=args.encoder_depth,
             n_attn_layers=args.n_attn_layers,
+            lockin_reset_std_threshold=args.lockin_reset_std_threshold,
         )
         history = server.run(
             rounds=args.rounds,
@@ -1091,6 +1099,17 @@ if __name__ == "__main__":
                               "feature encoders instead and was found to hurt monotonically) -- "
                               "this adds capacity to the part of the network that actually sees "
                               "neighbor information. Applies to --algo dqn only.")
+    parser.add_argument("--lockin_reset_std_threshold", type=float, default=0.0,
+                         help="Item 20 (fidings sec 78): if a round's eval std_reward falls below "
+                              "this threshold (the same std<50 screen used throughout "
+                              "fidings/divergence_investigation.md, sec 49/50, to flag confident "
+                              "lock-in), every worker clears its replay buffer before training the "
+                              "NEXT round -- tests whether a locked policy's self-generated, "
+                              "increasingly homogeneous transitions are perpetuating the lock via "
+                              "TD-bootstrapping off stale data. Distinct from --epsilon_reset_every "
+                              "(sec 41/42, tested, null), which resets exploration, not the buffer. "
+                              "0.0 (default) is an exact no-op. --parallel only (needs server->"
+                              "worker signaling the sequential path doesn't have wired up for this).")
     parser.add_argument("--eval_every",            type=int,   default=1)
     parser.add_argument("--eval_episodes",         type=int,   default=5)
     parser.add_argument("--log_loss_every_steps",  type=int,   default=50,

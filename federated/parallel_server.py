@@ -205,8 +205,17 @@ def _client_worker(
             if msg is None or msg[0] == "stop":
                 break
 
-            _, global_state, round_num = msg
+            _, global_state, round_num, clear_replay = msg
             agent.start_round(global_state)
+            if clear_replay and algo != "ppo":
+                # item 20 (fidings sec 78): server detected a confident
+                # lock-in on last round's eval and asked every worker to
+                # drop its replay buffer before training this round. PPO
+                # has no persistent replay buffer (on-policy) -- nothing to
+                # clear, and clear_replay() doesn't exist on PPOAgent.
+                agent.clear_replay()
+                logger.info("Worker '%s' round %d: replay buffer cleared (lock-in detected last round)",
+                            name, round_num)
             # Periodic exploration reset (item 11(b), fidings/divergence_
             # investigation.md §40): monotonic epsilon decay means a client
             # that's locked onto a confidently-wrong repeating action by
@@ -323,7 +332,15 @@ class ParallelFederatedServer:
         activation: str = "relu",
         encoder_depth: int = 2,
         n_attn_layers: int = 1,
+        lockin_reset_std_threshold: float = 0.0,
     ):
+        # item 20 (fidings sec 78): if >0, a round whose eval std_reward
+        # falls below this threshold (the same std<50 screen already used
+        # throughout fidings/divergence_investigation.md to flag confident
+        # lock-in, sec 49/50) triggers a replay-buffer clear on every
+        # worker before the NEXT round trains. 0.0 (default) is an exact
+        # no-op -- self._pending_clear_replay never becomes True.
+        self.lockin_reset_std_threshold = float(lockin_reset_std_threshold)
         self.algo = algo
         self.d_model = d_model
         self.n_heads = n_heads
@@ -537,6 +554,9 @@ class ParallelFederatedServer:
         per_client_state: Dict[str, Dict[str, torch.Tensor]] = {
             name: self._clone_state_dict(base_global_state) for name in self.names
         }
+        # Set from the PREVIOUS round's eval (see the bottom of this loop) --
+        # False for start_round since there's no prior eval yet this run.
+        pending_clear_replay = False
 
         try:
             for r in range(start_round, rounds + 1):
@@ -549,7 +569,8 @@ class ParallelFederatedServer:
                         send_state = per_client_state[name]
                     else:
                         send_state = global_state_before
-                    self.in_queues[name].put(("train", send_state, r))
+                    self.in_queues[name].put(("train", send_state, r, pending_clear_replay))
+                pending_clear_replay = False  # consumed; next round's value set after this round's eval below
 
                 # Collect results as they arrive (order doesn't matter).
                 client_states: Dict[str, Dict[str, torch.Tensor]] = {}
@@ -762,6 +783,24 @@ class ParallelFederatedServer:
                             metrics["mean_stopped"],
                             metrics.get("std_stopped", 0.0),
                         )
+                        # item 20 (fidings sec 78): flag a replay-buffer
+                        # clear for every worker's NEXT round if this
+                        # round's eval looks confidently locked. Uses the
+                        # cheap 5-episode std screen already established
+                        # throughout fidings/divergence_investigation.md
+                        # (sec 49/50) -- a real but imperfect proxy (sec 56
+                        # found false negatives near the threshold), fine
+                        # for triggering an inexpensive corrective action
+                        # rather than a load-bearing measurement.
+                        std_reward = metrics.get("std_reward")
+                        if self.lockin_reset_std_threshold > 0.0 and std_reward is not None \
+                                and std_reward < self.lockin_reset_std_threshold:
+                            pending_clear_replay = True
+                            logger.info(
+                                "Round %d | eval std=%.4f < threshold=%.1f -- clearing every "
+                                "worker's replay buffer before round %d",
+                                r, std_reward, self.lockin_reset_std_threshold, r + 1,
+                            )
                     else:
                         history["eval_reward"].append(None)
                         history["eval_reward_std"].append(None)

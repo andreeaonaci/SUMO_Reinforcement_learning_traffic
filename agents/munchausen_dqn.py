@@ -191,6 +191,12 @@ class MunchausenDQNAgent:
     def start_round(self, global_state: Dict[str, "torch.Tensor"]) -> None:
         self.load_state_dict(global_state)
 
+    def clear_replay(self) -> None:
+        """See agents/dqn.py::ReplayBuffer.clear()'s docstring (item 20,
+        fidings sec 78)."""
+        self.replay.clear()
+        self._nstep_buffers = {}
+
     def decay_lr(self) -> float:
         for group in self.optimizer.param_groups:
             new_lr = max(group["lr"] * self.lr_decay, self.min_lr)
