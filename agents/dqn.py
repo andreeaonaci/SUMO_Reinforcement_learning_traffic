@@ -127,6 +127,7 @@ class DQNAgent:
         use_batchnorm: bool = False,
         activation: str = "relu",
         encoder_depth: int = 2,
+        n_attn_layers: int = 1,
     ):
         self.own_dim = own_dim
         self.neighbor_dim = neighbor_dim
@@ -147,6 +148,7 @@ class DQNAgent:
             use_batchnorm=use_batchnorm,
             activation=activation,
             encoder_depth=encoder_depth,
+            n_attn_layers=n_attn_layers,
         )
         self.q = NeighborAttentionQNetwork(**net_kwargs).to(self.device)
         self.q_target = NeighborAttentionQNetwork(**net_kwargs).to(self.device)

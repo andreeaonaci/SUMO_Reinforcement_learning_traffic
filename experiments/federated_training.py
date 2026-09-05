@@ -93,7 +93,7 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
                 algo: str = "dqn", d_model: int = 128, n_heads: int = 4,
                 munchausen_temp: float = 0.03, munchausen_alpha: float = 0.9,
                 use_batchnorm: bool = False, activation: str = "relu",
-                encoder_depth: int = 2):
+                encoder_depth: int = 2, n_attn_layers: int = 1):
     """Single place that constructs the local/global agent -- DQNAgent
     (default, unchanged), PPOAgent (--algo ppo, agents/ppo.py), or
     MunchausenDQNAgent (--algo munchausen, agents/munchausen_dqn.py; see
@@ -145,6 +145,7 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
         use_batchnorm=use_batchnorm,
         activation=activation,
         encoder_depth=encoder_depth,
+        n_attn_layers=n_attn_layers,
     )
 
 
@@ -175,6 +176,7 @@ def load_clients(
     use_batchnorm: bool = False,
     activation: str = "relu",
     encoder_depth: int = 2,
+    n_attn_layers: int = 1,
 ) -> tuple:
     """Build one FederatedClient per city directory.
 
@@ -254,14 +256,15 @@ def load_clients(
             _tau=tau, _tu=target_update, _mu=mu, _dueling=dueling, _n_step=n_step,
             _qew=q_entropy_weight, _algo=algo, _dm=d_model, _nh=n_heads,
             _mtemp=munchausen_temp, _malpha=munchausen_alpha,
-            _bn=use_batchnorm, _act_fn=activation, _depth=encoder_depth,
+            _bn=use_batchnorm, _act_fn=activation, _depth=encoder_depth, _nal=n_attn_layers,
         ):
             return _make_agent(_own, _nbr, _k, _act, _eps, head_fix=_head_fix,
                                tau=_tau, target_update=_tu, mu=_mu, dueling=_dueling,
                                n_step=_n_step, q_entropy_weight=_qew, algo=_algo,
                                d_model=_dm, n_heads=_nh,
                                munchausen_temp=_mtemp, munchausen_alpha=_malpha,
-                               use_batchnorm=_bn, activation=_act_fn, encoder_depth=_depth)
+                               use_batchnorm=_bn, activation=_act_fn, encoder_depth=_depth,
+                               n_attn_layers=_nal)
 
         clients.append(
             FederatedClient(
@@ -777,6 +780,7 @@ def main(args):
             use_batchnorm=args.batchnorm,
             activation=args.activation,
             encoder_depth=args.encoder_depth,
+            n_attn_layers=args.n_attn_layers,
         )
 
         start_round = 1
@@ -869,6 +873,7 @@ def main(args):
             use_batchnorm=args.batchnorm,
             activation=args.activation,
             encoder_depth=args.encoder_depth,
+            n_attn_layers=args.n_attn_layers,
         )
         history = server.run(
             rounds=args.rounds,
@@ -904,6 +909,7 @@ def main(args):
             use_batchnorm=args.batchnorm,
             activation=args.activation,
             encoder_depth=args.encoder_depth,
+            n_attn_layers=args.n_attn_layers,
         )
         own_dim, neighbor_dim, k_max = obs_dims
 
@@ -930,6 +936,7 @@ def main(args):
             use_batchnorm=args.batchnorm,
             activation=args.activation,
             encoder_depth=args.encoder_depth,
+            n_attn_layers=args.n_attn_layers,
         )
         evaluator = make_holdout_evaluator(
             base,
@@ -1073,6 +1080,17 @@ if __name__ == "__main__":
                               "a fixed 'head.4.*' key name; changing head depth would shift that "
                               "index and silently break it, the same class of bug --batchnorm "
                               "was found to cause). Applies to --algo dqn only.")
+    parser.add_argument("--n_attn_layers", type=int, default=1,
+                         help="'Stacked attention' (fidings sec 76): number of independent "
+                              "(separately-weighted) rounds of attention each intersection's own "
+                              "embedding does over its neighbors before the head trunk sees it "
+                              "(1 = original single-attention-pass architecture exactly). Neighbor "
+                              "keys/values stay fixed across rounds; only the query (running own-"
+                              "representation) is iteratively refined. A genuinely different "
+                              "architecture from --encoder_depth (which adds capacity to the raw-"
+                              "feature encoders instead and was found to hurt monotonically) -- "
+                              "this adds capacity to the part of the network that actually sees "
+                              "neighbor information. Applies to --algo dqn only.")
     parser.add_argument("--eval_every",            type=int,   default=1)
     parser.add_argument("--eval_episodes",         type=int,   default=5)
     parser.add_argument("--log_loss_every_steps",  type=int,   default=50,

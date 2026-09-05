@@ -103,6 +103,7 @@ def _client_worker(
     use_batchnorm: bool = False,
     activation: str = "relu",
     encoder_depth: int = 2,
+    n_attn_layers: int = 1,
 ):
     """Runs inside its own process for the ENTIRE training run.
 
@@ -196,7 +197,7 @@ def _client_worker(
                 q_entropy_weight=q_entropy_weight,
                 d_model=d_model, n_heads=n_heads,
                 use_batchnorm=use_batchnorm, activation=activation,
-                encoder_depth=encoder_depth,
+                encoder_depth=encoder_depth, n_attn_layers=n_attn_layers,
             )
 
         while True:
@@ -321,6 +322,7 @@ class ParallelFederatedServer:
         use_batchnorm: bool = False,
         activation: str = "relu",
         encoder_depth: int = 2,
+        n_attn_layers: int = 1,
     ):
         self.algo = algo
         self.d_model = d_model
@@ -328,6 +330,7 @@ class ParallelFederatedServer:
         self.munchausen_temp = munchausen_temp
         self.munchausen_alpha = munchausen_alpha
         self.encoder_depth = encoder_depth
+        self.n_attn_layers = n_attn_layers
         self.use_batchnorm = use_batchnorm
         self.activation = activation
         self.global_model = global_model
@@ -433,7 +436,7 @@ class ParallelFederatedServer:
                     self.d_model, self.n_heads,
                     self.munchausen_temp, self.munchausen_alpha,
                     self.use_batchnorm, self.activation,
-                    self.encoder_depth,
+                    self.encoder_depth, self.n_attn_layers,
                 ),
                 daemon=True,
             )

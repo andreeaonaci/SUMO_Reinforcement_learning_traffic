@@ -126,6 +126,7 @@ class NeighborAttentionQNetwork(nn.Module):
         use_batchnorm: bool = False,
         activation: str = "relu",
         encoder_depth: int = 2,
+        n_attn_layers: int = 1,
     ):
         super().__init__()
         if dueling and actor_critic:
@@ -167,17 +168,39 @@ class NeighborAttentionQNetwork(nn.Module):
             [neighbor_dim] + [d_model] * encoder_depth, activation, use_batchnorm, final_activation=False
         )
 
-        try:
-            self.attn = nn.MultiheadAttention(
-                embed_dim=d_model, num_heads=n_heads, batch_first=True
-            )
-            self._attn_batch_first = True
-        except TypeError:
-            self.attn = nn.MultiheadAttention(
-                embed_dim=d_model, num_heads=n_heads
-            )
-            self._attn_batch_first = False
-        self.attn_norm = nn.LayerNorm(d_model)
+        # "Stacked attention" (fidings sec 76): n_attn_layers=1 (default)
+        # reproduces the original single-attention-pass design exactly (one
+        # nn.MultiheadAttention + one LayerNorm, both indexed [0] in the
+        # ModuleLists below). n_attn_layers>1 gives each intersection's own
+        # embedding multiple independent (separately-weighted, not shared)
+        # rounds of attention over its neighbors before the head trunk sees
+        # it -- capacity added to the part of the network that actually
+        # sees neighbor information, unlike encoder_depth (sec 75, which
+        # added capacity to the raw-feature encoders instead and hurt
+        # monotonically). The neighbor keys/values (kv) stay fixed across
+        # rounds; only the query (the running own-representation) is
+        # iteratively refined -- simpler than a full stacked Transformer
+        # encoder (which would also update kv each layer) but still a
+        # genuinely different architecture, not just deeper MLPs.
+        self.n_attn_layers = n_attn_layers
+        attn_layers = []
+        attn_norms = []
+        attn_batch_first = True
+        for _ in range(n_attn_layers):
+            try:
+                attn_layers.append(nn.MultiheadAttention(
+                    embed_dim=d_model, num_heads=n_heads, batch_first=True
+                ))
+                attn_batch_first = True
+            except TypeError:
+                attn_layers.append(nn.MultiheadAttention(
+                    embed_dim=d_model, num_heads=n_heads
+                ))
+                attn_batch_first = False
+            attn_norms.append(nn.LayerNorm(d_model))
+        self.attn_layers = nn.ModuleList(attn_layers)
+        self.attn_norms = nn.ModuleList(attn_norms)
+        self._attn_batch_first = attn_batch_first
 
         # Learnable fallback so a fully isolated intersection (mask all
         # zero) still attends to a well-defined value instead of a
@@ -267,26 +290,29 @@ class NeighborAttentionQNetwork(nn.Module):
 
         key_padding_mask = full_mask < 0.5  # True = ignore this position
 
-        query = own_emb.unsqueeze(1)  # (B, 1, d_model)
+        # Iteratively refine the own-representation across n_attn_layers
+        # rounds of attention over the SAME (fixed) neighbor kv -- see the
+        # __init__ comment above for why this differs from a full stacked
+        # Transformer encoder. own_repr is the running query; own_emb
+        # itself never changes and is what gets concatenated at the end,
+        # matching the original single-layer design's semantics exactly
+        # when n_attn_layers=1 (own_repr after one round == that design's
+        # attn_out).
+        own_repr = own_emb
+        for attn, norm in zip(self.attn_layers, self.attn_norms):
+            query = own_repr.unsqueeze(1)  # (B, 1, d_model)
+            if self._attn_batch_first:
+                attn_out, _ = attn(query, kv, kv, key_padding_mask=key_padding_mask)
+                attn_out = attn_out.squeeze(1)
+            else:
+                # Older torch versions only support (seq, batch, embed).
+                query_t = query.transpose(0, 1)
+                kv_t = kv.transpose(0, 1)
+                attn_out, _ = attn(query_t, kv_t, kv_t, key_padding_mask=key_padding_mask)
+                attn_out = attn_out.transpose(0, 1).squeeze(1)
+            own_repr = norm(attn_out + own_repr)  # residual
 
-        if self._attn_batch_first:
-            attn_out, _ = self.attn(query, kv, kv, key_padding_mask=key_padding_mask)
-            attn_out = attn_out.squeeze(1)
-        else:
-            # Older torch versions only support (seq, batch, embed).
-            query_t = query.transpose(0, 1)
-            kv_t = kv.transpose(0, 1)
-            attn_out, _ = self.attn(
-                query_t,
-                kv_t,
-                kv_t,
-                key_padding_mask=key_padding_mask,
-            )
-            attn_out = attn_out.transpose(0, 1).squeeze(1)
-
-        attn_out = self.attn_norm(attn_out + own_emb)  # residual
-
-        return torch.cat([own_emb, attn_out], dim=-1)
+        return torch.cat([own_emb, own_repr], dim=-1)
 
     def forward(
         self,
