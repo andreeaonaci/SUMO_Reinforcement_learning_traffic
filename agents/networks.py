@@ -127,6 +127,7 @@ class NeighborAttentionQNetwork(nn.Module):
         activation: str = "relu",
         encoder_depth: int = 2,
         n_attn_layers: int = 1,
+        recurrent: bool = False,
     ):
         super().__init__()
         if dueling and actor_critic:
@@ -245,6 +246,18 @@ class NeighborAttentionQNetwork(nn.Module):
                 [d_model] + [d_model] * encoder_depth, activation, use_batchnorm, final_activation=False
             )
 
+        # Recurrent policy (item 23, fidings/divergence_investigation.md): every
+        # architecture tried before this (wider/deeper/more-attention) was still a
+        # purely reactive function of one tick's snapshot. A GRUCell sits between
+        # `_combined_features` and `self.head`, same width in and out (d_model*2)
+        # so `self.head`'s structure -- and the "head.4.weight" key masked-head
+        # aggregation depends on by name -- is completely untouched regardless of
+        # this flag. recurrent=False (default) never constructs `self.gru` at all,
+        # an exact no-op matching every other architecture knob in this class.
+        self.recurrent = recurrent
+        if self.recurrent:
+            self.gru = nn.GRUCell(d_model * 2, d_model * 2)
+
     def load_state_dict(self, state_dict, strict: bool = True):
         """Backward-compat shim: checkpoints saved before the "stacked
         attention" refactor (fidings sec 76, 2026-09-05) used flat
@@ -344,8 +357,42 @@ class NeighborAttentionQNetwork(nn.Module):
     ) -> torch.Tensor:
         """DQN entry point: own+neighbor obs -> masked-ready Q-values
         (plain or dueling-combined depending on ``self.dueling``)."""
+        if self.recurrent:
+            # Loud, not silent (project convention, e.g. RewardShapingWrapper's
+            # _extract_local_metric): a recurrent net's Q-values depend on a hidden
+            # state the caller must manage explicitly (per intersection, reset every
+            # episode) -- silently starting from zero hidden state on every call
+            # would look like it works while quietly discarding all temporal memory.
+            raise RuntimeError(
+                "This network was built with recurrent=True -- call forward_recurrent("
+                "..., hidden) instead of forward(), which has no hidden state to work with."
+            )
         combined = self._combined_features(own_obs, neighbor_obs, neighbor_mask, hop_dist)
         return self._q_from_features(combined)
+
+    def forward_recurrent(
+        self,
+        own_obs: torch.Tensor,
+        neighbor_obs: torch.Tensor,
+        neighbor_mask: torch.Tensor,
+        hop_dist: Optional[torch.Tensor] = None,
+        hidden: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Recurrent entry point: own+neighbor obs + previous hidden state ->
+        (masked-ready Q-values, new hidden state). ``hidden`` is (B, d_model*2);
+        None means "start of episode" (fed as zeros) -- callers (RecurrentDQNAgent)
+        are responsible for carrying the returned hidden state to the next tick and
+        resetting it to None/zeros at every episode boundary."""
+        if not self.recurrent:
+            raise RuntimeError(
+                "This network was built with recurrent=False -- call forward(...) "
+                "instead, or construct with recurrent=True to use forward_recurrent."
+            )
+        combined = self._combined_features(own_obs, neighbor_obs, neighbor_mask, hop_dist)
+        if hidden is None:
+            hidden = torch.zeros_like(combined)
+        new_hidden = self.gru(combined, hidden)
+        return self._q_from_features(new_hidden), new_hidden
 
     def forward_actor_critic(
         self,

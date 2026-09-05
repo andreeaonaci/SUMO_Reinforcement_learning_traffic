@@ -4839,6 +4839,71 @@ better/worse. Not urgent to chase further right now per the agreed item-20-25 or
 item 23 next), but flagged as the strongest candidate for a follow-up validation pass once the
 queue is worked through.
 
+## 81. Item 23 (recurrent policy) implemented, verified end-to-end, pilot launched
+
+**2026-09-06.** Every architecture tried in §73-76 (wider, deeper, more attention layers) was still
+a purely reactive function of one tick's snapshot -- this item gives the shared network an actual
+memory of recent ticks, a genuinely different axis (time, not capacity) from the whole architecture
+campaign. Bigger build than items 20-22: touches the network, the agent's action-selection/replay/
+optimize loop, AND the shared `federated/evaluator.py` (every prior result in this document runs
+through that evaluator, so this needed real care).
+
+**Design: "stored state" DRQN (Hausknecht & Stone 2015), not full R2D2-style sequence replay.**
+`agents/networks.py::NeighborAttentionQNetwork` gained `recurrent=True` -- a `GRUCell` sits between
+the existing own+neighbor feature fusion and `self.head`, same width in and out (`d_model*2`), so
+`self.head`'s structure (and the `"head.4.weight"` key masked-head aggregation depends on by name,
+§75/§76's own concern) is completely untouched. A new `forward_recurrent(obs, hidden)` method
+returns `(q_values, new_hidden)`; the existing stateless `forward()` now raises loudly if called on
+a `recurrent=True` network (and `forward_recurrent()` raises if called on a `recurrent=False` one)
+-- silently defaulting to zero hidden state on every call would look like it works while quietly
+discarding all temporal memory, so this project's standing "loud, not silent" convention
+(`RewardShapingWrapper._extract_local_metric`, §10, §24) applies here too.
+
+New `agents/recurrent_dqn.py::RecurrentDQNAgent` (subclasses `DQNAgent`, same interface as
+`PPOAgent`/`MunchausenDQNAgent` so it plugs in as `--algo recurrent`). Each transition stores the
+hidden state that was ACTUALLY live during rollout going into that tick (`h_in`) and its successor
+(`h_out`) -- both captured once in `act_batch`, reused unmodified by both online and target networks
+at train time. Simpler than replaying whole episode sequences with burn-in, at the cost of some
+staleness (the online network at train time has different weights than whatever produced `h_out`
+during rollout) -- an accepted, well-precedented DRQN tradeoff, not a full R2D2 implementation.
+Scope cuts, deliberate: `n_step>1` raises `ValueError` (an n-step accumulator window's own
+hidden-state bookkeeping across multiple ticks isn't implemented); the standalone diagnostic
+scripts (`finetune_on_holdout.py`, `swa_reeval.py`) don't support this agent type yet, matching how
+they also don't support `--algo ppo`/`munchausen`.
+
+**A real interface gap was found and fixed before it could produce silently-wrong evaluation
+numbers:** `federated/evaluator.py::_policy_action` calls `model.act(obs, explore=False)` once per
+`ts_id` per tick with NO `ts_id` passed into `.act()` itself -- fine for every stateless agent, but
+a recurrent agent needs to know WHICH intersection's hidden state to advance. Fixed by adding an
+accepted-and-ignored `ts_id: Optional[str] = None` parameter to `DQNAgent.act()`/`q_values()`,
+`PPOAgent.act()`, and `MunchausenDQNAgent.act()` (a safe, backward-compatible extension -- default
+None, unused by three of four agent types, matching this codebase's standing "extra optional kwarg,
+exact no-op at default" convention), then threading `ts_id=ts_id` through both `_policy_action` and
+the Q-gap diagnostic block. Also added an episode-boundary `model.reset_hidden()` call (a no-op via
+`hasattr` check for every other agent type) right after `env.reset()` in the eval loop -- without
+it, episode N+1's first tick would start from episode N's final hidden state instead of "no
+information yet." A second, subtler bug avoided during design (not found via testing, reasoned
+through up front): `q_values()` is called separately from `act()` purely for Q-gap diagnostic
+logging (every 10th tick) -- if it ran its own stateful forward pass, it would double-advance the
+hidden state for that tick. `q_values()` instead reads `_last_h_in` (the hidden state that was live
+going INTO the most recent `act()` call), a read-only lookup that doesn't touch `_hidden` at all.
+
+**Verified before spending real compute, same discipline as every other item in this queue:** a
+pure-Python smoke test (no SUMO) checking the `n_step>1` guard raises, hidden state actually
+changes across ticks, replay/optimize produce a real loss, episode reset clears hidden state,
+single-obs `act()`/`q_values()` with `ts_id` match evaluator.py's exact call pattern, checkpoint
+state_dict round-trips (including the new `gru.*` keys), and plain `DQNAgent` is completely
+unaffected -- all passed. Then a real 1-round, 3-city SUMo training run end-to-end with
+`--algo recurrent`, including the in-loop holdout eval -- completed cleanly, no crash. Full test
+suite re-run (`tests/`): same 3 pre-existing, unrelated failures as before this change (confirmed
+via `git stash` comparison), no new regressions; `tests/test_flag_wiring.py`'s 17 tests unaffected.
+
+**Pilot launched:** matching item 22's exact protocol for direct comparability (`environments_c1_4_6`,
+`--rounds 5 --local_episodes 2 --pad_to_true_holdout --q_entropy_weight 0.05`), baseline (plain
+`--algo dqn`) vs. `--algo recurrent`, seeds 3/7/11 to start (extending to 6 immediately if
+borderline, per this document's own standing rule -- see item 22's own 3-seed-then-6-seed path
+above). Results to follow.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit

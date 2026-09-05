@@ -143,7 +143,7 @@ class HoldoutEvaluator:
 
     def _policy_action(self, policy_name: str, ts_id: str | None, obs: dict, model) -> int:
         if policy_name == "trained":
-            return int(model.act(obs, explore=False))
+            return int(model.act(obs, explore=False, ts_id=ts_id))
 
         valid = np.flatnonzero(obs["action_mask"] > 0.5)
         if len(valid) == 0:
@@ -199,6 +199,13 @@ class HoldoutEvaluator:
                 obs_dict = env.reset()
                 if not isinstance(obs_dict, dict):
                     obs_dict = {"__single__": obs_dict}
+                # RecurrentDQNAgent carries per-intersection hidden state across
+                # ticks WITHIN an episode -- must be dropped at every episode
+                # boundary or the first tick of episode N+1 would start from
+                # episode N's final hidden state instead of "no information yet".
+                # A no-op for every other agent type (no reset_hidden method).
+                if hasattr(model, "reset_hidden"):
+                    model.reset_hidden()
 
                 done = False
                 ep_r = 0.0
@@ -216,7 +223,7 @@ class HoldoutEvaluator:
                     if len(action_log) % 10 == 0:
                         for ts_id, o in obs_dict.items():
                             try:
-                                qvals = model.q_values(o) if policy_name == "trained" else None
+                                qvals = model.q_values(o, ts_id=ts_id) if policy_name == "trained" else None
                                 if qvals is not None:
                                     valid = qvals[~np.isnan(qvals)]
                                     if len(valid) >= 2:

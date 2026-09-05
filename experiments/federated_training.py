@@ -38,6 +38,7 @@ from environments.federated_env import build_federated_env, ActionMaskPadder
 from agents.dqn import DQNAgent
 from agents.ppo import PPOAgent
 from agents.munchausen_dqn import MunchausenDQNAgent
+from agents.recurrent_dqn import RecurrentDQNAgent
 from federated.utils import compute_eps_decay, set_seed
 
 run_dir = None
@@ -127,6 +128,22 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
             n_step=n_step,
             d_model=d_model, n_heads=n_heads,
             munchausen_temp=munchausen_temp, munchausen_alpha=munchausen_alpha,
+        )
+    if algo == "recurrent":
+        return RecurrentDQNAgent(
+            own_dim=own_dim,
+            neighbor_dim=neighbor_dim,
+            k_max=k_max,
+            action_dim=action_dim,
+            eps_decay=eps_decay,
+            head_fix=head_fix,
+            tau=tau,
+            target_update=target_update,
+            d_model=d_model, n_heads=n_heads,
+            mu=mu,
+            dueling=dueling,
+            n_step=n_step,
+            q_entropy_weight=q_entropy_weight,
         )
     return DQNAgent(
         own_dim=own_dim,
@@ -1026,7 +1043,8 @@ if __name__ == "__main__":
              "(e.g. the same --rounds 40), not a remaining-rounds count.",
     )
     parser.add_argument("--local_episodes",        type=int,   default=1)
-    parser.add_argument("--algo", type=str, default="dqn", choices=["dqn", "ppo", "munchausen"],
+    parser.add_argument("--algo", type=str, default="dqn",
+                         choices=["dqn", "ppo", "munchausen", "recurrent"],
                          help="Local training algorithm. 'dqn' (default): agents/dqn.py, "
                               "unchanged. 'ppo': agents/ppo.py, an on-policy actor-critic with "
                               "an entropy-regularized stochastic policy. 'munchausen': "
@@ -1036,14 +1054,18 @@ if __name__ == "__main__":
                               "budget, unlike ppo), but the target is entropy-regularized so "
                               "the policy structurally resists collapsing to one action, same "
                               "motivation as ppo (see that module's docstring and "
-                              "fidings/divergence_investigation.md sec 32-34/51-57/70/72). Wired "
+                              "fidings/divergence_investigation.md sec 32-34/51-57/70/72). "
+                              "'recurrent': agents/recurrent_dqn.py (item 23) -- a GRUCell carries "
+                              "per-intersection hidden state across ticks within an episode, "
+                              "'stored state' DRQN (Hausknecht & Stone 2015); does not support "
+                              "--n_step other than 1. Wired "
                               "into both --parallel and the sequential path. DQN-only flags "
-                              "(--q_entropy_weight, --fedprox_mu) are ignored under both "
-                              "non-dqn algos; --dueling/--n_step/--tau/--target_update are "
-                              "honored under munchausen but not ppo. Masked-head aggregation is "
-                              "forced off under ppo only -- munchausen uses the same DQN Q-head "
-                              "naming, so masked-head aggregation (--disable_head_fix) still "
-                              "applies normally.")
+                              "(--q_entropy_weight, --fedprox_mu) are ignored under ppo/munchausen "
+                              "(recurrent honors both); --dueling/--n_step/--tau/--target_update are "
+                              "honored under munchausen and recurrent but not ppo. Masked-head "
+                              "aggregation is forced off under ppo only -- munchausen and recurrent "
+                              "use the same DQN Q-head naming, so masked-head aggregation "
+                              "(--disable_head_fix) still applies normally.")
     parser.add_argument("--d_model", type=int, default=128,
                          help="Network hidden width (own/neighbor encoders, attention, head "
                               "trunk) for whichever --algo is selected. Default 128 matches "

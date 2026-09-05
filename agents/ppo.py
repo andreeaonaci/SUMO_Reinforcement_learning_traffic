@@ -228,11 +228,15 @@ class PPOAgent:
         values = {t: float(v) for t, v in zip(ts_ids, value.cpu().numpy())}
         return actions, log_probs, values
 
-    def act(self, obs: Observation, explore: bool = True, eps: Optional[float] = None) -> int:
+    def act(self, obs: Observation, explore: bool = True, eps: Optional[float] = None,
+            ts_id: Optional[str] = None) -> int:
         """Single-observation action, matching DQNAgent.act()'s signature
         -- this is what federated/evaluator.py calls at eval time
-        (``explore=False``). ``eps`` is accepted only for interface parity
-        and ignored (PPO has no epsilon schedule).
+        (``explore=False``). ``eps``/``ts_id`` are accepted only for
+        interface parity and ignored (PPO has no epsilon schedule and no
+        per-intersection state; ``ts_id`` exists so evaluator.py can pass
+        it uniformly to every agent type, including RecurrentDQNAgent,
+        which actually uses it).
 
         explore=True:  sample from the policy distribution (same
                         stochastic behavior as during training).

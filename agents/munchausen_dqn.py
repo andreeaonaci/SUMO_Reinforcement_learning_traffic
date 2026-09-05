@@ -248,10 +248,14 @@ class MunchausenDQNAgent:
                 actions = torch.argmax(q, dim=-1).cpu().numpy().tolist()
         return dict(zip(ts_ids, actions))
 
-    def act(self, obs: Observation, explore: bool = True, eps: Optional[float] = None) -> int:
+    def act(self, obs: Observation, explore: bool = True, eps: Optional[float] = None,
+            ts_id: Optional[str] = None) -> int:
         """Single-observation action -- what federated/evaluator.py calls
         at eval time (explore=False -> deterministic argmax, matching this
-        project's pure-argmax-at-eval convention, sec 35)."""
+        project's pure-argmax-at-eval convention, sec 35). ``ts_id`` is
+        accepted and ignored (this agent has no per-intersection state) --
+        see DQNAgent.q_values's docstring for why the parameter exists on
+        this signature at all."""
         return self.act_batch({"__single__": obs}, explore=explore)["__single__"]
 
     # ------------------------------------------------------------------

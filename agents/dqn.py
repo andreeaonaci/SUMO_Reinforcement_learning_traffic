@@ -138,6 +138,7 @@ class DQNAgent:
         activation: str = "relu",
         encoder_depth: int = 2,
         n_attn_layers: int = 1,
+        recurrent: bool = False,
     ):
         self.own_dim = own_dim
         self.neighbor_dim = neighbor_dim
@@ -159,6 +160,7 @@ class DQNAgent:
             activation=activation,
             encoder_depth=encoder_depth,
             n_attn_layers=n_attn_layers,
+            recurrent=recurrent,
         )
         self.q = NeighborAttentionQNetwork(**net_kwargs).to(self.device)
         self.q_target = NeighborAttentionQNetwork(**net_kwargs).to(self.device)
@@ -361,10 +363,14 @@ class DQNAgent:
 
         return actions
 
-    def q_values(self, obs: Observation) -> np.ndarray:
+    def q_values(self, obs: Observation, ts_id: Optional[str] = None) -> np.ndarray:
         """Masked Q-values for a single observation (invalid actions are
         NaN, not -inf, so callers can distinguish 'invalid' from 'valid
-        but low' when inspecting/logging)."""
+        but low' when inspecting/logging). ``ts_id`` is accepted and
+        ignored here (this network is stateless) -- it exists so callers
+        like ``federated/evaluator.py`` can pass it uniformly to every
+        agent type; ``RecurrentDQNAgent`` overrides this to actually use
+        it as a per-intersection hidden-state key."""
         self.q.eval()  # single observation -- see _greedy_action_batch's comment
         with torch.no_grad():
             own, neighbors, neighbor_mask, hop_dist, action_mask = _collate([obs], self.device)
@@ -385,7 +391,11 @@ class DQNAgent:
             return self._random_valid_action(obs["action_mask"])
         return self._greedy_action(obs)
 
-    def act(self, obs: Observation, explore: bool = True, eps: Optional[float] = None) -> int:
+    def act(self, obs: Observation, explore: bool = True, eps: Optional[float] = None,
+            ts_id: Optional[str] = None) -> int:
+        """``ts_id`` is accepted and ignored here (this agent is stateless
+        across ticks) -- see ``q_values``'s docstring for why the parameter
+        exists on this base-class signature at all."""
         if explore:
             eps = self._current_epsilon() if eps is None else eps
             return self._epsilon_action(obs, eps)
@@ -594,6 +604,13 @@ class DQNAgent:
         if self.mu > 0:
             self._global_params = [p.detach().clone() for p in self.q.parameters()]
 
+    def _on_episode_start(self) -> None:
+        """Hook called once per episode by ``train()``, right where n-step
+        accumulators are reset -- a no-op here. ``RecurrentDQNAgent``
+        overrides this to reset its per-intersection hidden state, so
+        ``train()`` itself doesn't need to know anything about recurrence."""
+        pass
+
     def clear_replay(self) -> None:
         """See ReplayBuffer.clear()'s docstring. Also clears any in-flight
         n-step accumulator windows -- a partially-built n-step return
@@ -640,6 +657,7 @@ class DQNAgent:
             # episode should never bleed a bootstrap target into the next
             # one. A no-op when n_step<=1 (buffers stay unused).
             self._nstep_buffers = {}
+            self._on_episode_start()
 
             done = False
             ep_steps = 0
