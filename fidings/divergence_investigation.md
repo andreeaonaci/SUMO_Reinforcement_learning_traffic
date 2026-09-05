@@ -4208,6 +4208,58 @@ meaningful, if negative, result — worth treating with the same weight as this 
 well-replicated negatives (§27/§65's aggregation-strategy sweep, §71's roster-diversity test)
 rather than as "insufficiently explored."
 
+**Batch 5 — a real 3-seed comparison (not single-seed anecdotes) and a capacity-axis check on
+plain DQN itself. This reframes the whole night's "DQN+qew baseline" reference point.**
+
+| algo | seed | best | mean |
+|---|---:|---:|---:|
+| DQN+qew | 3 | -5933.60 | -8016.66 |
+| DQN+qew | 7 | -9141.15 | -9396.41 |
+| DQN+qew | 11 | -9008.52 | -9463.45 |
+| **DQN+qew, 3-seed average** | — | **-8027.76** | **-8958.84** |
+| Munchausen-default | 3 | -7198.59 | -8539.36 |
+| Munchausen-default | 7 | -7885.15 | -8806.43 |
+| Munchausen-default | 11 | -8701.05 | -9394.84 |
+| **Munchausen-default, 3-seed average** | — | **-7928.26** | **-8913.54** |
+
+**The seed-3 DQN+qew number this entire section has been comparing everything against
+(-5933.60/-8016.66) was itself a favorable single-seed outlier, not a representative baseline** —
+seeds 7 and 11 both land around -9000 to -9500 on both measures, close to Munchausen-default's own
+range. Averaged across 3 seeds, DQN+qew and Munchausen-default are statistically indistinguishable
+(within ~100 points on both measures, dwarfed by the ~1800-point seed-to-seed spread on DQN's own
+side) — **neither algorithm has a real edge over the other once the comparison is done fairly**.
+This retroactively weakens every earlier single-seed comparison in this section that used seed 3's
+DQN number as "the baseline to beat," including the original PPO/Munchausen-default results
+reported above (§73's opening table) — they were being compared against an unusually good DQN
+roll, not a typical one.
+
+**Capacity-axis check on plain DQN+qew itself (seed 3), completing the picture started on
+Munchausen (`d_model=512` failed) and PPO (untested):**
+
+| d_model | best | mean |
+|---|---:|---:|
+| 64 | -10112.25 (locked the entire run, clean dud) | -10179.30 |
+| **128 (project default)** | **-5933.60** | -8016.66 |
+| 256 | -7524.11 | -8959.30 |
+
+Both deviations from the existing default (128) made things worse on this seed — smaller
+catastrophically (immediate, unbroken lock-in), larger moderately. Combined with Munchausen's
+512-parameter failure earlier in this section, **every capacity variation tried across every
+algorithm tonight (dqn, munchausen) underperformed the existing 128-width default** — a
+consistent, if narrow (single-seed-per-point, capacity only tested on DQN at seed 3), signal that
+this project's existing architecture size is not obviously undersized or oversized for this task.
+
+**Overall verdict for the night's algorithm-swap campaign, revised in light of batch 5:** the
+honest finding is not "DQN beats every alternative" — it's that **at this 5-round budget, and once
+compared fairly across multiple seeds, DQN+q_entropy, Munchausen-DQN, and PPO (with a large enough
+episode budget) all land in roughly the same performance range, with enormous seed-to-seed
+variance dominating any single-seed "winner."** No architecture or capacity change tried
+(dueling, n_step alone, d_model 64/256/512) moved any algorithm meaningfully off that range either.
+This is consistent with — and adds algorithm-choice as a third axis to — this project's standing
+central finding (§70/§71): the binding constraint is not which algorithm or how much capacity is
+used, it's the shared training dynamic (confident lock-in, cross-topology generalization) that
+appears to affect all of them similarly.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
