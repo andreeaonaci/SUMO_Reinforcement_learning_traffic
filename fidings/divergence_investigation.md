@@ -4170,6 +4170,44 @@ Single trial, not yet replicated. **Launched next: the same config extended to t
 budget (fair comparison to DQN's own 20-round numbers, not just its 5-round ones), plus 2 more
 seeds (7, 11) at 5 rounds for a quick robustness check before reading too much into one seed.**
 
+**Batches 3-4 results — the seed-3 win does NOT replicate; at full budget even seed 3 is a wash,
+not a win. This is the same "single-seed doesn't survive scrutiny" pattern this document has hit
+repeatedly (§11→12, §30→31, §46→47), now hitting the algorithm-swap effort too.**
+
+| seed | rounds | best | mean |
+|---|---:|---:|---:|
+| 3 (original) | 5 | -5514.84 | -6561.87 |
+| 3, extended | 20 | -3592.65 | -6065.33 |
+| 7 | 5 | -7879.46 | -8571.60 |
+| 11 | 5 | -9550.65 (locked most of the run) | -10015.82 |
+| 17 | 5 | -6529.73 (late escape, round 5 only) | -9302.95 |
+| *(for reference)* DQN+qew, seed 3, 20 rounds | 20 | -3288.73 | -6093.66 |
+
+**Seeds 7, 11, and 17 all failed to reproduce seed 3's clean, monotonic, early improvement** — 11
+stayed confidently locked for 4 of 5 rounds, 17 only escaped on its very last round, 7 never
+escaped at all. **And at the full 20-round budget, seed 3 itself stops looking like a win**: best
+-3592.65 vs DQN+qew's -3288.73 (DQN slightly ahead), mean -6065.33 vs -6093.66 (a statistical
+wash, not a real difference) — plus the same late-training regression pattern documented
+throughout this project (peaked at round 9, degraded through round 20, ending at -8457.57).
+**Reading: `temp=0.01 + n_step=3`'s batch-1/2 result was a favorable single-seed draw, not a real
+property of the config.** Two more findings from the same batch, both useful negatives:
+**n_step=3 alone, added to plain DQN+q_entropy without Munchausen, produces no change**
+(best -5945.46, mean -8173.02, statistically indistinguishable from the -5933.60/-8016.66
+baseline) — the apparent n_step boost was specific to the Munchausen+seed-3 combination, not a
+general n_step effect. **PPO with a 4x larger episode budget (`--local_episodes 8`) partially
+closes its own gap** (best -8795.28 vs -10190.73 at `--local_episodes 2`, matched 5 rounds) —
+confirming the on-policy sample-inefficiency confound diagnosed earlier is real and at least
+partially explains PPO's poor showing — but even with 4x the episodes PPO remains far behind
+every DQN-family result at the same round count.
+
+**Standing net result after one full night of algorithm-swap experimentation (PPO, Munchausen
+default/temp-swept/architecture-combined, capacity checks): no tested alternative has produced a
+seed-robust improvement over plain DQN+q_entropy.** The one lead that looked real (temp=0.01+
+n_step=3) evaporated under both seed replication and extended budget. This is itself a
+meaningful, if negative, result — worth treating with the same weight as this project's other
+well-replicated negatives (§27/§65's aggregation-strategy sweep, §71's roster-diversity test)
+rather than as "insufficiently explored."
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
