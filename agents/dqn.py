@@ -124,6 +124,8 @@ class DQNAgent:
         n_step: int = 1,
         init_steps_done: int = 0,
         q_entropy_weight: float = 0.0,
+        use_batchnorm: bool = False,
+        activation: str = "relu",
     ):
         self.own_dim = own_dim
         self.neighbor_dim = neighbor_dim
@@ -141,10 +143,22 @@ class DQNAgent:
             n_hops=n_hops,
             head_fix=head_fix,
             dueling=dueling,
+            use_batchnorm=use_batchnorm,
+            activation=activation,
         )
         self.q = NeighborAttentionQNetwork(**net_kwargs).to(self.device)
         self.q_target = NeighborAttentionQNetwork(**net_kwargs).to(self.device)
         self.q_target.load_state_dict(self.q.state_dict())
+        # q_target is never trained by backprop (only Polyak/hard-synced
+        # from self.q), so it always runs in eval mode -- this also sides
+        # steps a real subtlety with BatchNorm specifically: Polyak
+        # averaging below only touches .parameters() (weight/bias), not
+        # BatchNorm's running_mean/running_var buffers, so q_target's BN
+        # statistics only ever get updated by the hard copies here and in
+        # load_state_dict()/optimize()'s hard-copy branch, not by the
+        # per-step Polyak loop. Deliberate simplification, not a bug: with
+        # use_batchnorm=False (the default) this comment is moot.
+        self.q_target.eval()
 
         # AdamW, not Adam: plain torch.optim.Adam folds weight_decay into the
         # gradient before the moment estimates, so a parameter that gets
@@ -277,6 +291,13 @@ class DQNAgent:
         a per-observation loop would produce, just with the network forward
         pass batched.
         """
+        # eval(): inference-only forward pass, possibly batch-size-1 (a
+        # single-intersection city, or _greedy_action's list-of-one) --
+        # BatchNorm1d rejects batch size 1 in train mode (can't compute a
+        # meaningful batch variance from one sample). No-op when
+        # use_batchnorm=False. optimize() switches back to train() before
+        # its own forward pass.
+        self.q.eval()
         with torch.no_grad():
             own, neighbors, neighbor_mask, hop_dist, action_mask = _collate(obs_list, self.device)
             q = self.q(own, neighbors, neighbor_mask, hop_dist)
@@ -330,6 +351,7 @@ class DQNAgent:
         """Masked Q-values for a single observation (invalid actions are
         NaN, not -inf, so callers can distinguish 'invalid' from 'valid
         but low' when inspecting/logging)."""
+        self.q.eval()  # single observation -- see _greedy_action_batch's comment
         with torch.no_grad():
             own, neighbors, neighbor_mask, hop_dist, action_mask = _collate([obs], self.device)
             q = self.q(own, neighbors, neighbor_mask, hop_dist).squeeze(0).cpu().numpy()
@@ -418,6 +440,11 @@ class DQNAgent:
     def optimize(self) -> Optional[float]:
         if len(self.replay) < max(4, self.batch_size):
             return None
+        # train(): undoes any .eval() left behind by act_batch/_greedy_action_batch
+        # (called every tick before this) -- BatchNorm needs batch statistics,
+        # not frozen running stats, during the actual gradient step. No-op
+        # when use_batchnorm=False.
+        self.q.train()
 
         obs, actions, rewards, next_obs, dones, ns = self.replay.sample(self.batch_size)
 
@@ -499,6 +526,7 @@ class DQNAgent:
         elif self.learn_steps % self.target_update == 0:
             # Legacy hard copy: kept for ablation (pass tau=0 to enable).
             self.q_target.load_state_dict(self.q.state_dict())
+            self.q_target.eval()  # load_state_dict() doesn't touch train/eval mode
 
         return float(loss.item())
 
@@ -529,6 +557,7 @@ class DQNAgent:
         state = torch.load(path, map_location=self.device)
         self.q.load_state_dict(state)
         self.q_target.load_state_dict(state)
+        self.q_target.eval()
 
     def state_dict(self) -> Dict[str, "torch.Tensor"]:
         return {k: v.cpu() for k, v in self.q.state_dict().items()}
@@ -536,6 +565,7 @@ class DQNAgent:
     def load_state_dict(self, state: Dict[str, "torch.Tensor"]) -> None:
         self.q.load_state_dict(state)
         self.q_target.load_state_dict(state)
+        self.q_target.eval()
 
     def start_round(self, global_state: Dict[str, "torch.Tensor"]) -> None:
         """Sync to the broadcast global weights and anchor FedProx's

@@ -91,7 +91,8 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
                 tau: float = 0.005, target_update: int = 200, mu: float = 0.0,
                 dueling: bool = False, n_step: int = 1, q_entropy_weight: float = 0.0,
                 algo: str = "dqn", d_model: int = 128, n_heads: int = 4,
-                munchausen_temp: float = 0.03, munchausen_alpha: float = 0.9):
+                munchausen_temp: float = 0.03, munchausen_alpha: float = 0.9,
+                use_batchnorm: bool = False, activation: str = "relu"):
     """Single place that constructs the local/global agent -- DQNAgent
     (default, unchanged), PPOAgent (--algo ppo, agents/ppo.py), or
     MunchausenDQNAgent (--algo munchausen, agents/munchausen_dqn.py; see
@@ -140,6 +141,8 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
         dueling=dueling,
         n_step=n_step,
         q_entropy_weight=q_entropy_weight,
+        use_batchnorm=use_batchnorm,
+        activation=activation,
     )
 
 
@@ -167,6 +170,8 @@ def load_clients(
     n_heads: int = 4,
     munchausen_temp: float = 0.03,
     munchausen_alpha: float = 0.9,
+    use_batchnorm: bool = False,
+    activation: str = "relu",
 ) -> tuple:
     """Build one FederatedClient per city directory.
 
@@ -246,12 +251,14 @@ def load_clients(
             _tau=tau, _tu=target_update, _mu=mu, _dueling=dueling, _n_step=n_step,
             _qew=q_entropy_weight, _algo=algo, _dm=d_model, _nh=n_heads,
             _mtemp=munchausen_temp, _malpha=munchausen_alpha,
+            _bn=use_batchnorm, _act_fn=activation,
         ):
             return _make_agent(_own, _nbr, _k, _act, _eps, head_fix=_head_fix,
                                tau=_tau, target_update=_tu, mu=_mu, dueling=_dueling,
                                n_step=_n_step, q_entropy_weight=_qew, algo=_algo,
                                d_model=_dm, n_heads=_nh,
-                               munchausen_temp=_mtemp, munchausen_alpha=_malpha)
+                               munchausen_temp=_mtemp, munchausen_alpha=_malpha,
+                               use_batchnorm=_bn, activation=_act_fn)
 
         clients.append(
             FederatedClient(
@@ -764,6 +771,8 @@ def main(args):
             n_heads=args.n_heads,
             munchausen_temp=args.munchausen_temp,
             munchausen_alpha=args.munchausen_alpha,
+            use_batchnorm=args.batchnorm,
+            activation=args.activation,
         )
 
         start_round = 1
@@ -853,6 +862,8 @@ def main(args):
             n_heads=args.n_heads,
             munchausen_temp=args.munchausen_temp,
             munchausen_alpha=args.munchausen_alpha,
+            use_batchnorm=args.batchnorm,
+            activation=args.activation,
         )
         history = server.run(
             rounds=args.rounds,
@@ -885,6 +896,8 @@ def main(args):
             n_heads=args.n_heads,
             munchausen_temp=args.munchausen_temp,
             munchausen_alpha=args.munchausen_alpha,
+            use_batchnorm=args.batchnorm,
+            activation=args.activation,
         )
         own_dim, neighbor_dim, k_max = obs_dims
 
@@ -908,6 +921,8 @@ def main(args):
             n_heads=args.n_heads,
             munchausen_temp=args.munchausen_temp,
             munchausen_alpha=args.munchausen_alpha,
+            use_batchnorm=args.batchnorm,
+            activation=args.activation,
         )
         evaluator = make_holdout_evaluator(
             base,
@@ -1020,6 +1035,25 @@ if __name__ == "__main__":
                          help="--algo munchausen only: weight on the Munchausen bonus term "
                               "(the target network's own clipped log-policy of the action "
                               "taken). Paper default 0.9. Ignored under dqn/ppo.")
+    parser.add_argument("--batchnorm", action="store_true",
+                         help="'Upgraded DQN' (fidings/divergence_investigation.md, 2026-09-05): "
+                              "add BatchNorm1d after every hidden Linear in the own/neighbor "
+                              "encoders and the shared head trunk. Applies to --algo dqn only "
+                              "(agents/dqn.py handles the required eval()/train() mode "
+                              "switching around single-observation action selection vs. batched "
+                              "optimize() steps -- BatchNorm1d rejects batch size 1 in train "
+                              "mode, which is why this needed real code changes, not just a "
+                              "flag). Literature caution: BatchNorm is NOT a standard component "
+                              "of the DQN/Rainbow lineage (Hessel et al. 2018) -- RL's non-i.i.d., "
+                              "policy-drifting data distribution conflicts with BatchNorm's "
+                              "assumption of a roughly-fixed input distribution, and this is a "
+                              "documented source of instability in RL specifically (unlike "
+                              "vision, where it's close to a default). Test, don't assume.")
+    parser.add_argument("--activation", type=str, default="relu",
+                         choices=["relu", "relu6", "leaky_relu"],
+                         help="Activation function throughout the network (own/neighbor "
+                              "encoders, head trunk). 'relu' (default) reproduces the original "
+                              "architecture exactly. Applies to --algo dqn only.")
     parser.add_argument("--eval_every",            type=int,   default=1)
     parser.add_argument("--eval_episodes",         type=int,   default=5)
     parser.add_argument("--log_loss_every_steps",  type=int,   default=50,

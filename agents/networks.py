@@ -29,6 +29,56 @@ import torch
 import torch.nn as nn
 
 
+class _FlattenBatchNorm1d(nn.Module):
+    """BatchNorm1d over the last dim of an arbitrarily-shaped (..., C) input.
+
+    Plain ``nn.BatchNorm1d`` only accepts ``(N, C)`` or ``(N, C, L)`` --
+    this project's own-intersection tensors are ``(B, C)`` but neighbor
+    tensors are ``(B, K, C)`` (channel last, not matching either accepted
+    layout). Flattening every leading dim into one batch dim before
+    normalizing, then restoring the original shape, lets the SAME encoder
+    code path batch-norm both without a special case.
+    """
+
+    def __init__(self, num_features: int):
+        super().__init__()
+        self.bn = nn.BatchNorm1d(num_features)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        shape = x.shape
+        return self.bn(x.reshape(-1, shape[-1])).reshape(shape)
+
+
+def _make_activation(name: str) -> nn.Module:
+    if name == "relu":
+        return nn.ReLU()
+    if name == "relu6":
+        return nn.ReLU6()
+    if name == "leaky_relu":
+        return nn.LeakyReLU(0.01)
+    raise ValueError(f"Unknown activation '{name}' -- expected relu/relu6/leaky_relu.")
+
+
+def _mlp_block(dims: list, activation: str, use_batchnorm: bool, final_activation: bool) -> nn.Sequential:
+    """Build a Linear-BN-activation stack matching whatever the pre-upgrade
+    hardcoded nn.Sequential blocks looked like when activation='relu' and
+    use_batchnorm=False (byte-identical -- this is a strict superset, not a
+    behavior change, at those defaults). ``final_activation=False`` omits
+    BN+activation after the LAST Linear (used for own_encoder/
+    neighbor_encoder, whose output feeds attention as a raw embedding, not
+    a hidden layer); True includes it (used for ``head``, whose final ReLU
+    was already part of the original design)."""
+    layers: list = []
+    for i in range(len(dims) - 1):
+        layers.append(nn.Linear(dims[i], dims[i + 1]))
+        is_last_linear = i == len(dims) - 2
+        if not is_last_linear or final_activation:
+            if use_batchnorm:
+                layers.append(_FlattenBatchNorm1d(dims[i + 1]))
+            layers.append(_make_activation(activation))
+    return nn.Sequential(*layers)
+
+
 class MLP(nn.Module):
     """Kept for backward compatibility / simple non-federated baselines."""
 
@@ -73,6 +123,8 @@ class NeighborAttentionQNetwork(nn.Module):
         head_fix: bool = True,
         dueling: bool = False,
         actor_critic: bool = False,
+        use_batchnorm: bool = False,
+        activation: str = "relu",
     ):
         super().__init__()
         if dueling and actor_critic:
@@ -83,21 +135,25 @@ class NeighborAttentionQNetwork(nn.Module):
         self.head_fix = head_fix
         self.dueling = dueling
         self.actor_critic = actor_critic
+        # "Upgraded DQN" (fidings/divergence_investigation.md, 2026-09-05):
+        # BatchNorm1d + relu6/leaky_relu in place of the original plain-ReLU
+        # design, tested against the overnight algorithm-swap campaign's
+        # DQN+q_entropy result. use_batchnorm=False, activation="relu" is an
+        # EXACT behavioral no-op -- _mlp_block reproduces the original
+        # hardcoded Sequential blocks byte-for-byte at those defaults.
+        self.use_batchnorm = use_batchnorm
+        self.activation = activation
 
-        self.own_encoder = nn.Sequential(
-            nn.Linear(own_dim, d_model),
-            nn.ReLU(),
-            nn.Linear(d_model, d_model),
+        self.own_encoder = _mlp_block(
+            [own_dim, d_model, d_model], activation, use_batchnorm, final_activation=False
         )
 
         # +1 so "padding" (hop 0) gets its own embedding, distinct from a
         # real hop-1 neighbor.
         self.hop_embedding = nn.Embedding(n_hops + 1, d_model)
 
-        self.neighbor_encoder = nn.Sequential(
-            nn.Linear(neighbor_dim, d_model),
-            nn.ReLU(),
-            nn.Linear(d_model, d_model),
+        self.neighbor_encoder = _mlp_block(
+            [neighbor_dim, d_model, d_model], activation, use_batchnorm, final_activation=False
         )
 
         try:
@@ -124,11 +180,8 @@ class NeighborAttentionQNetwork(nn.Module):
         # `federated/aggregation.py::masked_head_weighted_average` already
         # looks for by default -- no aggregation-side change needed unless
         # dueling is actually turned on.
-        self.head = nn.Sequential(
-            nn.Linear(d_model * 2, d_model),
-            nn.ReLU(),
-            nn.Linear(d_model, d_model),
-            nn.ReLU(),
+        self.head = _mlp_block(
+            [d_model * 2, d_model, d_model], activation, use_batchnorm, final_activation=True
         )
 
         if self.dueling:
@@ -154,10 +207,8 @@ class NeighborAttentionQNetwork(nn.Module):
             self.head.append(nn.Linear(d_model, action_dim))
 
         if not self.head_fix:
-            self.pool_head = nn.Sequential(
-                nn.Linear(d_model, d_model),
-                nn.ReLU(),
-                nn.Linear(d_model, d_model),
+            self.pool_head = _mlp_block(
+                [d_model, d_model, d_model], activation, use_batchnorm, final_activation=False
             )
 
     def _q_from_features(self, combined: torch.Tensor) -> torch.Tensor:
