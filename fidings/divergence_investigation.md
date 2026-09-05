@@ -4630,10 +4630,60 @@ is an exact no-op. Verified end-to-end against real SUMO with a deliberately hig
 to force triggering): confirmed detection, logging, and all 3 workers clearing on cue, every round,
 no crashes, before spending real comparison compute.
 
-**Status: 3-seed comparison launched immediately** (seeds 3, 7, 11, `--lockin_reset_std_threshold
-50`, otherwise identical to every other §73-77 comparison's protocol) -- going straight to 3 seeds,
-not a single-seed screen first, per this session's own repeated lesson (§73, §76) that anything
-smaller isn't trustworthy here. Results to follow.
+**Result: null, same story as §73-77 -- a real, cleanly-tested mechanistic hypothesis, ruled out.**
+
+| config | best (3-seed avg) | mean (3-seed avg) | |diff|/SE |
+|---|---:|---:|---:|
+| baseline (no reset) | -8027.76 (std 2289.6) | -8958.84 (std 1603.1) | — |
+| `--lockin_reset_std_threshold 50` | -7670.36 (std 911.8) | -8689.24 (std 897.4) | 0.30 / 0.38 |
+
+The mechanism triggered as designed (all 3 seeds hit the threshold on round 1, several times each
+run -- confirmed directly in the logs) but clearing the replay buffer on detection did not
+measurably change outcomes either way. **Rules out the specific hypothesis that a locked policy's
+own self-generated, homogeneous transitions are what perpetuate the lock** -- if that were the
+main driver, forcing fresh data should have shown a clear effect. Consistent with §51's much
+earlier finding that confident lock-in is a secondary factor in the baseline gap, not the primary
+one: fixing the lock-in mechanism (this item, and separately `--q_entropy_weight`, §54-56) keeps
+not moving the headline number, because the lock-in was never the dominant cause. Item 20 closed
+out; moving to item 21.
+
+## 79. Item 21 (SWA-style checkpoint averaging/ensembling at eval time) -- the first genuinely
+    promising, training-free result of the entire investigation
+
+**Implementation:** `diagnostics/swa_reeval.py`. Loads N consecutive round checkpoints from a run,
+evaluates each individually, then evaluates (a) a straight elementwise weight-average of all N
+state dicts through one network (true SWA), and (b) a majority-vote ensemble of N independently-
+loaded agents (ties broken by summed Q-value across members) -- against the SAME episode count and
+evaluator, so the report is a direct, fair comparison, not just a number in isolation. Reuses
+`infer_arch_from_checkpoint` (from `diagnostics/finetune_on_holdout.py`) so it doesn't need to be
+told the architecture. **Found and fixed a real, previously-unnoticed regression while building
+this**: §76's `attn`/`attn_norm` -> `attn_layers.0`/`attn_norms.0` rename silently broke loading
+every checkpoint saved before that commit (a pure key-name issue, not a shape change) -- this
+would have hit `--resume` and every other checkpoint-loading diagnostic script too, not just this
+new one. Fixed with a `load_state_dict` shim on `NeighborAttentionQNetwork` that remaps the old
+keys before delegating to the real load; verified against a synthetic old-style state dict, a
+synthetic new-style one, and a real on-disk pre-fix checkpoint.
+
+**First result (rounds 16-20 of the original §73 DQN+q_entropy baseline run, 10 episodes each):**
+
+| | reward |
+|---|---:|
+| Individual checkpoints (rounds 16-20) | -6223, -4737, **-4229 (best)**, -5699, -6968 |
+| Naive mean of the 5 individuals | -5571 |
+| **SWA weight-average of all 5** | **-4263** |
+| **Majority-vote ensemble of all 5** | **-4324** |
+
+**Both combination methods land almost exactly at the single best individual checkpoint's
+performance, without knowing in advance which round was best** -- the practical value proposition
+of the whole idea, since in real deployment you can't pick the best round ahead of time. This is
+the first result anywhere in this investigation (§32 onward) that looks like a genuine, actionable
+win rather than noise. **Not yet confirmed**: single window (one specific 5-round stretch from one
+run), only 10 episodes (this document's own convention treats 5-episode/10-episode screens as
+optimistic -- §33 -- until re-confirmed at 30). Two follow-ups launched immediately: the same
+window re-evaluated at 30 episodes (confirmatory rigor), and a second, independent window (rounds
+16-20 of a *different* run -- `encoder_depth=3`, seed 7, §75's 20-round extension -- to test
+whether the benefit generalizes across runs/seeds/architectures or was specific to this one
+volatile stretch). Results to follow.
 
 ## Open questions / next steps
 
