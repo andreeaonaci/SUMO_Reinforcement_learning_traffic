@@ -4521,6 +4521,20 @@ untested levers are in the training *procedure* (larger `--local_episodes` per r
 warm-up schedules, or a training-time regularizer targeting Q-value confidence more directly than
 `--q_entropy_weight` already does) rather than more network-architecture variants.
 
+## §77. Pivoting to the training-procedure axis: `--local_episodes` (never varied in §73-76 --
+    always 2). 3-seed screen launched immediately, per this session's own repeated lesson
+
+**2026-09-05, same autonomous session.** Every run in §73-76 used `--local_episodes 2` throughout
+-- more environment experience *per round* (as opposed to more rounds, already tested via §75's
+20-round extension) is a genuinely untested axis. `--local_episodes 4` (double), baseline
+architecture otherwise (`d_model=128, encoder_depth=2, n_attn_layers=1`, no batchnorm), seeds 3/7/11
+launched together rather than screening on one seed first -- this session has now seen three
+separate few-seed leads (one dramatic outlier each) evaporate on replication (`temp=0.01+n_step=3`
+sec 73; `n_attn_layers=2` sec 76 twice), so going straight to 3 seeds is the responsible baseline
+rigor here, not caution for its own sake.
+
+**Status: launched, in progress.**
+
 ## §75 closeout: `encoder_depth=3` extended to the full 20-round budget does NOT catch up --
     depth is a confirmed negative at both budgets, not an underbudgeted one
 
