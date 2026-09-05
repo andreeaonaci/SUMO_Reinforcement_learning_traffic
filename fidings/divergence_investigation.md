@@ -4260,6 +4260,46 @@ central finding (§70/§71): the binding constraint is not which algorithm or ho
 used, it's the shared training dynamic (confident lock-in, cross-topology generalization) that
 appears to affect all of them similarly.
 
+**Batch 6 (final for the night) — the same 3-seed comparison extended to the full 20-round
+budget. This is the rigorous, statistically-grounded version of everything else in this
+section, and it confirms the batch-5 verdict rather than overturning it:**
+
+| algo | seed | best | mean(1-20) |
+|---|---:|---:|---:|
+| DQN+qew | 3 | -3288.73 | -6093.66 |
+| DQN+qew | 7 | -6406.89 | -8147.82 |
+| DQN+qew | 11 | -7752.10 | -9252.74 |
+| **DQN+qew, 3-seed avg** | — | **-5815.91 (std 2289.6)** | **-7831.41 (std 1603.1)** |
+| Munchausen-default | 3 | -6349.36 | -7862.28 |
+| Munchausen-default | 7 | -6155.44 | -7817.16 |
+| Munchausen-default | 11 | -6802.57 | -8609.05 |
+| **Munchausen-default, 3-seed avg** | — | **-6435.79 (std 332.1)** | **-8096.16 (std 444.7)** |
+
+**|diff|/SE = 0.46 (best-round), 0.28 (mean)** — both far below this project's own ≥2
+significance bar, at the full 20-round budget, with real (if small, n=3) multi-seed grounding.
+**DQN+q_entropy and Munchausen-DQN (default hyperparameters) are statistically indistinguishable
+at this budget.** DQN's own average nominally leads on both measures, but the difference is
+dwarfed by DQN's seed-to-seed spread.
+
+**A genuinely interesting secondary finding, independent of the "no significant difference"
+headline: Munchausen-DQN's seed-to-seed variance is roughly 5-7x smaller than DQN's** (best-round
+std 332.1 vs 2289.6; mean std 444.7 vs 1603.1) — DQN got one great seed (3: best -3288.73) and two
+much worse ones (7, 11: best -6407/-7752, a >2x spread within DQN's own three runs), while
+Munchausen's three seeds all land within a tight -6155 to -6803 band. **Munchausen-DQN may trade a
+slightly worse average for substantially more consistent, predictable performance across
+training seeds** — not tested rigorously enough here to claim this confidently (n=3 per side), but
+a concrete, specific hypothesis worth a dedicated multi-seed variance comparison in a future
+session, distinct from the "which has the better mean" question this section has focused on.
+
+**Overall verdict for this document's first algorithm-swap campaign, final for tonight:** no
+algorithm change (PPO, Munchausen-DQN across several hyperparameter/architecture/capacity
+variants) produced a statistically supportable improvement over plain DQN+q_entropy, at either a
+5-round or 20-round budget, once compared fairly across multiple seeds rather than single
+anecdotes. The practical recommendation following from this: **keep DQN+q_entropy as the standing
+default** (no replacement earned its keep), but the Munchausen-DQN consistency observation above
+is worth a dedicated follow-up given how much this whole document's instability narrative
+(§32-34/§51-57) has been about variance and lock-in specifically, not just mean reward.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
