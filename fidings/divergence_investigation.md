@@ -4609,6 +4609,55 @@ lead: if it holds up on more seeds, the story becomes "capacity helps only when 
 of the network that sees neighbor information (attention), not when added to raw-feature encoding
 depth" -- a genuinely informative distinction, not just "bigger is worse across the board."
 
+## Open questions / next steps
+
+**RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
+this session (the numbered list below and every cross-reference to it elsewhere in this document
+survived intact -- only the header line itself was lost). Re-added here, at the same position
+relative to the still-intact numbered list, so the `#open-questions--next-steps` anchor (used at
+the top of this document) resolves again.**
+
+**NEW, 2026-09-05, queued per direct user request -- implement and validate in this exact order,
+one at a time, before moving to the next:**
+
+20. **Replay-buffer reset on detected lock-in.** Distinct from `--epsilon_reset_every` (§41/§42,
+    tested, null) -- that resets *exploration*, this would clear the *replay buffer* itself when a
+    lock-in is detected (reusing the existing std<50 5-episode screen, §49/§50), testing the
+    specific hypothesis that a locked policy keeps generating self-reinforcing transitions that
+    perpetuate the lock via TD-bootstrapping off increasingly homogeneous data.
+21. **SWA-style checkpoint averaging/ensembling at eval time.** Nothing tested in this document has
+    touched *evaluation* -- every lever so far changed training. Average (or ensemble-vote across)
+    several consecutive rounds' weights at eval time to smooth over the round-to-round volatility
+    directly, orthogonal to every training-side fix tried.
+22. **Potential-based reward shaping using `max_pressure`'s own formula.** Unlike the ad hoc
+    `--reward_shaping_wait_weight`/`--reward_shaping_stopped_weight` (§44, inconclusive single
+    pilot, arbitrary weights), potential-based shaping (Ng, Harada & Russell 1999) is
+    mathematically guaranteed not to change the optimal policy -- so injecting `max_pressure`'s
+    exact pressure signal this way isolates a *learning-dynamics* effect from a *different-optimal-
+    policy* effect, unlike every reward-shaping attempt so far.
+23. **Recurrent policy (LSTM/GRU over recent ticks).** Every architecture tested in §73-76 (wider,
+    deeper, more attention layers) was still a purely reactive function of one tick's snapshot.
+    Temporal memory is a genuinely different axis (time, not space/capacity) and a policy with
+    history can't collapse into "always pick action X" the same way a stateless one can.
+24. **Meta-learning aggregation (Reptile/MAML-style) instead of plain FedAvg.** The one lever that's
+    actually worked in this whole project is fine-tuning (§66-70) -- but FedAvg optimizes the
+    global model to be a good *fixed policy on average*, not a good *starting point for local
+    adaptation*. A meta-learning objective targets the second thing directly, more aligned with
+    §70/§71's retention/transfer diagnosis than any architecture change tried so far.
+25. **Evolution strategies (gradient-free policy optimization).** The most radical departure on
+    this list: no Q-values, no TD-bootstrapping, no value-estimation step at all -- a population of
+    policies perturbed and selected by total episode reward. Sidesteps the entire diagnosed
+    confident-lock-in mechanism class (a value-estimation pathology) rather than trying to patch
+    around it from within the same paradigm. Biggest engineering lift of the six.
+
+**Why this order:** roughly cheapest/most diagnostic first, most novel/expensive last -- #20-22 are
+each small, targeted code changes reusing existing infrastructure (the lock-in screen, the
+evaluator, the reward-shaping wrapper) and answer a specific mechanistic question each; #23-24 are
+real architecture/training-paradigm changes; #25 is close to a from-scratch reimplementation of the
+training loop. Each gets implemented, smoke-tested, and validated (matching this session's own
+now-hard-learned standard -- at least 3 seeds before trusting any result, given §73/§76's repeated
+few-seed mirages) before moving to the next.
+
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
    real multi-seed run in §6.** Parallel workers were never seeded; fixed and verified
    deterministic 2026-08-04, then verified on a real 3-seed/20-round run: per-city training loss
