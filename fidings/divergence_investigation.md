@@ -4468,8 +4468,27 @@ before treating this as more than a lead** -- this is exactly the seed-count and
 (3 seeds, one dramatic escape) that §73's `temp=0.01+n_step=3` had before it evaporated on
 replication, so the same caution applies here until more data comes in.
 
-**Status: seed-expansion running. §75's depth3 20-round extension also still running (16/20 as of
-this writeup) -- both to be reported once complete.**
+**Status: `n_attn_layers=2` seed-expansion (17/21/25) running.**
+
+## §75 closeout: `encoder_depth=3` extended to the full 20-round budget does NOT catch up --
+    depth is a confirmed negative at both budgets, not an underbudgeted one
+
+Testing whether depth's poor 5-round showing was a budget artifact (analogous to how DQN's own
+best-round jumps from -5933.60 at 5 rounds to -3288.73 at 20 rounds, same seed) -- it is not.
+
+| | seed 3, 20 rounds | seed 7, 20 rounds |
+|---|---:|---:|
+| DQN+qew baseline (depth=2) | best -3288.73 / mean -6093.66 | best -6406.89 / mean -8147.82 |
+| **encoder_depth=3** | best **-6567.21** / mean **-9278.89** | best **-6892.88** / mean **-8190.92** |
+
+Seed 3 is clearly worse at full budget, not just at the cheap screen (more than double the mean
+gap of the baseline); seed 7 is roughly tied. **`encoder_depth` is now a confirmed negative at
+both budgets tested** -- extra MLP depth in the feature encoders is a worse architecture for this
+task at this scale, full stop, not merely a capacity increase that needed more data to pay off.
+This closes out the depth axis. Sharpens the interpretation of §76's still-open `n_attn_layers=2`
+lead: if it holds up on more seeds, the story becomes "capacity helps only when added to the part
+of the network that sees neighbor information (attention), not when added to raw-feature encoding
+depth" -- a genuinely informative distinction, not just "bigger is worse across the board."
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
    real multi-seed run in §6.** Parallel workers were never seeded; fixed and verified
