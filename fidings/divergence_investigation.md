@@ -4685,6 +4685,34 @@ window re-evaluated at 30 episodes (confirmatory rigor), and a second, independe
 whether the benefit generalizes across runs/seeds/architectures or was specific to this one
 volatile stretch). Results to follow.
 
+**Follow-up 1 (generalization window, `encoder_depth=3` seed 7, rounds 16-20, 10 episodes) is
+in -- does NOT replicate, and actively reverses.** This window was far less volatile to begin with
+(individual checkpoints -8452, -8490, -8490, -8609, -8925 -- a tight band, nothing like the first
+window's -4229-to-6968 spread), so there was less for combination to smooth over. Result:
+
+| | reward |
+|---|---:|
+| Individual checkpoints | -8452 (best), -8490, -8490, -8609, -8925 |
+| Individual mean of means | -8593 |
+| **SWA weight-average** | **-8546** (worse than best, roughly at the mean) |
+| **Majority-vote ensemble** | **-8945** (worse than *every single individual checkpoint*, including the worst one) |
+
+**Reading:** on a stable window, SWA lands near the mean (unsurprising -- nothing to rescue) and
+the ensemble does actively worse than any individual member, not just failing to help. This is
+the opposite of the first window's story, and directly matches this document's own recurring
+pattern (§11->§12, §30->§31, §46->§47, and item 20/21's own §54 middle-value non-monotonicity):
+a striking single-window result that does not hold on a second, independent window. The mechanism
+read: combination helps when volatility is high and driven by transient bad rounds surrounding a
+good one (window 1), and can hurt when checkpoints are already converged/stable and merely
+differ by noise, since averaging/voting adds variance-from-disagreement without a lock-in episode
+to cancel out. **Item 21 status: NOT confirmed as a general fix -- it is at best conditional on
+being in a volatile stretch, which you can't identify in advance without already having the
+per-round eval data that tells you which round was best anyway.** Still waiting on follow-up 2
+(the 30-episode re-confirmation of the *original* window) to see whether even that first result
+survives more episodes; if it does, the honest framing becomes "helps sometimes, on volatile
+windows, no reliable way to know in advance" rather than a general eval-time fix -- a much weaker
+claim than the first result suggested test-time-fine-tuning tier (§66-68) would deliver.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
