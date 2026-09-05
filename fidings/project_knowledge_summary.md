@@ -119,30 +119,36 @@ the buffer just didn't change outcomes. Rules out this specific hypothesis about
 perpetuates, without needing to abandon the lock-in diagnosis itself (§51 already established
 lock-in is a secondary factor in the gap, not the primary one — consistent with this null).
 
-### Item 21 — SWA-style checkpoint averaging/ensembling at eval time: **the first genuinely
-promising result of the entire investigation, confirmation in progress**
+### Item 21 — SWA-style checkpoint averaging/ensembling at eval time: **closed — real effect,
+not a deployable fix**
 
-Every prior lever changed something about *training*. This is the first eval-time-only lever
+Every prior lever changed something about *training*. This was the first eval-time-only lever
 tested: average (true SWA) or majority-vote-ensemble several consecutive round checkpoints instead
 of picking one. Built `diagnostics/swa_reeval.py`.
 
-**First result** (5 consecutive checkpoints from an existing run, 10 episodes each):
+**Original window** (5 consecutive checkpoints from a volatile run, confirmed at 30 episodes):
 
 | | reward |
 |---|---:|
-| Individual checkpoints | -6223, -4737, **-4229 (best)**, -5699, -6968 |
-| SWA weight-average | **-4263** |
-| Majority-vote ensemble | **-4324** |
+| Individual checkpoints | -6083, -4651, **-4002 (best)**, -5715, -6849 |
+| SWA weight-average | **-4390** |
+| Majority-vote ensemble | **-4464** |
 
-**Both combination methods landed almost exactly at the single best individual checkpoint's
-performance, without needing to know in advance which round was best** — the actual practical
-value proposition, since in real deployment you can't pick the best round ahead of time.
+Both combination methods landed within ~10-11% of the best individual checkpoint — confirmed, this
+direction held from 10 to 30 episodes, unlike most single-window leads in this project.
 
-**Not yet confirmed**, per the hard-learned lesson in §3 above: this is one window (one specific
-5-round stretch, one run), 10 episodes only. Two confirmatory runs are in progress as of this
-writeup: the same window at 30-episode rigor, and an independent window (different run, seed, and
-architecture) to test generalization. **Do not cite the numbers above as final** — check back for
-the confirmed result before relying on this.
+**Independent generalization window** (different run: `encoder_depth=3`, seed 7 — a *stable*
+stretch, not a volatile one): combination did NOT help — SWA landed near the mean (-8546 vs. best
+-8452), and the ensemble did worse than **every single individual checkpoint** (-8945 vs. -8452
+best / -8925 worst).
+
+**Verdict: a real, mechanistically-sensible effect — but conditional on volatility, not a general
+fix.** It rescues near-best performance when a good round is surrounded by bad ones; it adds
+noise-from-disagreement (and can actively hurt) when checkpoints are already converged and merely
+differ by chance. The original pitch — "near-best performance without knowing which round was
+best" — doesn't survive: telling a volatile window from a stable one requires the same per-round
+eval sweep that would let you pick the best round directly. **Item 21 closed as a non-deployable
+but real finding.** Moving to item 22.
 
 **Two real bugs found and fixed while building this (both now committed):**
 1. §76's attention-stacking refactor had silently broken loading of *every* checkpoint saved before
@@ -179,11 +185,12 @@ the confirmed result before relying on this.
 - It is not an architecture problem (§3) — extensively, multi-seed tested.
 - It is not (solely) a lock-in-via-stale-replay-data problem (item 20, this session).
 - Test-time fine-tuning is a real, replicated mitigation, not a fix.
-- The first result suggesting a further, practical mitigation is eval-time checkpoint combination
-  (item 21) — promising but **not yet confirmed**.
-- Four more genuinely different mechanism hypotheses are queued and will be tested with the same
-  rigor (3+ seeds from the start, or multiple independent windows for eval-time tricks) before any
-  of them gets cited as a real finding.
+- Eval-time checkpoint combination (item 21) is a real, replicated effect but not a deployable
+  mitigation — it only helps on volatile windows, and you can't tell which kind of window you're
+  in without the eval sweep that would let you just pick the best round directly. Closed.
+- Four more genuinely different mechanism hypotheses remain queued (items 22-25) and will be
+  tested with the same rigor (3+ seeds from the start, or multiple independent windows for
+  eval-time tricks) before any of them gets cited as a real finding.
 
 **For a paper:** the defensible framing remains what §58-61 of the investigation log established —
 not "federated DQN traffic control fails," but "a characterized, budget-resistant cross-topology

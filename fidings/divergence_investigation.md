@@ -4713,6 +4713,37 @@ survives more episodes; if it does, the honest framing becomes "helps sometimes,
 windows, no reliable way to know in advance" rather than a general eval-time fix -- a much weaker
 claim than the first result suggested test-time-fine-tuning tier (§66-68) would deliver.
 
+**Follow-up 2 (30-episode confirmatory re-eval of the ORIGINAL window) is in -- confirms the
+original direction held at higher rigor, one of the few single-window leads in this document to
+survive that jump:**
+
+| | reward (30 episodes) |
+|---|---:|
+| Individual checkpoints (rounds 16-20) | -6083, -4651, **-4002 (best)**, -5715, -6849 |
+| Mean of individuals | -5460 |
+| **SWA weight-average** | **-4390** |
+| **Majority-vote ensemble** | **-4464** |
+
+Both combination methods again land within ~10-11% of the single best checkpoint, clearly ahead of
+4/5 individual checkpoints and the naive mean -- unlike the 10-episode-to-30-episode pattern seen
+elsewhere (§33's own "screens are optimistic" caution), this specific number did NOT shrink or
+reverse going to 3x the episodes.
+
+**Item 21 closeout, combining both follow-ups:** eval-time checkpoint combination is a real effect,
+not noise -- but it is *conditional on volatility*, not a general-purpose fix. On the volatile
+window (rounds 16-20 of the §73 baseline run, individual checkpoints spanning -4002 to -6849) it
+reliably rescues near-best-checkpoint performance. On the stable window (rounds 16-20 of the
+encoder_depth=3/seed-7 run, individual checkpoints spanning only -8452 to -8925) it does nothing
+useful (SWA) or actively hurts (ensemble, worse than every individual member). **The practical
+value proposition originally claimed -- "you get near-best performance without needing to know in
+advance which round was best" -- does not actually hold**: telling a volatile window from a stable
+one requires the same per-round eval sweep that would let you just pick the best round directly, so
+this buys nothing a practitioner doesn't already have once they've done that sweep. **Verdict: a
+real, mechanistically-sensible effect (averaging/voting cancels a transient bad round when
+neighbors are good; adds noise-from-disagreement when neighbors are already converged and merely
+differ by chance) but not a deployable mitigation as originally hoped. Item 21 closed.** Moving to
+item 22 (potential-based reward shaping) per the agreed ordering.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
@@ -4724,15 +4755,21 @@ the top of this document) resolves again.**
 **NEW, 2026-09-05, queued per direct user request -- implement and validate in this exact order,
 one at a time, before moving to the next:**
 
-20. **Replay-buffer reset on detected lock-in.** Distinct from `--epsilon_reset_every` (§41/§42,
-    tested, null) -- that resets *exploration*, this would clear the *replay buffer* itself when a
-    lock-in is detected (reusing the existing std<50 5-episode screen, §49/§50), testing the
-    specific hypothesis that a locked policy keeps generating self-reinforcing transitions that
-    perpetuate the lock via TD-bootstrapping off increasingly homogeneous data.
-21. **SWA-style checkpoint averaging/ensembling at eval time.** Nothing tested in this document has
-    touched *evaluation* -- every lever so far changed training. Average (or ensemble-vote across)
-    several consecutive rounds' weights at eval time to smooth over the round-to-round volatility
-    directly, orthogonal to every training-side fix tried.
+20. ~~Replay-buffer reset on detected lock-in.~~ **DONE, §78: null (|diff|/SE 0.30 best-round, 0.38
+    mean).** Distinct from `--epsilon_reset_every` (§41/§42, also tested, also null) -- that resets
+    *exploration*, this cleared the *replay buffer* itself when a lock-in is detected (reusing the
+    existing std<50 5-episode screen, §49/§50), testing the specific hypothesis that a locked policy
+    keeps generating self-reinforcing transitions that perpetuate the lock via TD-bootstrapping off
+    increasingly homogeneous data. Mechanism verified firing correctly on real training; clearing
+    the buffer just didn't change outcomes.
+21. ~~SWA-style checkpoint averaging/ensembling at eval time.~~ **DONE, §79: real but not
+    deployable -- conditional on volatility, not identifiable in advance.** The only eval-time-only
+    lever tried in this document. On a volatile window, averaging/ensembling 5 consecutive round
+    checkpoints reliably recovered near-best-checkpoint performance, confirmed at 30-episode rigor.
+    On a stable window (different run/seed/architecture) it did nothing useful (SWA) or actively
+    hurt (ensemble, worse than every individual member). Telling the two cases apart in advance
+    needs the same per-round eval sweep that would let you just pick the best round directly, so
+    the original "near-best without knowing which round" value proposition doesn't hold up.
 22. **Potential-based reward shaping using `max_pressure`'s own formula.** Unlike the ad hoc
     `--reward_shaping_wait_weight`/`--reward_shaping_stopped_weight` (§44, inconclusive single
     pilot, arbitrary weights), potential-based shaping (Ng, Harada & Russell 1999) is
