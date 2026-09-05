@@ -160,12 +160,29 @@ but real finding.** Moving to item 22.
    checkpoints, a shape-mismatch crash for anything trained with those flags. Fixed to detect both
    directly from the state dict.
 
-### Items 22-25 — queued, not yet started
+### Item 22 — Potential-based reward shaping using `max_pressure`'s own formula: **CONFIRMED, the
+first real training-time win in the item-2X series**
 
-- **22. Potential-based reward shaping using `max_pressure`'s own formula.** Unlike the earlier ad
-  hoc shaping attempt (§44, arbitrary weights, inconclusive), potential-based shaping (Ng, Harada &
-  Russell 1999) is mathematically guaranteed not to change the optimal policy — isolates a
-  learning-*dynamics* effect from a different-optimal-policy effect.
+Unlike the earlier ad hoc shaping attempt (§44, arbitrary weights, inconclusive), potential-based
+shaping (Ng, Harada & Russell 1999) is mathematically guaranteed not to change the optimal policy
+— `F(s,a,s') = gamma*Phi(s') - Phi(s)` added to the training reward, with `Phi(s) = weight *
+{ts}_pressure` (the same signal `max_pressure` itself maximizes). Isolates a learning-*dynamics*
+effect (denser, better-aligned per-tick signal) from a different-optimal-policy effect.
+
+At 6 seeds (3/7/11/17/21/25, `weight=0.1`, layered on top of the already-adopted
+`q_entropy_weight=0.05`): best-round |diff|/SE=2.53, mean-reward |diff|/SE=2.49, both clearing this
+project's bar — and **5 of 6 seeds individually favor it, the 6th is a near-exact tie, not a
+reversal**, unlike every architecture-search lead that turned out to be one outlier seed. Magnitude
+is real but modest (~4-7.5% better), nowhere near closing the multi-order-of-magnitude gap to
+`fixed_time`/`max_pressure`. **This is the first training-time lever in the entire item-2X series
+(20-25) to confirm as a genuine, non-outlier-driven improvement** — every other training-time
+attempt in this project (aggregation strategy, architecture, extra features, ad hoc reward shaping,
+roster diversity, replay-buffer reset) came back null or negative. Not yet tested at a longer
+training budget or other weight values — flagged as a good follow-up once the item-2X queue is
+finished, not urgent right now.
+
+### Items 23-25 — queued, not yet started
+
 - **23. Recurrent policy (LSTM/GRU over recent ticks).** Every architecture tried in §73-76 was
   still a purely reactive function of one tick's snapshot. Temporal memory is a genuinely different
   axis (time, not capacity).
@@ -188,7 +205,11 @@ but real finding.** Moving to item 22.
 - Eval-time checkpoint combination (item 21) is a real, replicated effect but not a deployable
   mitigation — it only helps on volatile windows, and you can't tell which kind of window you're
   in without the eval sweep that would let you just pick the best round directly. Closed.
-- Four more genuinely different mechanism hypotheses remain queued (items 22-25) and will be
+- Potential-based reward shaping using `max_pressure`'s own signal (item 22) is a real, confirmed,
+  modest training-time improvement (|diff|/SE 2.5 on both measures, 6 seeds, no single-outlier
+  dependence) — the first training-time lever in this whole document to hold up. Still a small
+  effect relative to the baseline gap, not a fix.
+- Three more genuinely different mechanism hypotheses remain queued (items 23-25) and will be
   tested with the same rigor (3+ seeds from the start, or multiple independent windows for
   eval-time tricks) before any of them gets cited as a real finding.
 

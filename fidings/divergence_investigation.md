@@ -4802,6 +4802,43 @@ smallest seed count this document treats as informative at all, is exactly the p
 historically NOT replicated. **Not calling this a finding yet.** Extending to 6 seeds (3/7/11 +
 17/21/25) on both arms before any conclusion, matching the rigor already applied to items 20/21.
 
+**6-seed result is in -- CONFIRMED, both measures now clear the bar, and unlike the classic
+few-seed-mirage pattern this isn't one outlier seed carrying the average:**
+
+| | best-round (6-seed avg) | mean(5 rounds, 6-seed avg) |
+|---|---:|---:|
+| baseline | -9296.84 (std 436.97) | -9675.20 (std 333.64) |
+| `+ potential_shaping_weight=0.1` | -8602.09 (std 431.33) | -9277.03 (std 126.75) |
+| \|diff\|/SE | **2.53** | **2.49** |
+
+Per-seed pairing (baseline -> potential, best-round): seed 3 -9390->-8886, seed 7 -9141->-9166
+(the one seed where potential is marginally WORSE, by 0.3%), seed 11 -9009->-8767, seed 17
+-10225->-8742, seed 21 -9019->-7972, seed 25 -8997->-8079. **5 of 6 seeds favor potential shaping on
+both measures, the 6th (seed 7) is a near-exact tie, not a reversal** -- this is the closest this
+document has come to a genuinely broad-based effect rather than one dramatic seed dragging an
+average, the exact failure mode that sank the architecture-search leads (§46-47, §76) and this
+same item's own §54 middle-value non-monotonicity.
+
+**Item 22 CONFIRMED: potential-based reward shaping using `max_pressure`'s own pressure signal is
+a real, replicated, modest improvement -- the first training-time lever anywhere in the item-2X
+series (20-25) to clear this project's bar on both measures without single-seed-outlier
+dependence.** Magnitude is real but not large: ~4% better mean reward, ~7.5% better best-round --
+nowhere near closing the multi-order-of-magnitude gap to `fixed_time`/`max_pressure` (still
+thousands of reward units off), but a genuine, mechanistically-motivated, cleanly-tested win where
+every other training-time lever tried in this document (aggregation strategies, architecture,
+extra features, ad hoc reward shaping, roster diversity, replay-buffer reset) came back null or
+negative. Reasonable reading: since `Phi(s)` tracks exactly the signal `max_pressure` itself
+greedily maximizes, this shaping term is effectively teaching the DQN a denser, better-aligned
+per-tick learning signal without changing what the optimal policy actually is -- consistent with
+this document's standing diagnosis (§70/§71) that the core problem is a learning-*dynamics*/
+retention failure, not insufficient data or capacity, since a purely dynamics-side intervention
+(denser, better-shaped gradient signal) is what moved the needle here. **Caveats:** only one weight
+value (0.1) and one budget (5 rounds) tested so far; not yet checked at the extended (63-round)
+budget where §58-61 showed budget itself matters a great deal, nor whether a different weight does
+better/worse. Not urgent to chase further right now per the agreed item-20-25 ordering (moving to
+item 23 next), but flagged as the strongest candidate for a follow-up validation pass once the
+queue is worked through.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
@@ -4828,13 +4865,16 @@ one at a time, before moving to the next:**
     hurt (ensemble, worse than every individual member). Telling the two cases apart in advance
     needs the same per-round eval sweep that would let you just pick the best round directly, so
     the original "near-best without knowing which round" value proposition doesn't hold up.
-22. ~~Potential-based reward shaping using `max_pressure`'s own formula.~~ **IN PROGRESS, §80:
-    implemented, 3-seed pilot launched.** Unlike the ad hoc `--reward_shaping_wait_weight`/
-    `--reward_shaping_stopped_weight` (§44, inconclusive single pilot, arbitrary weights),
-    potential-based shaping (Ng, Harada & Russell 1999) is mathematically guaranteed not to change
-    the optimal policy -- so injecting `max_pressure`'s exact pressure signal this way isolates a
-    *learning-dynamics* effect from a *different-optimal-policy* effect, unlike every reward-shaping
-    attempt so far.
+22. ~~Potential-based reward shaping using `max_pressure`'s own formula.~~ **DONE, §80: CONFIRMED
+    at 6-seed rigor -- |diff|/SE 2.53 (best-round), 2.49 (mean), 5/6 seeds favor it, 1 near-tie.**
+    Unlike the ad hoc `--reward_shaping_wait_weight`/`--reward_shaping_stopped_weight` (§44,
+    inconclusive single pilot, arbitrary weights), potential-based shaping (Ng, Harada & Russell
+    1999) is mathematically guaranteed not to change the optimal policy -- injecting
+    `max_pressure`'s exact pressure signal this way isolates a *learning-dynamics* effect from a
+    *different-optimal-policy* effect. **The first item-2X training-time lever to confirm as a real,
+    non-outlier-driven win** -- modest (~4-7.5% better, not close to closing the baseline gap) but
+    genuine. `--potential_shaping_weight`/`--potential_shaping_gamma` in
+    `experiments/federated_training.py`.
 23. **Recurrent policy (LSTM/GRU over recent ticks).** Every architecture tested in §73-76 (wider,
     deeper, more attention layers) was still a purely reactive function of one tick's snapshot.
     Temporal memory is a genuinely different axis (time, not space/capacity) and a policy with
