@@ -139,6 +139,7 @@ class DQNAgent:
         encoder_depth: int = 2,
         n_attn_layers: int = 1,
         recurrent: bool = False,
+        topology_conditioned: bool = False,
     ):
         self.own_dim = own_dim
         self.neighbor_dim = neighbor_dim
@@ -161,6 +162,7 @@ class DQNAgent:
             encoder_depth=encoder_depth,
             n_attn_layers=n_attn_layers,
             recurrent=recurrent,
+            topology_conditioned=topology_conditioned,
         )
         self.q = NeighborAttentionQNetwork(**net_kwargs).to(self.device)
         self.q_target = NeighborAttentionQNetwork(**net_kwargs).to(self.device)

@@ -39,6 +39,7 @@ from agents.dqn import DQNAgent
 from agents.ppo import PPOAgent
 from agents.munchausen_dqn import MunchausenDQNAgent
 from agents.recurrent_dqn import RecurrentDQNAgent
+from agents.topology_conditioned_dqn import TopologyConditionedDQNAgent
 from federated.utils import compute_eps_decay, set_seed
 
 run_dir = None
@@ -131,6 +132,22 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
         )
     if algo == "recurrent":
         return RecurrentDQNAgent(
+            own_dim=own_dim,
+            neighbor_dim=neighbor_dim,
+            k_max=k_max,
+            action_dim=action_dim,
+            eps_decay=eps_decay,
+            head_fix=head_fix,
+            tau=tau,
+            target_update=target_update,
+            d_model=d_model, n_heads=n_heads,
+            mu=mu,
+            dueling=dueling,
+            n_step=n_step,
+            q_entropy_weight=q_entropy_weight,
+        )
+    if algo == "topo":
+        return TopologyConditionedDQNAgent(
             own_dim=own_dim,
             neighbor_dim=neighbor_dim,
             k_max=k_max,
@@ -1044,7 +1061,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--local_episodes",        type=int,   default=1)
     parser.add_argument("--algo", type=str, default="dqn",
-                         choices=["dqn", "ppo", "munchausen", "recurrent"],
+                         choices=["dqn", "ppo", "munchausen", "recurrent", "topo"],
                          help="Local training algorithm. 'dqn' (default): agents/dqn.py, "
                               "unchanged. 'ppo': agents/ppo.py, an on-policy actor-critic with "
                               "an entropy-regularized stochastic policy. 'munchausen': "
@@ -1058,14 +1075,20 @@ if __name__ == "__main__":
                               "'recurrent': agents/recurrent_dqn.py (item 23) -- a GRUCell carries "
                               "per-intersection hidden state across ticks within an episode, "
                               "'stored state' DRQN (Hausknecht & Stone 2015); does not support "
-                              "--n_step other than 1. Wired "
+                              "--n_step other than 1. 'topo': agents/topology_conditioned_dqn.py "
+                              "(TC-FedAvg) -- a shared hypernetwork maps a per-intersection "
+                              "structural descriptor (valid-action/-neighbor fraction, mean/max "
+                              "hop distance) to a FiLM scale/shift on the fused own+neighbor "
+                              "representation; FedAvg aggregation itself is unchanged, only the "
+                              "shared function being averaged gains topology-awareness. See "
+                              "fidings/divergence_investigation.md for the design rationale. Wired "
                               "into both --parallel and the sequential path. DQN-only flags "
                               "(--q_entropy_weight, --fedprox_mu) are ignored under ppo/munchausen "
-                              "(recurrent honors both); --dueling/--n_step/--tau/--target_update are "
-                              "honored under munchausen and recurrent but not ppo. Masked-head "
-                              "aggregation is forced off under ppo only -- munchausen and recurrent "
-                              "use the same DQN Q-head naming, so masked-head aggregation "
-                              "(--disable_head_fix) still applies normally.")
+                              "(recurrent and topo honor both); --dueling/--n_step/--tau/"
+                              "--target_update are honored under munchausen/recurrent/topo but not "
+                              "ppo. Masked-head aggregation is forced off under ppo only -- "
+                              "munchausen/recurrent/topo use the same DQN Q-head naming, so masked-"
+                              "head aggregation (--disable_head_fix) still applies normally.")
     parser.add_argument("--d_model", type=int, default=128,
                          help="Network hidden width (own/neighbor encoders, attention, head "
                               "trunk) for whichever --algo is selected. Default 128 matches "

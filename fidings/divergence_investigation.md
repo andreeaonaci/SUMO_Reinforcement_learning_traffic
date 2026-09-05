@@ -4904,6 +4904,68 @@ via `git stash` comparison), no new regressions; `tests/test_flag_wiring.py`'s 1
 borderline, per this document's own standing rule -- see item 22's own 3-seed-then-6-seed path
 above). Results to follow.
 
+## 82. TC-FedAvg (Topology-Conditioned FedAvg): a bespoke design, not an existing named method,
+    built per direct user request after discussing what "2026-standard" federated-learning ideas
+    could apply here
+
+**2026-09-06.** User asked directly whether the project's purpose should change so plain FedAvg
+"makes sense," then asked instead for a genuinely new method purpose-built for this exact setup
+rather than an existing off-the-shelf federated algorithm (Reptile/SCAFFOLD/etc. were discussed and
+explicitly declined in favor of a bespoke design). Design rationale, reasoned from this document's
+own accumulated evidence, not imported from outside:
+
+Every AGGREGATION-strategy tweak tried in this project -- EMA-loss weighting, EMA-gradient-
+alignment, clustered-by-action-dim, gradient-survival, velocity-novelty -- came back null (see the
+master aggregation-strategy summary earlier in this doc), and federation vs. no-federation itself
+makes no measurable difference either (§49/§50/§64). Read together, that says **the problem was
+never in HOW weights get combined across cities** -- the averaging math isn't broken. What's
+missing is a way for the ONE shared function actually being averaged to behave differently for a
+3-way intersection vs. a 5-way one in the first place; today only the final Q-head (via
+`action_mask`) gets any explicit topology-specific treatment, and §20/§23 already showed that
+benefit shrinks as roster size grows.
+
+**Design: a small shared hypernetwork conditions the network's internal representation on a
+structural descriptor of the CURRENT intersection, computed fresh every tick from data already in
+the observation -- no per-city parameters, no city identity, nothing that requires having seen this
+topology before.** Descriptor (4 dims): valid-action fraction, valid-neighbor fraction, mean/max hop
+distance of live neighbors (`NeighborAttentionQNetwork._topology_descriptor`). A 2-layer MLP
+(`self.topo_hyper`) maps this to a FiLM (Perez et al. 2018) scale/shift applied to the fused
+own+neighbor representation, same injection point item 23's GRU uses (before `self.head`, so
+`"head.4.weight"`'s masked-head-aggregation key is untouched). **FedAvg aggregation itself is
+completely unchanged** -- `topo_hyper`'s weights are shared and averaged exactly like every other
+layer; the "personalization" comes entirely from the per-tick INPUT, not from anything server-side
+or per-city. This is the actual novel piece: not a new aggregation rule, but a new *shared function*
+for the existing, unmodified FedAvg to average, one that can express topology-conditional behavior
+using only information any city -- including a never-before-seen one -- can compute for itself.
+
+**Implementation:** `agents/networks.py::NeighborAttentionQNetwork` gained `topology_conditioned`
+(default False, exact no-op) and `_topology_descriptor()`; `forward()` gained an `action_mask`
+parameter (used only to build the descriptor, not to mask output -- callers still do that via
+`_mask_q` exactly as before), required and validated (loud `RuntimeError`, not silent) when
+`topology_conditioned=True`. `self.topo_hyper`'s last layer is zero-initialized so the network is an
+EXACT identity transform at the start of training (gamma=0, beta=0), a standard adapter-layer
+practice so this can't destabilize early training even if it turns out to be useless. New
+`agents/topology_conditioned_dqn.py::TopologyConditionedDQNAgent(DQNAgent)` threads `action_mask`
+into the network calls that need it; because DQNAgent's `act`/`act_batch`/`train`/`_remember_step`
+already dispatch through the three methods this subclass overrides
+(`_greedy_action_batch`/`q_values`/`optimize`), those are inherited completely unchanged --
+substantially smaller and lower-risk than item 23's `RecurrentDQNAgent` (no evaluator.py changes
+needed at all, since this agent has no per-tick state to thread through). Wired in as `--algo topo`
+alongside ppo/munchausen/recurrent.
+
+**Verified before spending real compute:** a pure-Python smoke test confirmed (1) a topology-
+conditioned network's output is BYTE-IDENTICAL to the plain network's at init when sharing the same
+non-`topo_hyper` weights -- the zero-init identity guarantee actually holds, not just in theory; (2)
+calling `forward()` without `action_mask` on a topology-conditioned net raises loudly; (3) the
+descriptor is sane for a genuinely isolated intersection (all-zero neighbor mask -> valid_nbr_frac,
+mean_hop, max_hop all exactly 0, not NaN or an arbitrary padding value); (4) the full agent-level
+loop (act_batch/remember/optimize across 25 ticks, single-obs `act`/`q_values`, checkpoint
+state_dict round-trip including the new `topo_hyper.*` keys) all work; (5) plain `DQNAgent` is
+completely unaffected. Full `tests/` suite re-run: same 3 pre-existing unrelated failures, no new
+regressions. A real SUMO smoke run (`--algo topo`, 1 round, 3 cities) is in progress as this section
+is being written; the actual multi-seed comparison pilot (matching items 22/23's exact protocol) is
+next once that confirms clean.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit

@@ -128,6 +128,7 @@ class NeighborAttentionQNetwork(nn.Module):
         encoder_depth: int = 2,
         n_attn_layers: int = 1,
         recurrent: bool = False,
+        topology_conditioned: bool = False,
     ):
         super().__init__()
         if dueling and actor_critic:
@@ -258,6 +259,40 @@ class NeighborAttentionQNetwork(nn.Module):
         if self.recurrent:
             self.gru = nn.GRUCell(d_model * 2, d_model * 2)
 
+        # Topology-Conditioned FedAvg (item "TC-FedAvg", fidings/divergence_
+        # investigation.md): every aggregation-strategy tweak tried in this
+        # project (EMA-loss/-alignment weighting, clustered-by-action-dim,
+        # gradient-survival, velocity-novelty) came back null, and federation
+        # vs. no-federation makes no measurable difference either (sec 49/50/
+        # 64) -- evidence the problem was never in HOW weights get combined
+        # across cities. What's missing is a way for the ONE shared function
+        # being averaged to behave differently for a 3-way vs. a 5-way
+        # intersection in the first place; right now only the final Q-head
+        # (via action_mask) gets that treatment. A small shared hypernetwork
+        # maps a per-intersection topology descriptor -- valid-action
+        # fraction, valid-neighbor fraction, mean/max hop distance of live
+        # neighbors, ALL computable for any intersection including one never
+        # trained on -- to a FiLM (Perez et al. 2018) scale/shift applied to
+        # `combined`, same injection point as `recurrent` above. FedAvg
+        # aggregation itself is completely unchanged: `topo_hyper`'s weights
+        # are shared and averaged exactly like every other layer -- there is
+        # nothing city-specific to carve out, since the conditioning comes
+        # from the INPUT (the descriptor), not from per-city parameters.
+        # Zero-initializing the last layer makes this an exact identity
+        # transform at the start of training (gamma=0, beta=0 ->
+        # combined*(1+0)+0 == combined), standard practice for adapter-style
+        # layers so they don't destabilize early training.
+        self.topology_conditioned = topology_conditioned
+        if self.topology_conditioned:
+            self._topo_dim = 4
+            self.topo_hyper = nn.Sequential(
+                nn.Linear(self._topo_dim, 16),
+                nn.ReLU(),
+                nn.Linear(16, 2 * d_model * 2),
+            )
+            nn.init.zeros_(self.topo_hyper[-1].weight)
+            nn.init.zeros_(self.topo_hyper[-1].bias)
+
     def load_state_dict(self, state_dict, strict: bool = True):
         """Backward-compat shim: checkpoints saved before the "stacked
         attention" refactor (fidings sec 76, 2026-09-05) used flat
@@ -348,15 +383,48 @@ class NeighborAttentionQNetwork(nn.Module):
 
         return torch.cat([own_emb, own_repr], dim=-1)
 
+    def _topology_descriptor(
+        self,
+        neighbor_mask: torch.Tensor,
+        hop_dist: Optional[torch.Tensor],
+        action_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """4-dim per-intersection structural descriptor: valid-action
+        fraction, valid-neighbor fraction, mean/max hop distance of live
+        neighbors (0 if isolated). Every component is computable for ANY
+        intersection -- including one never trained on -- from tensors
+        already in the observation contract; nothing here is a city
+        identity or anything that requires having seen this topology before.
+        """
+        valid_action_frac = (action_mask > 0.5).float().mean(dim=1, keepdim=True)
+        valid_nbr_mask = (neighbor_mask > 0.5).float()
+        valid_nbr_frac = valid_nbr_mask.mean(dim=1, keepdim=True)
+        if hop_dist is None:
+            hop_dist = torch.zeros_like(neighbor_mask)
+        hop_f = hop_dist.float()
+        denom = valid_nbr_mask.sum(dim=1, keepdim=True).clamp(min=1.0)
+        norm = max(self.n_hops, 1)
+        mean_hop = (hop_f * valid_nbr_mask).sum(dim=1, keepdim=True) / denom / norm
+        # No valid neighbors -> masked hop values are all 0 -> max is 0, correctly
+        # signaling "isolated" rather than an arbitrary padding hop value.
+        max_hop = (hop_f * valid_nbr_mask).max(dim=1, keepdim=True).values / norm
+        return torch.cat([valid_action_frac, valid_nbr_frac, mean_hop, max_hop], dim=1)
+
     def forward(
         self,
         own_obs: torch.Tensor,
         neighbor_obs: torch.Tensor,
         neighbor_mask: torch.Tensor,
         hop_dist: Optional[torch.Tensor] = None,
+        action_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """DQN entry point: own+neighbor obs -> masked-ready Q-values
-        (plain or dueling-combined depending on ``self.dueling``)."""
+        (plain or dueling-combined depending on ``self.dueling``).
+        ``action_mask`` is only used (and only required) when
+        ``self.topology_conditioned`` -- see that flag's __init__ comment --
+        to build the per-intersection topology descriptor; it plays no part
+        in masking this method's OUTPUT, which callers still do themselves
+        via ``_mask_q``, exactly as before."""
         if self.recurrent:
             # Loud, not silent (project convention, e.g. RewardShapingWrapper's
             # _extract_local_metric): a recurrent net's Q-values depend on a hidden
@@ -368,6 +436,16 @@ class NeighborAttentionQNetwork(nn.Module):
                 "..., hidden) instead of forward(), which has no hidden state to work with."
             )
         combined = self._combined_features(own_obs, neighbor_obs, neighbor_mask, hop_dist)
+        if self.topology_conditioned:
+            if action_mask is None:
+                raise RuntimeError(
+                    "This network was built with topology_conditioned=True -- forward() "
+                    "requires action_mask (used to build the topology descriptor, not to "
+                    "mask output -- callers still do that separately via _mask_q)."
+                )
+            t = self._topology_descriptor(neighbor_mask, hop_dist, action_mask)
+            gamma, beta = self.topo_hyper(t).chunk(2, dim=-1)
+            combined = combined * (1.0 + gamma) + beta
         return self._q_from_features(combined)
 
     def forward_recurrent(

@@ -64,6 +64,7 @@ from agents.dqn import DQNAgent
 from agents.ppo import PPOAgent
 from agents.munchausen_dqn import MunchausenDQNAgent
 from agents.recurrent_dqn import RecurrentDQNAgent
+from agents.topology_conditioned_dqn import TopologyConditionedDQNAgent
 from federated.utils import set_seed
 
 logger = logging.getLogger(__name__)
@@ -188,6 +189,18 @@ def _client_worker(
             )
         elif algo == "recurrent":
             agent = RecurrentDQNAgent(
+                own_dim=own_dim, neighbor_dim=neighbor_dim, k_max=k_max,
+                action_dim=action_dim, eps_decay=eps_decay,
+                lr=lr, lr_decay=lr_decay, min_lr=min_lr,
+                head_fix=neighbor_attention,
+                tau=tau, target_update=target_update,
+                mu=mu, dueling=dueling, n_step=n_step,
+                init_steps_done=init_steps_done,
+                q_entropy_weight=q_entropy_weight,
+                d_model=d_model, n_heads=n_heads,
+            )
+        elif algo == "topo":
+            agent = TopologyConditionedDQNAgent(
                 own_dim=own_dim, neighbor_dim=neighbor_dim, k_max=k_max,
                 action_dim=action_dim, eps_decay=eps_decay,
                 lr=lr, lr_decay=lr_decay, min_lr=min_lr,
