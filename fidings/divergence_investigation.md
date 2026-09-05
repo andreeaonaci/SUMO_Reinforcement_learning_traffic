@@ -4437,7 +4437,39 @@ refining the representation before the head trunk sees it, rather than adding de
 the network (the raw-feature encoders) that has no access to neighbor information at all until
 after attention already happened once.
 
-**Status: implementation in progress.**
+**Implementation:** `NeighborAttentionQNetwork` gains `n_attn_layers: int = 1` (default reproduces
+the original single-attention-pass design exactly). Each intersection's own embedding does
+`n_attn_layers` independent (separately-weighted, `nn.ModuleList`) rounds of attention over its
+neighbors before the head trunk sees it; neighbor keys/values stay fixed across rounds, only the
+query (a running own-representation) is iteratively refined -- simpler than a full stacked
+Transformer encoder but a genuine capacity/architecture change, distinct from §75's encoder depth.
+No masked-head-aggregation confound this time (verified directly: `head.4.*` keys untouched, since
+only attention module structure changed, not `self.head`). Wired as `--n_attn_layers`, `--algo dqn`
+only. Smoke-tested before real comparison compute.
+
+**Result (3 seeds -- 3, 7, 11 -- 5 rounds, same protocol as §75): the FIRST architecture change all
+session pointing in the right direction, not null/negative -- but not yet significant, and needs
+more seeds before trusting it (this document's own standing lesson, most recently relearned in
+§73's `temp=0.01+n_step=3` mirage).**
+
+| config | best (3-seed avg) | mean (3-seed avg) | |diff|/SE vs. baseline (best / mean) |
+|---|---:|---:|---:|
+| baseline (n_attn_layers=1) | -8027.76 (std 2289.6) | -8958.84 (std 1603.1) | — |
+| **n_attn_layers=2** | **-5961.51 (std 2761.7)** | **-7915.93 (std 1980.2)** | 1.08 / 0.84 |
+| n_attn_layers=3 | -7866.58 (std 1237.9) | -9158.64 (std 778.1) | 0.13 / 0.31 (back to tied) |
+
+`n_attn_layers=2` specifically (not "more attention is generally better" -- 3 layers lands back at
+a wash) shows a real positive direction on both measures, driven partly by seed 11 hitting
+**-2842.85** at round 3 -- the single best result of any short (5-round) pilot anywhere in this
+session, across every algorithm and architecture tried. Still well short of the ≥2 significance
+bar and the seed-to-seed spread is large (std 2761.7 on best-round, comparable to §73's own DQN
+baseline spread). **3 more seeds (17, 21, 25) launched immediately to build toward a 6-seed sample
+before treating this as more than a lead** -- this is exactly the seed-count and confidence level
+(3 seeds, one dramatic escape) that §73's `temp=0.01+n_step=3` had before it evaporated on
+replication, so the same caution applies here until more data comes in.
+
+**Status: seed-expansion running. §75's depth3 20-round extension also still running (16/20 as of
+this writeup) -- both to be reported once complete.**
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
    real multi-seed run in §6.** Parallel workers were never seeded; fixed and verified
