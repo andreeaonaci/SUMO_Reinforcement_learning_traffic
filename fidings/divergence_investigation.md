@@ -4485,13 +4485,41 @@ promising few-seed lead with one dramatic outlier evaporated on replication (tem
 §73; and now this) -- strong, repeated evidence that this project's per-seed variance is simply
 too large for anything under ~5-6 seeds to be trustworthy, regardless of how clean the story looks.
 
+**Combination screens (single-seed, seed 3) also both clean misses:**
+
+| config | best | mean |
+|---|---:|---:|
+| baseline (for reference) | -5933.60 | -8016.66 |
+| n_attn_layers=2 alone (seed 3) | -6944.15 | -8523.85 |
+| n_attn_layers=2 + n_step=3 | -9137.53 | -9787.65 |
+| n_attn_layers=2 + dueling | -9292.84 | -9952.57 |
+
+Both combinations are worse than `n_attn_layers=2` alone on the same seed, let alone the baseline
+-- neither `n_step=3` nor `dueling` rescues or compounds with the (already-nulled) attention-
+stacking idea. No further seeds warranted per this document's standing decision rule (a config
+that doesn't clear even a single-seed screen is deprioritized without replication).
+
 **Combined verdict for the full architecture-search campaign (§73-76): PPO, Munchausen-DQN
 (multiple hyperparameter/architecture combinations), BatchNorm+activation, network width
 (d_model 64/256/512), network depth (encoder_depth 3/4, confirmed negative at both cheap and full
-budget), and stacked attention (n_attn_layers 2/3) -- none produced a seed-robust improvement over
-the existing DQN+q_entropy, d_model=128, depth=2, single-attention-pass architecture.** Two
-combination screens (n_attn_layers=2 + n_step=3, n_attn_layers=2 + dueling) still running as a
-last check before concluding this axis is exhausted.
+budget), stacked attention (n_attn_layers 2/3, including combinations with n_step/dueling) -- NONE
+produced a seed-robust improvement over the existing DQN+q_entropy, d_model=128, depth=2,
+single-attention-pass architecture.** Roughly 25+ training runs across this session. The honest,
+well-supported conclusion: **the existing default architecture is already competitive with, or
+better than, everything tried against it** -- this is not a failure to find the right tweak yet,
+it is now a reasonably well-powered negative result in its own right (multiple independent axes:
+algorithm, width, depth, attention structure, normalization, all tested, several with genuine
+multi-seed rigor). Consistent with and extending §70/§71's own diagnosis: the project's binding
+constraint (confident lock-in, cross-topology retention/transfer failure) does not appear to be
+fixable by changing the network's size or structure -- it looks like a property of the training
+*dynamic* itself (off-policy bootstrapping against a non-stationary, federated-aggregated target),
+which no architecture variant tested here touches.
+
+**Recommendation:** stop searching the architecture axis; it has had a fair, multi-pronged test.
+If a future session wants to pursue the confident-lock-in mechanism further, the more promising
+untested levers are in the training *procedure* (larger `--local_episodes` per round, curriculum/
+warm-up schedules, or a training-time regularizer targeting Q-value confidence more directly than
+`--q_entropy_weight` already does) rather than more network-architecture variants.
 
 ## §75 closeout: `encoder_depth=3` extended to the full 20-round budget does NOT catch up --
     depth is a confirmed negative at both budgets, not an underbudgeted one
