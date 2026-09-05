@@ -4400,7 +4400,44 @@ the head trunk gets a genuine "more layers" test without reintroducing that same
 as `--encoder_depth`, `--algo dqn` only, through both training paths. Smoke-tested (synthetic
 shapes + a real tiny `--parallel` run) before committing to real comparison compute.
 
-**Status: pilots launched, in progress — see below for results as they land.**
+**Result (3 seeds -- 3, 7, 11 -- 5 rounds, `environments_c1_4_6`, `q_entropy=0.05`, identical
+protocol to §73/§74's comparisons): depth hurts, monotonically, same pattern already seen on the
+width axis (§73 batch 5: `d_model` 64/256/512 all worse than the 128 default).**
+
+| config | best (3-seed avg) | mean (3-seed avg) | |diff|/SE vs. depth=2 (best / mean) |
+|---|---:|---:|---:|
+| encoder_depth=2 (baseline, existing default) | -8027.76 (std 2289.6) | -8958.84 (std 1603.1) | — |
+| encoder_depth=3 | -8156.41 (std 1311.3) | -9520.18 (std 212.3) | 0.10 / 1.15 |
+| encoder_depth=4 | -9355.51 (std 948.4) | -9907.45 (std 383.7) | 1.12 / **1.82** |
+
+`encoder_depth=4`'s mean comparison (1.82) is the closest any architecture change tested this
+session has come to this project's ≥2 significance bar — still short of it, but the monotonic
+trend (depth 2 > 3 > 4 on both measures) is clean and consistent with the width-axis finding.
+**Working hypothesis: more parameters (whether via width or depth) need more gradient steps to
+pay off than this project's tiny 5-round/2-episode screening budget provides** — directly
+analogous to how DQN's own reward jumps dramatically between the 5-round screen and the 20-round
+full budget (§73's own baseline: best -5933.60 at round 5 vs. -3288.73 at round 20, same seed).
+**Testing this directly: `encoder_depth=3` (the gentler of the two, closer to baseline) extended
+to the full 20-round budget, seeds 3 and 7, launched in parallel with the next investigation
+branch below.**
+
+## 76. A genuinely different architecture, not just deeper MLPs: stacked multi-layer neighbor
+    attention
+
+**2026-09-05, same autonomous session as §75.** §75's own result argues against "deeper MLP" as
+the right kind of bigger model — capacity added as more Linear layers in the *feature encoders*
+hurt monotonically, the same direction already seen for raw width (`d_model`). Per the user's own
+framing ("maybe a bigger model with a different architecture"), the more principled next
+experiment is adding capacity somewhere structurally different: **the neighbor-attention
+mechanism itself currently does exactly one round of attention** (each intersection's own
+embedding attends over its neighbors' embeddings once, then the result is concatenated and fed
+through the head trunk). A genuinely different architecture — closer to how a real Transformer
+block stacks — lets that own-embedding attend over neighbors **multiple times**, each round
+refining the representation before the head trunk sees it, rather than adding depth to a part of
+the network (the raw-feature encoders) that has no access to neighbor information at all until
+after attention already happened once.
+
+**Status: implementation in progress.**
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
    real multi-seed run in §6.** Parallel workers were never seeded; fixed and verified
