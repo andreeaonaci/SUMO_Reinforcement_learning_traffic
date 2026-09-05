@@ -149,6 +149,40 @@ constraint is not the training data's quantity or diversity — it's the algorit
 retain and transfer what it learns.** This is the problem the architecture change (DQN → a
 different network/algorithm, kept behind the same FedAvg-style aggregation) is aimed at.
 
+### Algorithm swap: is DQN itself the bottleneck? (2026-09-04/05)
+
+Tested directly: kept FedAvg untouched, swapped the local learning algorithm behind it. Two
+alternatives were implemented, both matching `DQNAgent`'s interface exactly so the federated
+plumbing needed no changes beyond a `--algo {dqn,ppo,munchausen}` flag:
+
+- **PPO** (`agents/ppo.py`) — an on-policy actor-critic with an entropy-regularized stochastic
+  policy, which structurally can't collapse to one repeating action the way `argmax(Q)` can.
+- **Munchausen-DQN** (`agents/munchausen_dqn.py`, Vieillard et al. 2020) — keeps DQN's off-policy
+  replay buffer (same sample efficiency, unlike PPO) but replaces the hard policy with a Boltzmann
+  distribution over Q-values and an entropy-regularized soft-Bellman target.
+
+**Methodology note worth keeping in mind when reading any single-seed result in this project:** a
+promising-looking Munchausen configuration (`temp=0.01 + n_step=3`) beat DQN cleanly on one seed —
+and then failed to replicate on three further seeds, and even on its original seed only *tied*
+DQN once run to the full training budget instead of a short screen. A textbook single-seed
+mirage, caught before being reported as a real result.
+
+**The real, statistically-grounded answer** (3 seeds each, full 20-round budget,
+`environments_c1_4_6`, true holdout): **DQN+q_entropy and Munchausen-DQN are statistically
+indistinguishable** — |diff|/SE = 0.46 (best-round), 0.28 (mean), both far below this project's
+own ≥2 significance bar. PPO stayed clearly behind both even after quadrupling its episode budget
+to remove its on-policy sample-inefficiency disadvantage. Every network-capacity variant tried
+(`d_model` 64/256/512, on both DQN and Munchausen) underperformed the existing default of 128.
+
+**One lead for later, not yet confirmed:** Munchausen-DQN's seed-to-seed variance was 5-7x
+smaller than DQN's (best-round std 332 vs. 2290) even though its mean wasn't better — DQN's one
+good seed was doing most of the work of making it look ahead. A specific, testable
+consistency-vs-peak-performance hypothesis for a future dedicated multi-seed variance study.
+
+**Conclusion: no algorithm swap earned its keep.** DQN+q_entropy remains the standing default.
+Full round-by-round data and every intermediate (including the mirage) is in
+`fidings/divergence_investigation.md` §73.
+
 ### Paper framing
 
 Not "federated DQN traffic control fails" (disproven by the in-distribution result above) — the
