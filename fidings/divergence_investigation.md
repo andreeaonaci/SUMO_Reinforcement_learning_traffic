@@ -4468,7 +4468,30 @@ before treating this as more than a lead** -- this is exactly the seed-count and
 (3 seeds, one dramatic escape) that §73's `temp=0.01+n_step=3` had before it evaporated on
 replication, so the same caution applies here until more data comes in.
 
-**Status: `n_attn_layers=2` seed-expansion (17/21/25) running.**
+**Seed-expansion result (seeds 17, 21, 25 added -- 6 seeds total): the lead did NOT survive, exact
+same pattern as §73's `temp=0.01+n_step=3` mirage.**
+
+| n seeds | best (avg) | mean (avg) | |diff|/SE (best / mean) |
+|---|---:|---:|---:|
+| 3 (3, 7, 11) | -5961.51 | -7915.93 | 1.08 / 0.84 |
+| **6 (3, 7, 11, 17, 21, 25)** | **-7551.43 (std 2492.8)** | **-8826.80 (std 1605.7)** | **0.33 / 0.16** |
+
+Seeds 17/21/25 were all unremarkable (best -8597 to -9734) -- none came anywhere near seed 11's
+-2842.85 escape. Adding them pulled the average almost all the way back to baseline (-8027.76
+best / -8958.84 mean), collapsing |diff|/SE from a suggestive 1.08/0.84 down to a negligible
+0.33/0.16. **`n_attn_layers=2` is not a real win -- the 3-seed result was one lucky seed, not a
+property of the architecture.** This is now the THIRD time in this session/document that a
+promising few-seed lead with one dramatic outlier evaporated on replication (temp=0.01+n_step=3,
+§73; and now this) -- strong, repeated evidence that this project's per-seed variance is simply
+too large for anything under ~5-6 seeds to be trustworthy, regardless of how clean the story looks.
+
+**Combined verdict for the full architecture-search campaign (§73-76): PPO, Munchausen-DQN
+(multiple hyperparameter/architecture combinations), BatchNorm+activation, network width
+(d_model 64/256/512), network depth (encoder_depth 3/4, confirmed negative at both cheap and full
+budget), and stacked attention (n_attn_layers 2/3) -- none produced a seed-robust improvement over
+the existing DQN+q_entropy, d_model=128, depth=2, single-attention-pass architecture.** Two
+combination screens (n_attn_layers=2 + n_step=3, n_attn_layers=2 + dueling) still running as a
+last check before concluding this axis is exhausted.
 
 ## §75 closeout: `encoder_depth=3` extended to the full 20-round budget does NOT catch up --
     depth is a confirmed negative at both budgets, not an underbudgeted one
