@@ -4300,6 +4300,68 @@ default** (no replacement earned its keep), but the Munchausen-DQN consistency o
 is worth a dedicated follow-up given how much this whole document's instability narrative
 (§32-34/§51-57) has been about variance and lock-in specifically, not just mean reward.
 
+## 74. "Upgraded DQN" (BatchNorm1d + relu6/leaky_relu): tested, statistically tied with baseline —
+    a third confirmation that network-internals tweaks don't touch this project's instability
+
+**2026-09-05.** User request, following directly from §73's algorithm-swap campaign: keep DQN, but
+modify the network itself — add BatchNorm1d and swap ReLU for relu6/leaky_relu — and name it
+"Upgraded DQN". Implemented in `agents/networks.py` (`NeighborAttentionQNetwork` gains
+`use_batchnorm`/`activation` params; a new `_FlattenBatchNorm1d` wraps `BatchNorm1d` so it accepts
+both the `(B, C)` own-intersection tensors and `(B, K, C)` neighbor tensors uniformly) and wired
+through as `--batchnorm`/`--activation {relu,relu6,leaky_relu}`, `--algo dqn` only. At the
+defaults (`use_batchnorm=False, activation="relu"`) this is an exact behavioral no-op — verified.
+
+**Literature context, checked before running anything:** BatchNorm is notably absent from the
+DQN/Rainbow lineage (Hessel et al. 2018's "what actually works" combination is Double DQN +
+prioritized replay + dueling + multi-step + distributional RL + NoisyNets — no BatchNorm). The
+documented reason: RL's replay-buffer/policy-drifting data isn't i.i.d. the way BatchNorm's
+fixed-input-distribution assumption expects, and single-observation inference (batch size 1)
+forces a train/eval-mode split vision applications don't usually hit as sharply. LayerNorm has
+fared better in RL for exactly this reason (DreamerV3, several SAC/TD3 implementations). Expectation
+going in was calibrated toward "plausibly neutral-to-negative," not "should help."
+
+**A real bug found and fixed before any training compute was spent on it**: nothing in this
+codebase had ever called `.eval()`/`.train()` on the network — never needed to, since attention/
+dueling/actor_critic heads are all mode-insensitive. `BatchNorm1d` is not: it raises on batch size
+1 in train mode, and single-observation action selection (`_greedy_action_batch`, `q_values`,
+`federated/evaluator.py`'s `model.act()`) happens on essentially every tick. Confirmed the crash
+directly, then fixed it in `agents/dqn.py`: `self.q.eval()` before any inference-only forward
+pass, `self.q.train()` at the start of `optimize()`, and `self.q_target` permanently in `eval()`
+(never trained by backprop; Polyak averaging only touches `.parameters()`, not BatchNorm's
+running-stat buffers, so `q_target`'s BN stats are hard-synced at each `load_state_dict()`/hard-
+copy point rather than smoothly Polyak-averaged — a documented simplification, moot when
+`use_batchnorm=False`). Verified via a synthetic single-intersection (batch-size-1-every-tick)
+training loop before spending any real SUMO compute on it.
+
+**Result (3 seeds — 3, 7, 11 — 5 rounds, `environments_c1_4_6`, true holdout, `q_entropy=0.05`,
+identical protocol to §73's batch 5, `--batchnorm --activation leaky_relu`):**
+
+| config | best (3-seed avg) | mean (3-seed avg) |
+|---|---:|---:|
+| DQN+q_entropy (§73 baseline) | -8027.76 (std 2289.6) | -8958.84 (std 1603.1) |
+| Munchausen-DQN default (§73) | -7928.26 (std 332.1) | -8913.54 (std 444.7) |
+| **Upgraded DQN (BatchNorm+LeakyReLU)** | **-7727.85 (std 1220.5)** | **-9159.10 (std 382.0)** |
+
+**|diff|/SE = 0.24 (best-round), 0.38 (mean) against the DQN baseline** — both far below this
+project's ≥2 bar. **Statistically tied, same conclusion as Munchausen-DQN.** BatchNorm+LeakyReLU
+neither helped nor hurt in any supportable way.
+
+**Directly on point for the literature question**: the confident-lock-in failure mode
+(§32-34/§51-57) showed up under Upgraded DQN in one of its most extreme forms yet — seed 11 hit
+**exactly zero variance for two consecutive rounds** (std=0.0000 both times, byte-identical reward
+across all 5 eval episodes on both rounds 3 and 4) before finally escaping on round 5.
+**BatchNorm did not prevent, reduce, or visibly delay this lock-in** — consistent with the
+literature's skepticism that BatchNorm addresses RL-specific instability, and now a third
+independent confirmation (after PPO and Munchausen-DQN in §73) that tweaking the network's
+internals — algorithm, capacity, or now normalization/activation — doesn't touch this project's
+central instability mechanism. Whatever's driving the confident lock-in appears to sit in the
+training *dynamic* (off-policy bootstrapping against a non-stationary, federated-aggregated
+target), not in anything fixable by changing what the network itself looks like.
+
+**Recommendation, extending §73's:** no network-architecture change tested so far (dueling,
+n_step, capacity 64/256/512, and now BatchNorm/activation) has earned a place ahead of the
+existing plain-ReLU, no-batchnorm default. Keep it.
+
 ## Open questions / next steps
 
 1. ~~**Run-to-run non-determinism (the big open one).**~~ **Resolved — see §5, confirmed with a
