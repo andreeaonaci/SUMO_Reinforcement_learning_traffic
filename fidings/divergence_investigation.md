@@ -4609,6 +4609,32 @@ lead: if it holds up on more seeds, the story becomes "capacity helps only when 
 of the network that sees neighbor information (attention), not when added to raw-feature encoding
 depth" -- a genuinely informative distinction, not just "bigger is worse across the board."
 
+## 78. Item 20 (replay-buffer reset on detected lock-in) implemented, verified, 3-seed comparison
+    launched -- first of the six genuinely-different-paradigm directions queued after §73-77
+
+**2026-09-05.** Per direct user request, six directions "as far away as possible" from the
+algorithm/architecture axis just exhausted (§73-77) were queued in the "Open questions" list below
+as items 20-25, to be implemented and validated in that order. This section covers item 20.
+
+**Implementation:** `ReplayBuffer.clear()` + `DQNAgent.clear_replay()`/`MunchausenDQNAgent.
+clear_replay()` (also drops in-flight n-step accumulator windows so a partial return can't span
+the reset boundary). `ParallelFederatedServer` tracks whether the last round's eval `std_reward`
+fell below a new `--lockin_reset_std_threshold` (reusing the exact std<50 screen this document has
+used since §49/§50 to flag confident lock-in) and, if so, tells every worker to clear its replay
+buffer before the next round via the existing per-round queue message. Tests a specific mechanistic
+hypothesis never isolated before: a locked policy's own self-generated, increasingly homogeneous
+transitions may be perpetuating the lock via TD-bootstrapping off stale data -- distinct from
+`--epsilon_reset_every` (§41/§42, tested, null), which only resets exploration, not the data the
+network is actually learning from. `--parallel` only (needs server->worker signaling), 0.0 default
+is an exact no-op. Verified end-to-end against real SUMO with a deliberately high threshold (500,
+to force triggering): confirmed detection, logging, and all 3 workers clearing on cue, every round,
+no crashes, before spending real comparison compute.
+
+**Status: 3-seed comparison launched immediately** (seeds 3, 7, 11, `--lockin_reset_std_threshold
+50`, otherwise identical to every other §73-77 comparison's protocol) -- going straight to 3 seeds,
+not a single-seed screen first, per this session's own repeated lesson (§73, §76) that anything
+smaller isn't trustworthy here. Results to follow.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
