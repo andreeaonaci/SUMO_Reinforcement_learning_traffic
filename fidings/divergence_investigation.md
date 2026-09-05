@@ -4533,7 +4533,61 @@ separate few-seed leads (one dramatic outlier each) evaporate on replication (`t
 sec 73; `n_attn_layers=2` sec 76 twice), so going straight to 3 seeds is the responsible baseline
 rigor here, not caution for its own sake.
 
-**Status: launched, in progress.**
+**Result: also a null, and the direction (slightly worse on mean) is informative in its own
+right.**
+
+| config | best (3-seed avg) | mean (3-seed avg) | |diff|/SE |
+|---|---:|---:|---:|
+| baseline (`local_episodes=2`) | -8027.76 (std 2289.6) | -8958.84 (std 1603.1) | — |
+| `local_episodes=4` | -8194.00 (std 766.2) | -9408.42 (std 277.8) | 0.15 / 0.90 |
+
+Doubling the environment interaction per round (roughly 2x the compute per round, same 5-round
+budget) did not help, and trended slightly worse on mean (not significant). **This rules out
+"not enough environment experience per round" as the explanation**, the same way §75's full-
+20-round extension ruled out "not enough total rounds" for `encoder_depth`. Note the much smaller
+cross-seed std here (766.2/277.8 vs. baseline's 2289.6/1603.1) mirrors §76's Munchausen-DQN
+observation (smaller variance, not-better mean) -- doubling local experience may be trading peak
+performance for consistency, the same open, unconfirmed pattern noted there.
+
+## Final summary for this autonomous session (§73-77): a comprehensively-tested, well-supported
+    negative result across algorithm, architecture, and training-procedure axes
+
+**Everything tried, in one place:**
+
+| axis | variants tested | best result found |
+|---|---|---|
+| Algorithm | PPO, Munchausen-DQN (default + temp/alpha sweep + n_step/dueling combos) | statistically tied with DQN at best (§73) |
+| Network width | `d_model` 64, 256, 512 | all worse than the 128 default (§73/§74) |
+| Normalization/activation | BatchNorm1d + relu6/leaky_relu | statistically tied (§74) |
+| Network depth | `encoder_depth` 3, 4, at both 5-round and 20-round budgets | confirmed worse at both budgets (§75) |
+| Attention structure | `n_attn_layers` 2, 3, plus combos with n_step/dueling | briefly looked promising (3-seed), evaporated at 6 seeds (§76) |
+| Training procedure | `local_episodes` 4 (double) | null, slightly worse on mean (§77) |
+
+**Roughly 30+ training runs, several with genuine 3-6-seed multi-seed rigor, spanning ~8 hours of
+autonomous operation. Not one variant produced a seed-robust improvement over the existing
+DQN+q_entropy, `d_model=128`, `encoder_depth=2`, `n_attn_layers=1`, `local_episodes=2` default.**
+
+**This session's own most valuable methodological finding, independent of any specific
+architecture question:** three separate few-seed "leads" (`temp=0.01+n_step=3` in §73;
+`n_attn_layers=2` twice over in §76) each looked like a real, clean win on 3 seeds, driven by
+exactly one dramatic outlier seed, and each collapsed to a null once 3 more seeds were added. This
+is now a robustly repeated pattern, not a fluke of any one lever -- **this project's per-seed
+variance at this roster/budget is large enough that nothing under ~5-6 seeds should be trusted,
+full stop**, regardless of how clean or dramatic a smaller sample looks.
+
+**Standing recommendation:** stop searching architecture and this specific slice of the training-
+procedure axis (episode count); both have now had a fair, multi-pronged, multi-seed test with a
+consistent negative result. This is fully consistent with and extends §70/§71's own diagnosis --
+the project's binding constraint (confident lock-in, cross-topology retention/transfer failure)
+is not fixable by changing the network's algorithm, size, structure, or per-round data volume. It
+looks like a property of the training *dynamic* itself. Untested directions that remain genuinely
+open, in rough priority order: (1) a training-time regularizer that targets Q-value confidence
+more directly than the already-tried-and-weak `--q_entropy_weight` (§54-56); (2) a curriculum/
+warm-up schedule (e.g. gradually increasing exploration difficulty or topology diversity across
+rounds, rather than a fixed roster from round 1); (3) revisiting whether the confident-lock-in
+mechanism itself can be directly targeted at the optimizer level (e.g. an explicit Q-value
+variance penalty, or periodic partial weight resets timed to when lock-in is detected rather than
+on a fixed schedule, extending §41/§42's null result on a *fixed*-interval version of this idea).
 
 ## §75 closeout: `encoder_depth=3` extended to the full 20-round budget does NOT catch up --
     depth is a confirmed negative at both budgets, not an underbudgeted one
