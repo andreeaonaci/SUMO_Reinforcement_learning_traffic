@@ -245,6 +245,27 @@ class NeighborAttentionQNetwork(nn.Module):
                 [d_model] + [d_model] * encoder_depth, activation, use_batchnorm, final_activation=False
             )
 
+    def load_state_dict(self, state_dict, strict: bool = True):
+        """Backward-compat shim: checkpoints saved before the "stacked
+        attention" refactor (fidings sec 76, 2026-09-05) used flat
+        `attn.*`/`attn_norm.*` keys for what is now `attn_layers.0.*`/
+        `attn_norms.0.*` (the n_attn_layers=1 case, which is architecturally
+        identical -- this is a pure key rename, not a shape change).
+        Without this, every checkpoint from before that commit -- most of
+        this project's saved results -- fails to load with a cryptic
+        missing/unexpected-key error. Newer checkpoints (already using
+        `attn_layers.*`) pass through unchanged."""
+        if any(k == "attn.in_proj_weight" or k == "attn_norm.weight" for k in state_dict):
+            remapped = {}
+            for k, v in state_dict.items():
+                if k.startswith("attn."):
+                    k = "attn_layers.0." + k[len("attn."):]
+                elif k.startswith("attn_norm."):
+                    k = "attn_norms.0." + k[len("attn_norm."):]
+                remapped[k] = v
+            state_dict = remapped
+        return super().load_state_dict(state_dict, strict=strict)
+
     def _q_from_features(self, combined: torch.Tensor) -> torch.Tensor:
         """Shared trunk -> Q-values, either straight through the plain head
         or combined dueling-style (Q = V + A - mean(A)) if ``dueling``."""
