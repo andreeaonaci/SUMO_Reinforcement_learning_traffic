@@ -5371,6 +5371,17 @@ gain.
 run next** (per the standing agreement: prove out a promising lever cheap first, then commit bigger
 compute) -- see the following section for the design and results of that escalation.
 
+## 86. Sequential curriculum training at 3x budget: does the confirmed §85 finding hold at larger
+    scale?
+
+**2026-09-06.** Escalation from §85's 6-seed confirmation, per the standing agreement to commit
+bigger compute once a lever is confirmed cheap. Design: 3x the screening budget on the same roster
+(`environments_c1_4_6`) -- `--episodes_per_city 30` for the sequential arm vs. a matched parallel-
+FedAvg baseline (`--rounds 15 --local_episodes 2` = 30 episodes/city cumulative, otherwise identical
+protocol: `--pad_to_true_holdout --q_entropy_weight 0.05`), single seed (3, the original screening
+seed, for direct comparability with §85's own seed-3 numbers at the smaller budget). Both arms
+launched concurrently. Results to follow.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
