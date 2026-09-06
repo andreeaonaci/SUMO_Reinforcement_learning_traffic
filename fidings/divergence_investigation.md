@@ -5329,6 +5329,48 @@ deployable win, independent of fixing the underlying retention problem.
 the unanimous 3-seed direction and >4x margin on the best-checkpoint measure make this the single
 most likely candidate in this document to actually hold up. Results to follow.
 
+**6-seed result: CONFIRMED, and the strongest result in the entire investigation -- the exact
+opposite of every other lever this session, which either weakened or reversed with more seeds, this
+one got MORE significant.**
+
+| Seed | Final vs. baseline best-round | Best-checkpoint vs. baseline best-round |
+|---|---:|---:|
+| 3 | +23.3% | +37.3% |
+| 7 | +49.6% | +49.6% |
+| 11 | -2.8% | +80.0% |
+| 17 | +35.1% | +44.4% |
+| 21 | +25.5% | +25.5% |
+| 25 | +14.0% | +35.5% |
+
+| | \|diff\|/SE vs. baseline best-round | \|diff\|/SE vs. baseline mean |
+|---|---:|---:|
+| Sequential FINAL checkpoint | **3.48** (up from 1.60 at n=3) | **4.14** (up from 1.85) |
+| Sequential BEST checkpoint | **5.71** (up from 4.20 at n=3) | **6.32** (up from 4.49) |
+
+**Every single one of the six seeds shows a positive best-checkpoint improvement, no exceptions
+(range +23% to +80%) -- and the final-checkpoint comparison, initially ambiguous because of seed
+11's mid-sequence relapse, now clears the bar decisively too (5 of 6 seeds positive).** This is
+qualitatively different from every other result in this document: TC-FedAvg, item 23, and every
+architecture-search lead in §73-77 either stayed flat or got WEAKER going from 3 to 6 seeds (the
+standing "few-seed mirage" pattern); this is the first and only lever whose significance roughly
+*doubled* with more seeds, the signature of a real, robust effect rather than noise a small sample
+happened to catch favorably.
+
+**This is now the second confirmed finding of the whole item-2X+ campaign (after item 22), and by a
+wide margin the stronger one** -- |diff|/SE 3.5-6.3 vs. item 22's already-strong 2.5, on a training
+paradigm change (parallel FedAvg -> sequential curriculum) that required zero new architecture,
+zero new algorithm, and reuses 100% of the existing training/eval code. **Confirms the reading from
+the 3-seed screen: sequential training reliably discovers a much better region of weight space than
+parallel FedAvg ever reaches at matched total training volume, and while it doesn't perfectly retain
+that peak by the end of training, retaining it partially is enough for the FINAL checkpoint to also
+significantly beat FedAvg** -- the forgetting cost (§85's seed-3 catastrophic-forgetting measurement:
+city_1's own performance dropping 64%) is real but does not erase the net holdout-generalization
+gain.
+
+**Given this is a confirmed, major, unusually strong result, escalating to a larger-scale training
+run next** (per the standing agreement: prove out a promising lever cheap first, then commit bigger
+compute) -- see the following section for the design and results of that escalation.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit

@@ -245,6 +245,37 @@ re-test) from this session.** Final scorecard: item 22 is the one confirmed, rep
 inconclusive-leaning-null at 6-seed rigor; item 25 is inconclusive due to being under-powered as
 tested.
 
+### Sequential (non-federated) curriculum training — the strongest confirmed finding of the entire
+investigation, added per direct user request after the item-2X queue closed
+
+Instead of training every city in parallel and averaging weights each round (FedAvg), fully train
+on city_1, then CONTINUE the same weights on city_4, then city_6 — one pass, no aggregation step at
+all. Motivated directly by two standing findings: federation vs. no-federation makes no difference
+(§49/50/64), while sequential adaptation (fine-tuning) is the one thing that's reliably worked
+(§66-69). `diagnostics/sequential_training.py`, reusing 100% existing training/eval code — no new
+architecture, no new algorithm.
+
+At 6-seed rigor, matched total training volume against the existing parallel-FedAvg baseline:
+
+| | \|diff\|/SE vs. baseline best-round | \|diff\|/SE vs. baseline mean |
+|---|---:|---:|
+| Sequential FINAL checkpoint | **3.48** | **4.14** |
+| Sequential BEST checkpoint (chosen in hindsight, same convention as this project's own "best-round" stat) | **5.71** | **6.32** |
+
+**Every single one of six seeds shows a positive best-checkpoint improvement (+23% to +80%), and
+the final-checkpoint comparison — the practically deployable one — also clears the bar (5 of 6
+positive).** Unlike every other lever tried this session, this one got MORE significant going from
+3 to 6 seeds, not less — the opposite of the standing "few-seed mirage" pattern, and the clearest
+sign yet of a real, robust effect rather than a lucky sample.
+
+A real cost comes with it: catastrophic forgetting, measured directly — city_1's own in-distribution
+performance drops 64% by the time city_4 and city_6 have also been trained (§85). The net holdout-
+generalization gain survives this cost, but it means the mechanism is trading away some retained
+competence on earlier cities for a much better final/peak policy overall — consistent with, and the
+sharpest demonstration yet of, this document's standing diagnosis (§70/§71) that RETENTION, not
+search or data, is the binding constraint: this result shows a much better policy is easily
+reachable via a completely different, much simpler training procedure, it just isn't perfectly kept.
+
 ---
 
 ## 5. Bottom line, right now
@@ -274,15 +305,20 @@ tested.
   additions (TC-FedAvg, item 24's protocol re-test), are now done.** Five genuinely different
   training/aggregation-time mechanisms were tried (replay reset, recurrent memory, topology-
   conditioned FiLM, Reptile-style blending, evolution strategies); exactly one (item 22,
-  potential-based reward shaping) confirmed as a real, replicated win. This queue is closed —
-  the next open decision is what to try beyond this list, or whether to move to writing up.
+  potential-based reward shaping) confirmed as a real, replicated win.
+- **Sequential (non-federated) curriculum training, tried after the queue closed, is the strongest
+  confirmed result in the whole investigation** — |diff|/SE 3.48-6.32 at 6-seed rigor (vs. item 22's
+  2.5), every single seed agreeing in direction on the best-checkpoint measure, and — unlike
+  everything else this session — the effect got MORE significant with more seeds, not less. Comes
+  with a real, measured catastrophic-forgetting cost, but the net holdout gain survives it.
 
-**For a paper:** the defensible framing remains what §58-61 of the investigation log established —
-not "federated DQN traffic control fails," but "a characterized, budget-resistant cross-topology
-generalization gap, with a well-understood partial mechanism (confident lock-in), a replicated
-test-time mitigation (fine-tuning), a thorough negative result on the architecture axis, one
-confirmed modest training-time improvement (potential-based reward shaping), and an exhaustive,
-methodologically rigorous search across five further training-dynamics-level mechanisms that did
-not move the needle." Same category of contribution as the RESCO benchmark paper itself — arguably
-a stronger one now, given the sheer number of plausible-sounding fixes that were actually tried and
-ruled out with real rigor rather than assumed.
+**For a paper:** the defensible framing has shifted meaningfully with this last result. Instead of
+"federated DQN traffic control fails," the strongest available framing is now: "a characterized
+cross-topology generalization gap; a mechanism (confident lock-in); a replicated test-time
+mitigation (fine-tuning); a thorough, rigorous elimination of the architecture and training-dynamics
+axes as culprits (five mechanisms tried, one confirmed modest win); and a genuinely surprising
+positive result — that abandoning federated averaging in favor of simple sequential curriculum
+training substantially improves cross-topology generalization at matched compute, at the cost of
+measurable forgetting on earlier-seen cities." That last piece, if it continues to hold at larger
+scale, is a real, citable, non-obvious empirical finding in its own right, not just a negative
+result — potentially the headline finding of the whole project.
