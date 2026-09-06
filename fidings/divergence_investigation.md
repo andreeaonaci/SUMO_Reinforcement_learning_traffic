@@ -5575,6 +5575,29 @@ separately. Results to follow. **Until the 6-seed re-verification lands, the hon
 whole line of investigation is: a real, still-possible effect that is now known to be considerably
 weaker and less certain than first reported, not a confirmed finding.**
 
+**§86 (3x budget) re-verification result: a complete reversal -- the dramatic finding does not
+reproduce at all under the fix.**
+
+| Stage | Original (buggy) | Re-verified (fixed) |
+|---|---:|---:|
+| Random init | -8585.72 | -8585.72 |
+| After city_1 alone (30 episodes) | **-2453.37 (claimed best in whole document)** | -9403.45 |
+| After city_1+city_4 | -6207.73 | -9432.00 |
+| Final (all three cities) | -7642.36 | **-9684.23** |
+
+Under the fix, this seed's trajectory monotonically got WORSE through every training phase --
+"best-of-checkpoints" trivially reduces to the random-init stage itself, since no amount of training
+ever recovered even that starting point. Against the matched parallel-FedAvg baseline (best-round
+-9450.14, mean -10143.20): the final checkpoint is now a statistical wash, -2.5% (best-round) /
++4.5% (mean) -- nowhere near the originally-claimed +74.0%/+75.8%. **The single most dramatic number
+in this entire investigation was ENTIRELY an artifact of the RNG-isolation bug and does not
+reproduce under genuinely independent randomness.** Single seed, so this specific run's total
+collapse to "no improvement, possibly negative" shouldn't be over-read either -- but combined with
+§85's 3-seed re-verification already showing the smaller-budget effect cut roughly in half, the
+overall trajectory of the correction is unambiguous: weaker at every re-check so far, not stronger,
+not holding steady. The full 6-seed §85 re-verification (still running as of this writing) will be
+the decisive data point for whether ANY real effect survives at all.
+
 ## 90. Self-Anchoring Training with Confidence-Gated Reversion: a bespoke mechanism built directly
     for this project's own diagnosed bottleneck, per direct user request
 
