@@ -224,12 +224,26 @@ an older protocol — a clean single-seed miss. Re-tested at 6-seed rigor under 
 is what works, so optimize the global model to be fine-tune-friendly) was sound but doesn't move
 this task's numbers. Confirmed null, not deprioritized-on-a-hunch.
 
-### Item 25 — Evolution strategies (gradient-free policy optimization): queued, not yet started
+### Item 25 — Evolution strategies (gradient-free policy optimization): **inconclusive, not a
+confirmed miss**
 
-The most radical departure of the six: no Q-values, no TD-bootstrapping at all — a population of
-policies perturbed and selected by total episode reward. Sidesteps the entire diagnosed confident-
-lock-in mechanism class rather than patching around it, since there's no bootstrapped value estimate
-to become overconfident about.
+The most radical departure of the six: OpenAI-ES (`diagnostics/evolution_strategies.py`), no
+Q-values, no TD-bootstrapping at all — a population of policies perturbed and selected by total
+episode reward, reusing `DQNAgent` purely as a stateless policy container. First pilot (population=8,
+5 generations, 1 seed): generation 3 genuinely beat random init (-6581 vs. -8586, ~23% better), but
+generations 4-5 relapsed to worse-than-initial — the same "reachable but not retained" pattern
+§51-53 characterized in gradient-based training, now showing up in an optimizer with no TD-
+bootstrapping at all (interesting evidence the instability may be more about the task than about
+Q-learning specifically). But 8 individuals × 1 episode/generation is genuinely under-powered by ES
+standards (published implementations use hundreds of episodes/generation) — this screen can't
+distinguish "doesn't work" from "too small to see it work." Closed as inconclusive, not confirmed
+either way; a real test would need substantially more compute per generation.
+
+**This closes the full six-item queue (20-25) plus the two ad-hoc additions (TC-FedAvg, item 24's
+re-test) from this session.** Final scorecard: item 22 is the one confirmed, replicated win; items
+20 and 24 are confirmed clean nulls; item 21 is real-but-non-deployable; items 23 and TC-FedAvg are
+inconclusive-leaning-null at 6-seed rigor; item 25 is inconclusive due to being under-powered as
+tested.
 
 ---
 
@@ -252,15 +266,23 @@ to become overconfident about.
   (both measures near/above the bar), evaporated at 6 (mean dropped from 2.18 to 1.22), the same
   4-favor/2-reverse split as item 23, on the same two seeds.
 - Meta-learning aggregation (item 24, `--fedavg_blend`) also confirmed null at 6-seed rigor
-  (|diff|/SE 0.82/0.07) — a sound theory that doesn't move this task's numbers. Four genuinely
-  different training/aggregation-time mechanisms tried this session (replay reset, recurrent
-  memory, topology-conditioned FiLM, Reptile-style blending); exactly one (item 22) confirmed.
-- One more genuinely different mechanism hypothesis remains queued (item 25, evolution strategies)
-  and will be tested with the same rigor before it gets cited as a real finding.
+  (|diff|/SE 0.82/0.07) — a sound theory that doesn't move this task's numbers.
+- Evolution strategies (item 25) is inconclusive, not a confirmed miss — the one first-generation
+  result that beat random init didn't persist, but the pilot (8 individuals × 1 episode/generation)
+  is genuinely under-powered by ES standards, not a fair test of the paradigm yet.
+- **All six originally-queued "genuinely different paradigm" items (20-25), plus two ad-hoc
+  additions (TC-FedAvg, item 24's protocol re-test), are now done.** Five genuinely different
+  training/aggregation-time mechanisms were tried (replay reset, recurrent memory, topology-
+  conditioned FiLM, Reptile-style blending, evolution strategies); exactly one (item 22,
+  potential-based reward shaping) confirmed as a real, replicated win. This queue is closed —
+  the next open decision is what to try beyond this list, or whether to move to writing up.
 
 **For a paper:** the defensible framing remains what §58-61 of the investigation log established —
 not "federated DQN traffic control fails," but "a characterized, budget-resistant cross-topology
 generalization gap, with a well-understood partial mechanism (confident lock-in), a replicated
-test-time mitigation (fine-tuning), a thorough negative result on the architecture axis, and an
-ongoing, methodologically rigorous search for a training-dynamics-level fix." Same category of
-contribution as the RESCO benchmark paper itself.
+test-time mitigation (fine-tuning), a thorough negative result on the architecture axis, one
+confirmed modest training-time improvement (potential-based reward shaping), and an exhaustive,
+methodologically rigorous search across five further training-dynamics-level mechanisms that did
+not move the needle." Same category of contribution as the RESCO benchmark paper itself — arguably
+a stronger one now, given the sheer number of plausible-sounding fixes that were actually tried and
+ruled out with real rigor rather than assumed.

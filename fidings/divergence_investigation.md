@@ -5163,6 +5163,53 @@ deliberately small first screen (per the same "short pilot before multi-seed inv
 used for the PPO/Munchausen algorithm swap, §73), not a claim of a finding either way. Results to
 follow.
 
+**Result: noisy and non-monotonic, one generation clearly better than random init, but it didn't
+persist -- inconclusive, NOT a confirmed miss the way items 23/24 were.**
+
+| Generation | Holdout mean_reward |
+|---|---:|
+| 0 (random init) | -8585.72 |
+| 1 | -9697.92 |
+| 2 | -8563.72 |
+| 3 | **-6581.26 (best, ~23% better than init)** |
+| 4 | -9580.36 |
+| 5 | -9378.72 |
+
+Generation 3's mean reward is a real, substantial improvement over the random-initialization
+baseline -- but generations 4 and 5 relapsed to worse-than-initial performance, not a plateau at the
+improved level. **This is the same qualitative signature this document has characterized extensively
+in gradient-based training (§51-53: a good round surrounded by bad ones, "reachable but not
+retained") -- showing up here too, in an optimizer that has no TD-bootstrapping, no bootstrapped
+value estimate, and no Bellman target to become overconfident about.** That's a genuinely
+interesting negative-space observation: whatever produces this reachable-but-not-retained pattern in
+this project's training dynamics, it survives switching to a completely different, gradient-free
+optimization paradigm -- weak evidence the instability is more about the TASK (extreme cross-
+topology transfer difficulty, or intrinsic reward variance across SUMO's random traffic seeds) than
+about TD-learning/Q-learning specifically. Not strong evidence on its own (single seed, 5
+generations), but consistent with §70/§71's standing diagnosis that the binding constraint is
+retention/transfer, not any one algorithm's specific mechanics.
+
+**Why this is inconclusive rather than a clean miss:** unlike items 20-24 (which layer a change on
+top of an already-functional gradient-based training loop, so a 5-8-seed pilot at the same budget is
+a fair, adequately-powered test), ES optimizes entirely from the fitness signal itself -- 8
+individuals x 1 episode each is a very small, high-variance sample for updating a 166k-parameter
+network by textbook ES standards (published implementations often use hundreds of episodes per
+generation). This screen cannot distinguish "ES doesn't work for this task" from "this particular
+population size/generation count/sigma/lr combination is too under-powered/untuned to see ES's real
+behavior." **Item 25 closed as inconclusive, not confirmed either way** -- a legitimate stopping
+point for a first screen, not a final verdict; a real test would need a substantially larger
+population and more generations (expensive given each individual is a full SUMO episode) or a
+lower-variance fitness estimate (e.g. multiple episodes per individual, averaged) before drawing any
+conclusion.
+
+**This closes out all six originally-queued items (20-25) plus the two ad-hoc additions (TC-FedAvg,
+item 24's re-test)** from this session's "genuinely different paradigms" investigation. Final
+scorecard: item 22 (potential-based reward shaping) is the one confirmed, replicated training-time
+win; items 20 (replay-buffer reset) and 24 (Reptile-style blending) are confirmed clean nulls; items
+21 (SWA/ensemble) is a real-but-non-deployable eval-time effect; items 23 (recurrent) and TC-FedAvg
+are inconclusive-leaning-null at 6-seed rigor; item 25 (evolution strategies) is inconclusive due to
+being genuinely under-powered as tested, not evidence against the paradigm itself.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
@@ -5214,11 +5261,16 @@ one at a time, before moving to the next:**
     the current protocol and the null held up cleanly, not just deprioritized on a single old seed.
     The theory (fine-tuning is what works, §66-70, so optimize for fine-tune-ability directly) was
     sound but doesn't move this task's numbers.
-25. **Evolution strategies (gradient-free policy optimization).** The most radical departure on
-    this list: no Q-values, no TD-bootstrapping, no value-estimation step at all -- a population of
-    policies perturbed and selected by total episode reward. Sidesteps the entire diagnosed
-    confident-lock-in mechanism class (a value-estimation pathology) rather than trying to patch
-    around it from within the same paradigm. Biggest engineering lift of the six.
+25. ~~Evolution strategies (gradient-free policy optimization).~~ **DONE, §84: inconclusive, not a
+    confirmed miss.** OpenAI-ES (`diagnostics/evolution_strategies.py`), no Q-values/TD-bootstrapping
+    at all -- a population of policies perturbed and selected by total episode reward. First pilot
+    (population=8, 5 generations, 1 seed) showed one generation genuinely beat random init (-6581 vs
+    -8586, ~23% better) then relapsed -- the same "reachable but not retained" signature as §51-53's
+    gradient-based training, interesting negative-space evidence the instability may be task-level
+    rather than TD-learning-specific, but 8 individuals x 1 episode is genuinely under-powered by ES
+    standards (published implementations use hundreds of episodes/generation) -- this screen can't
+    tell "doesn't work" from "too small to see it work." Would need a substantially larger population
+    to actually resolve.
 
 **Why this order:** roughly cheapest/most diagnostic first, most novel/expensive last -- #20-22 are
 each small, targeted code changes reusing existing infrastructure (the lock-in screen, the
