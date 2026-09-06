@@ -213,16 +213,23 @@ just harder for any new intervention on this roster rather than something specif
 as null — a real, carefully-verified idea that didn't survive scrutiny, same category as items 20/
 21/23, reinforcing item 22 as the one confirmed exception rather than the start of an easy streak.
 
-### Items 24-25 — queued, not yet started
+### Item 24 — Meta-learning aggregation (Reptile-style): **confirmed null, not just a stale
+single-seed miss**
 
-- **24. Meta-learning aggregation (Reptile/MAML-style) instead of plain FedAvg.** The one lever
-  that's actually worked (fine-tuning) succeeds *despite* FedAvg optimizing for the wrong thing (a
-  good fixed policy on average, not a good starting point for adaptation) — this targets that
-  mismatch directly. (Superseded in spirit by TC-FedAvg above, built instead per direct user request
-  for a bespoke design; still worth trying on its own merits if TC-FedAvg's confirmation holds.)
-- **25. Evolution strategies (gradient-free policy optimization).** The most radical departure: no
-  Q-values, no TD-bootstrapping at all — sidesteps the entire diagnosed confident-lock-in mechanism
-  class rather than patching around it.
+Already implemented in this codebase as `--fedavg_blend` (the exact Reptile damped-update rule:
+`global_new = blend*aggregate + (1-blend)*global_old`) and already tried once (§72 pilot C) under
+an older protocol — a clean single-seed miss. Re-tested at 6-seed rigor under the CURRENT protocol
+(matching items 22/23/TC-FedAvg) rather than trusting that stale result: |diff|/SE 0.82 (best-round),
+**0.07 (mean)** — essentially zero effect, mean reward differing by 0.17%. The theory (fine-tuning
+is what works, so optimize the global model to be fine-tune-friendly) was sound but doesn't move
+this task's numbers. Confirmed null, not deprioritized-on-a-hunch.
+
+### Item 25 — Evolution strategies (gradient-free policy optimization): queued, not yet started
+
+The most radical departure of the six: no Q-values, no TD-bootstrapping at all — a population of
+policies perturbed and selected by total episode reward. Sidesteps the entire diagnosed confident-
+lock-in mechanism class rather than patching around it, since there's no bootstrapped value estimate
+to become overconfident about.
 
 ---
 
@@ -243,10 +250,13 @@ as null — a real, carefully-verified idea that didn't survive scrutiny, same c
   2 against), neither measure clears the bar cleanly. Closed, not a confirmed finding.
 - TC-FedAvg (bespoke topology-conditioning design) also closed as null at 6 seeds — promising at 3
   (both measures near/above the bar), evaporated at 6 (mean dropped from 2.18 to 1.22), the same
-  4-favor/2-reverse split as item 23, on the same two seeds. Two carefully-built, well-verified
-  ideas tried this session, neither confirmed — item 22 remains the sole confirmed training-time win.
-- Two more genuinely different mechanism hypotheses remain queued (items 24-25) and will be
-  tested with the same rigor (3+ seeds from the start) before either gets cited as a real finding.
+  4-favor/2-reverse split as item 23, on the same two seeds.
+- Meta-learning aggregation (item 24, `--fedavg_blend`) also confirmed null at 6-seed rigor
+  (|diff|/SE 0.82/0.07) — a sound theory that doesn't move this task's numbers. Four genuinely
+  different training/aggregation-time mechanisms tried this session (replay reset, recurrent
+  memory, topology-conditioned FiLM, Reptile-style blending); exactly one (item 22) confirmed.
+- One more genuinely different mechanism hypothesis remains queued (item 25, evolution strategies)
+  and will be tested with the same rigor before it gets cited as a real finding.
 
 **For a paper:** the defensible framing remains what §58-61 of the investigation log established —
 not "federated DQN traffic control fails," but "a characterized, budget-resistant cross-topology

@@ -5089,6 +5089,35 @@ collected for items 22/23/TC-FedAvg's pilots (identical config: `environments_c1
 `--algo dqn`) rather than re-running it -- only the `--fedavg_blend 0.5` treatment arm needs fresh
 compute. Results to follow.
 
+**6-seed result: a clean, decisive null -- cleaner than §81/§82's borderline-then-evaporate
+pattern, essentially zero signal on the mean measure.**
+
+| | best-round (6-seed avg) | mean (6-seed avg) |
+|---|---:|---:|
+| baseline | -9296.84 (std 436.97) | -9675.20 (std 333.64) |
+| `--fedavg_blend 0.5` | -9025.69 (std 597.80) | -9691.53 (std 358.70) |
+| \|diff\|/SE | 0.82 | **0.07** |
+
+Mean reward is essentially IDENTICAL between arms (-9675.20 vs. -9691.53, a 0.17% difference) --
+not a near-miss, a real non-effect. Best-round shows a small, non-significant lean toward the blend
+arm (4 of 6 seeds slightly better, none dramatically), consistent with noise rather than a
+suppressed real effect. **This confirms §72 pilot C's original single-seed miss was not a fluke of
+that older, since-superseded protocol** -- the modern protocol (`q_entropy_weight=0.05` baseline,
+`environments_c1_4_6`, no dueling/n_step) doesn't rescue it either. **Item 24 (meta-learning-style
+damped aggregation, `--fedavg_blend`) is now confirmed null at proper rigor, not just deprioritized
+on a stale single-seed screen -- closed.**
+
+**Reading, combined with items 20/21/23 and TC-FedAvg:** the specific mechanism Reptile-style
+blending targets -- softening how hard the global model snaps to each round's aggregate, so it
+stays a better "adaptation starting point" -- doesn't move this task's numbers, even though the
+THEORY behind it (fine-tuning is what actually works, §66-70, so a model optimized to be
+fine-tuneable should transfer that advantage) is sound and well-motivated by this project's own
+data. Four genuinely different training/aggregation-time mechanisms have now been tried in the
+item-2X series (replay reset, recurrent memory, topology-conditioned FiLM, Reptile-style blending)
+and precisely one (potential-based reward shaping, item 22) produced a real, replicated effect.
+That is itself useful evidence for the paper: the retention/transfer problem diagnosed in §70/§71
+is not close to any of the mechanisms tried here, whatever it actually is.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
@@ -5133,11 +5162,13 @@ one at a time, before moving to the next:**
     genuinely different axis (time, not space/capacity). Doesn't reliably help or hurt at this
     budget; costs real extra compute (a forward pass on every intersection every tick, no skip-on-
     explore shortcut). Closed as inconclusive, not a confirmed finding.
-24. **Meta-learning aggregation (Reptile/MAML-style) instead of plain FedAvg.** The one lever that's
-    actually worked in this whole project is fine-tuning (§66-70) -- but FedAvg optimizes the
-    global model to be a good *fixed policy on average*, not a good *starting point for local
-    adaptation*. A meta-learning objective targets the second thing directly, more aligned with
-    §70/§71's retention/transfer diagnosis than any architecture change tried so far.
+24. ~~Meta-learning aggregation (Reptile/MAML-style) instead of plain FedAvg.~~ **DONE, §83:
+    confirmed null at 6-seed rigor, |diff|/SE 0.82 (best-round), 0.07 (mean) -- essentially zero
+    effect.** Already implemented in this codebase (`--fedavg_blend`, the exact Reptile damped-
+    update rule) and already tried once at §72 pilot C under a stale protocol; re-tested here under
+    the current protocol and the null held up cleanly, not just deprioritized on a single old seed.
+    The theory (fine-tuning is what works, §66-70, so optimize for fine-tune-ability directly) was
+    sound but doesn't move this task's numbers.
 25. **Evolution strategies (gradient-free policy optimization).** The most radical departure on
     this list: no Q-values, no TD-bootstrapping, no value-estimation step at all -- a population of
     policies perturbed and selected by total episode reward. Sidesteps the entire diagnosed
