@@ -430,3 +430,58 @@ def test_potential_bonus_raises_loudly_on_missing_pressure_key():
     wrapper = _make_potential_wrapper(weight=1.0)
     with pytest.raises(KeyError):
         wrapper._potential_bonus({"nt1_stopped": 3}, "nt1")
+
+
+# ---------------------------------------------------------------------------
+# 7. HoldoutEvaluator RNG isolation: a third instance of the "leaks state to
+# code that shares its process" bug class (fidings/divergence_investigation.md
+# sec 88). HoldoutEvaluator's deterministic-eval mode reseeds Python/NumPy/
+# PyTorch's GLOBAL RNG per episode (a fixed eval_seed_base, independent of any
+# training seed) so different checkpoints get compared on the same traffic
+# pattern. That's correct for the real --parallel pipeline, where training
+# runs in isolated worker subprocesses the main process's eval never touches
+# -- but any single-process script that interleaves agent.train() and
+# evaluator.evaluate() calls (diagnostics/sequential_training.py,
+# progressive_curriculum_fedavg.py, evolution_strategies.py) had every
+# training call AFTER the first evaluate() draw from a training-seed-
+# INDEPENDENT RNG stream. Confirmed as the root cause of two different
+# --seed values producing byte-identical results from the first training
+# phase onward in progressive_curriculum_fedavg.py's first pilot.
+# ---------------------------------------------------------------------------
+
+def test_evaluator_restores_rng_state_exactly():
+    """evaluate()/evaluate_controller() must leave the caller's global RNG
+    state exactly as they found it -- evaluation should be a pure operation
+    w.r.t. that state, regardless of what its own internal deterministic-eval
+    seeding does."""
+    import random
+    import numpy as np
+    import torch
+    from federated.evaluator import HoldoutEvaluator
+
+    ev = HoldoutEvaluator.__new__(HoldoutEvaluator)
+
+    random.seed(42)
+    np.random.seed(42)
+    torch.manual_seed(42)
+
+    snap = ev._save_rng_state()
+    expected = (random.random(), np.random.rand(), torch.rand(1).item())
+    ev._restore_rng_state(snap)
+
+    # Simulate what an internal eval episode's _set_seed() call does --
+    # clobber global state to something training-seed-independent.
+    snap2 = ev._save_rng_state()
+    random.seed(999)
+    np.random.seed(999)
+    torch.manual_seed(999)
+    random.random(); np.random.rand(); torch.rand(1)
+    ev._restore_rng_state(snap2)
+
+    actual = (random.random(), np.random.rand(), torch.rand(1).item())
+    assert actual == expected, (
+        "HoldoutEvaluator must fully restore Python/NumPy/PyTorch global RNG "
+        "state after evaluation -- a caller sharing a process with training "
+        "(any single-process diagnostic script) would otherwise have its "
+        "next training call draw from a training-seed-independent stream."
+    )

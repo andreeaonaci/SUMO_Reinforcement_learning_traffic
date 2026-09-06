@@ -77,6 +77,47 @@ class HoldoutEvaluator:
         except Exception:
             pass
 
+    def _save_rng_state(self) -> dict:
+        """Snapshot Python/NumPy/PyTorch global RNG state so evaluation can be
+        made a pure operation w.r.t. that state -- see _restore_rng_state.
+        """
+        state = {"py": random.getstate(), "np": np.random.get_state()}
+        try:
+            import torch
+
+            state["torch"] = torch.get_rng_state()
+        except Exception:
+            pass
+        return state
+
+    def _restore_rng_state(self, state: dict) -> None:
+        """Undo whatever this evaluator's own deterministic-eval _set_seed()
+        calls did to the GLOBAL random/np.random/torch RNG state.
+
+        Without this, any caller that shares a process with training (e.g. a
+        single-process diagnostic script that interleaves agent.train() and
+        evaluator.evaluate() calls, unlike the real --parallel pipeline where
+        training runs in isolated worker subprocesses the main process's eval
+        never touches) has every training call AFTER the first evaluate()
+        draw from a training-seed-INDEPENDENT RNG stream (eval_seed_base is a
+        fixed constant, not derived from the training seed) -- silently
+        collapsing "N different seeds" into "N different weight
+        initializations, identical exploration/replay-sampling randomness
+        thereafter." Confirmed as the root cause of two seeds (7 and 11)
+        producing byte-identical results from the first training phase
+        onward in diagnostics/progressive_curriculum_fedavg.py's first pilot
+        (2026-09-06) -- see fidings/divergence_investigation.md sec 88.
+        """
+        random.setstate(state["py"])
+        np.random.set_state(state["np"])
+        if "torch" in state:
+            try:
+                import torch
+
+                torch.set_rng_state(state["torch"])
+            except Exception:
+                pass
+
     def _extract_metric(self, info: dict, candidates: list[str], default: float = 0.0) -> float:
         for key in candidates:
             if key in info and info[key] is not None:
@@ -346,25 +387,29 @@ class HoldoutEvaluator:
         if self.rebuild_env_each_evaluate:
             self.close()
 
-        summary = {}
-        trained_result = self._evaluate_policy("trained", model=model, seed_offset=0, episode_count=self.episodes)
-        trained_result["eval_city_name"] = self.eval_city_name
-        trained_result["is_true_holdout"] = self.is_true_holdout
-        summary["trained"] = trained_result
+        rng_snapshot = self._save_rng_state()
+        try:
+            summary = {}
+            trained_result = self._evaluate_policy("trained", model=model, seed_offset=0, episode_count=self.episodes)
+            trained_result["eval_city_name"] = self.eval_city_name
+            trained_result["is_true_holdout"] = self.is_true_holdout
+            summary["trained"] = trained_result
 
-        if self.include_baselines:
-            baseline_count = max(1, self.eval_seeds)
-            for policy_name in ["always_zero", "random", "round_robin", "fixed_time", "max_pressure"]:
-                summary[policy_name] = self._evaluate_policy(
-                    policy_name,
-                    model=None,
-                    seed_offset=self.eval_seeds,
-                    episode_count=baseline_count,
-                )
+            if self.include_baselines:
+                baseline_count = max(1, self.eval_seeds)
+                for policy_name in ["always_zero", "random", "round_robin", "fixed_time", "max_pressure"]:
+                    summary[policy_name] = self._evaluate_policy(
+                        policy_name,
+                        model=None,
+                        seed_offset=self.eval_seeds,
+                        episode_count=baseline_count,
+                    )
 
-        self.last_summary = summary
-        self._persist_summary(summary)
-        return trained_result
+            self.last_summary = summary
+            self._persist_summary(summary)
+            return trained_result
+        finally:
+            self._restore_rng_state(rng_snapshot)
 
     def evaluate_controller(self, controller_name: str) -> dict:
         if self.rebuild_env_each_evaluate:
@@ -376,18 +421,22 @@ class HoldoutEvaluator:
                 f"Unknown controller '{controller_name}'. Allowed: {sorted(allowed)}"
             )
 
-        result = self._evaluate_policy(
-            controller_name,
-            model=None,
-            seed_offset=0,
-            episode_count=self.episodes,
-        )
-        result["eval_city_name"] = self.eval_city_name
-        result["is_true_holdout"] = self.is_true_holdout
-        summary = {controller_name: result}
-        self.last_summary = summary
-        self._persist_summary(summary)
-        return result
+        rng_snapshot = self._save_rng_state()
+        try:
+            result = self._evaluate_policy(
+                controller_name,
+                model=None,
+                seed_offset=0,
+                episode_count=self.episodes,
+            )
+            result["eval_city_name"] = self.eval_city_name
+            result["is_true_holdout"] = self.is_true_holdout
+            summary = {controller_name: result}
+            self.last_summary = summary
+            self._persist_summary(summary)
+            return result
+        finally:
+            self._restore_rng_state(rng_snapshot)
 
     def close(self):
         if self._env is not None:

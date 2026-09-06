@@ -67,7 +67,16 @@ one with a genuine positive, actionable core.
 ---
 
 ## A. Sequential (non-federated) curriculum training beats parallel FedAvg — the project's
-    strongest confirmed result
+    strongest result, re-verification in progress
+
+**DO NOT CITE THE NUMBERS BELOW YET (2026-09-06): a real RNG-isolation bug was found in
+`HoldoutEvaluator` after this section was written (`divergence_investigation.md` §88) — every
+single-process diagnostic script this session (including the one that produced this section's
+numbers) interleaves training and evaluation in one process, and evaluation's internal RNG reset was
+leaking into subsequent training, silently reducing effective seed independence. Fixed at the
+source; re-verification of this section's exact numbers is running now (§89). The DIRECTION of this
+finding may well survive — see §88 for why — but treat everything below as an unconfirmed lead until
+§89 reports a result, and update this section once it does.**
 
 **The claim:** instead of training every city in parallel and averaging weights each round
 (FedAvg), fully training on one city, then continuing the SAME weights on the next city, then the

@@ -245,8 +245,11 @@ re-test) from this session.** Final scorecard: item 22 is the one confirmed, rep
 inconclusive-leaning-null at 6-seed rigor; item 25 is inconclusive due to being under-powered as
 tested.
 
-### Sequential (non-federated) curriculum training — the strongest confirmed finding of the entire
-investigation, added per direct user request after the item-2X queue closed
+### Sequential (non-federated) curriculum training — the strongest finding of the entire
+investigation, added per direct user request after the item-2X queue closed. **CORRECTION PENDING
+(2026-09-06): a real RNG-isolation bug was found in `HoldoutEvaluator` (§88 in the investigation
+log) that affected the numbers below — re-verification in progress, see §89. Do not cite these exact
+numbers in a paper draft until §89 confirms them.**
 
 Instead of training every city in parallel and averaging weights each round (FedAvg), fully train
 on city_1, then CONTINUE the same weights on city_4, then city_6 — one pass, no aggregation step at

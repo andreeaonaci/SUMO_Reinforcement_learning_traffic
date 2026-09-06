@@ -5213,6 +5213,13 @@ being genuinely under-powered as tested, not evidence against the paradigm itsel
 ## 85. Sequential (non-federated) curriculum training, per direct user request: does fully training
     on one city, then continuing on the next, then the next, generalize better than parallel FedAvg?
 
+**CORRECTION PENDING, added 2026-09-06 after this section was originally written: §88 found this
+section's numbers were generated under a real RNG-isolation bug (`HoldoutEvaluator` leaking its
+internal eval-time RNG reset into subsequent training, since this script interleaves train/eval in
+one process). Fixed in §88; re-verification launched, see §89 for the result. Do not cite the exact
+numbers below until §89 confirms them -- the direction may well hold (§88 explains why) but treat
+this section as an unconfirmed lead until then.**
+
 **2026-09-06.** Per direct user request after the item-2X queue closed out: instead of training
 every city in parallel and averaging weights each round (FedAvg), fully train on city_1, then
 CONTINUE training the exact same weights on city_4, then city_6 -- one pass, no going back, no
@@ -5374,6 +5381,9 @@ compute) -- see the following section for the design and results of that escalat
 ## 86. Sequential curriculum training at 3x budget: does the confirmed §85 finding hold at larger
     scale?
 
+**CORRECTION PENDING, same RNG-isolation bug as §85 -- see §88.** This section is single-seed
+already, so re-verification is cheap; will be re-run alongside §85's seeds. Do not cite until §89.
+
 **2026-09-06.** Escalation from §85's 6-seed confirmation, per the standing agreement to commit
 bigger compute once a lever is confirmed cheap. Design: 3x the screening budget on the same roster
 (`environments_c1_4_6`) -- `--episodes_per_city 30` for the sequential arm vs. a matched parallel-
@@ -5458,7 +5468,75 @@ cities, correct final forgetting check across all three. Real pilot launched: `-
 --focus_episodes 5 --fedavg_rounds 3 --local_episodes 2`, seeds 3/7/11 (matching the standard
 3-seed-then-6-seed screening convention). Results to follow.
 
-## Open questions / next steps
+**PCFT's 3-seed pilot result found a serious, previously-unnoticed bug affecting §85/86's own
+numbers -- see §88 below before trusting §85/86 as reported.** Seeds 7 and 11 produced BYTE-IDENTICAL
+holdout rewards from the very first training phase (warm-up on `city_4`) onward, differing only at
+"Stage 0" (the random-init eval, before any training). Investigated and fixed immediately -- full
+write-up in §88. PCFT's own 3-seed pilot was killed and will be re-run under the fix once §85/86's
+re-verification (the higher-priority fix, given how much weight that finding carries) is done.
+
+## 88. CRITICAL BUG FOUND AND FIXED: `HoldoutEvaluator` was leaking its internal RNG-reset into
+    subsequent training in every single-process diagnostic script this session -- §85/86 must be
+    re-verified before being trusted as reported
+
+**2026-09-06.** While running §87's PCFT pilot, seeds 7 and 11 produced byte-identical holdout
+rewards from the first training phase onward (only "Stage 0," the random-init eval before any
+training, differed). This is not noise -- it is a real, previously-unnoticed correctness bug.
+
+**Root cause:** `HoldoutEvaluator`'s deterministic-eval mode (`_evaluate_policy`, used by every
+holdout eval in this project) reseeds Python's/NumPy's/PyTorch's GLOBAL RNG state once per eval
+episode, via `_set_seed(self.eval_seed_base + seed_offset + ep)` -- `eval_seed_base` defaults to
+`12345`, a FIXED constant, deliberately independent of whatever training seed produced the
+checkpoint being evaluated (the whole point: compare different checkpoints on the identical traffic
+pattern). This is correct and intentional for the real `--parallel` pipeline, because training there
+runs inside isolated worker SUBPROCESSES (`federated/parallel_server.py`) that the MAIN process's
+evaluator never shares memory or RNG state with -- the eval's global-RNG reset is invisible to
+training. **But every single-process diagnostic script built this session
+(`diagnostics/sequential_training.py`, `diagnostics/progressive_curriculum_fedavg.py`,
+`diagnostics/evolution_strategies.py`) interleaves `agent.train()` and `evaluator.evaluate()` calls
+IN THE SAME PROCESS, sharing that same global RNG.** Every training call AFTER the first `evaluate()`
+call in any of these scripts was therefore drawing its exploration decisions and replay-buffer
+sampling from a training-seed-INDEPENDENT RNG stream, silently collapsing "N different `--seed`
+values" into "N different weight initializations, then identical exploration/replay-sampling
+randomness thereafter." Small/simple environments (§87's `city_4`, 3 intersections) made this
+visible as literally byte-identical results; larger/more complex ones (§85/86's `city_1`, 16
+intersections) apparently had enough behavioral sensitivity to the differing initial weights alone
+to still produce visibly different outcomes across seeds -- meaning the bug was silently present
+there too, just not obviously so from the numbers alone.
+
+**Fix, applied at the source rather than patched per-script:** `federated/evaluator.py::
+HoldoutEvaluator` gained `_save_rng_state()`/`_restore_rng_state()`, wrapping both public entry
+points (`evaluate()`, `evaluate_controller()`) in a save-before/restore-after so evaluation is now a
+pure operation with respect to global RNG state, regardless of caller. This fixes all three
+diagnostic scripts automatically (they all go through this one class) with zero changes to those
+scripts themselves, and is a safe, non-behavior-changing addition for the real `--parallel` pipeline
+(training there was never affected by this, since it runs in separate processes -- the fix is purely
+defensive there, guarding against any future refactor that might call `evaluate()` from
+training-adjacent code in the main process).
+
+**Verified two ways before trusting it:** (1) a unit test
+(`tests/test_flag_wiring.py::test_evaluator_restores_rng_state_exactly`) confirms
+Python/NumPy/PyTorch RNG state is bit-for-bit restored across a call that deliberately clobbers it
+in between, matching what a real eval episode's `_set_seed()` does; full `tests/` suite re-run, same
+3 pre-existing unrelated failures, no new regressions, 18/18 in `test_flag_wiring.py`. (2) A real
+SUMO re-run of the exact PCFT smoke scenario that exposed the bug (seeds 7 and 11, same tiny
+settings) now shows genuinely different rewards at every single stage, including the previously-
+identical warm-up-on-`city_4` step -- direct empirical confirmation the fix resolves the actual
+symptom, not just the isolated unit-test scenario.
+
+**Consequence: §85's 6-seed confirmation and §86's 3x-budget result were both generated under the
+buggy code and must be re-verified under the fix before being trusted as reported.** The DIRECTION
+of the finding may well survive (city_1, the first city trained in that experiment, is large/complex
+enough that differing initial weights alone produced visibly different outcomes across all 6
+seeds -- unlike PCFT's simple city_4), but the exact numbers, and specifically whether the
+|diff|/SE values reported in §85/86 hold once every seed's FULL trajectory (not just its initial
+weights) is genuinely independent, cannot be assumed without re-running. **Re-verification launched
+immediately following this section -- see the next entry for results. Until that lands, §85/86
+should be read as "a promising but not-yet-independently-confirmed lead," not the confirmed finding
+the earlier sections claimed.** This correction has been noted at the point where §85/86's numbers
+are first stated in `fidings/project_knowledge_summary.md` and `fidings/paper_results_summary.md` as
+well -- do not cite those numbers from a paper draft until the re-verification section below reports
+a result.
 
 ## Open questions / next steps
 
