@@ -5769,6 +5769,43 @@ different reason to believe the next value would behave qualitatively differentl
 project's standing discipline against endless post-hoc hyperparameter search on an already-tested
 idea.
 
+## 91. Four candidate "significant improvement" ideas, per direct user request after §90's anchor-
+    revert closed out inconclusive: pre-registering the plan before results are known
+
+**2026-09-07.** User asked directly what could SIGNIFICANTLY improve on what's been found so far
+(not just another modest lever), explicitly ruling out re-litigating what's already been tried.
+Four candidates proposed, each targeting the confident-lock-in/retention bottleneck via a mechanism
+genuinely different from everything tried tonight, to be tested in whatever order with the same
+discipline (implement, verify, small pilot, decide, log, move on) while unsupervised:
+
+1. **True ensemble of independently-trained models at deployment** -- different from item 21
+   (§79/SWA-ensemble), which combined temporally-adjacent checkpoints from ONE training run
+   (highly correlated, only conditionally helpful). Majority-voting genuinely independent seeds'
+   final checkpoints is a stronger form of ensembling (decorrelated errors). Cheapest to test --
+   reuses checkpoints already on disk from tonight's item 22/23/24/TC-FedAvg baseline runs (6
+   independently-trained seeds, same architecture/protocol), no new training needed.
+2. **Conservative Q-Learning (CQL), discrete form** -- an established offline-RL technique that
+   directly penalizes Q-value overestimation (logsumexp over valid actions minus the taken action's
+   Q-value), unlike `--q_entropy_weight` (penalizes ANY peaked distribution, including confidence in
+   the CORRECT action). Targets confident lock-in from the loss-function level rather than a
+   post-hoc correction (unlike §90's anchor-revert).
+3. **Distributional RL (QR-DQN-style)** -- learn a distribution over returns per action instead of a
+   scalar Q-value. Structurally resists the exact failure mode (collapsing to an overconfident point
+   estimate) rather than correcting for it after the fact.
+4. **Proper meta-learning aggregation (real MAML)** -- item 24 tested `--fedavg_blend`, a crude
+   single-hyperparameter proxy for "optimize for fine-tuneability," and it came back null (§83).
+   Actual MAML computes gradients through the fine-tuning process itself, directly optimizing the
+   shared initialization for the one thing proven to work here (fine-tuning, §66-70) -- a more
+   principled version of an idea only weakly tested so far. Highest implementation complexity
+   (second-order gradients), attempted last if time/energy permits.
+
+**Order chosen: 1 (ensemble) -> 2 (CQL) -> 3 (distributional RL) -> 4 (MAML)**, roughly cheapest/
+fastest-signal first. Item 1 launched using existing checkpoints (no training needed, 30-episode
+confirmatory rigor directly since no new compute is being spent). Item 2 implemented
+(`agents/dqn.py`'s `cql_weight` flag, verified via unit test + real SUMO smoke run, see the commit
+history) and its 3-seed pilot (`--cql_weight 0.1`, matching the standard `environments_c1_4_6`
+protocol) launched. Results to follow for both.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
