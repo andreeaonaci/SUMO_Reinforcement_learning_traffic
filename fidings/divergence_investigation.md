@@ -5118,6 +5118,51 @@ and precisely one (potential-based reward shaping, item 22) produced a real, rep
 That is itself useful evidence for the paper: the retention/transfer problem diagnosed in §70/§71
 is not close to any of the mechanisms tried here, whatever it actually is.
 
+## 84. Item 25 (evolution strategies) implemented, verified, small first pilot launched -- the last
+    of the six queued "genuinely different paradigm" items
+
+**2026-09-06.** The most radical departure of the six: no replay buffer, no Bellman backup, no
+bootstrapped value estimate at all -- sidesteps the confident-lock-in mechanism class (§32-34/
+51-57) entirely instead of patching around it, since there's nothing to become overconfident about
+when there's no TD target being bootstrapped.
+
+**Implementation:** `diagnostics/evolution_strategies.py`, a standalone script rather than a new
+`agents/*.py` class -- unlike PPO/Munchausen/recurrent/TC-FedAvg, ES doesn't need a training loop
+integrated with the federated round/replay-buffer machinery at all. Reuses `NeighborAttentionQNetwork`/
+`DQNAgent` purely as a STATELESS POLICY CONTAINER: a policy is just a `state_dict`, "acting" is
+`DQNAgent.act(obs, explore=False)` (this project's standard pure-argmax eval convention, §35)
+against whatever weights happen to be loaded -- `.train()`/`.optimize()` are never called anywhere
+in this script. Optimizer is OpenAI-ES (Salimans et al. 2017): each generation, sample N Gaussian
+perturbations of the current mean weights, evaluate each on one training city for one full episode
+(reusing `build_federated_env`/`ActionMaskPadder` directly, no new environment code), rank-normalize
+the rewards (Wierstra et al. 2014 fitness shaping, robust to reward scale/outliers), and move the
+mean a step in the reward-weighted direction of the perturbations -- no gradients through the
+network at all. Also reuses `make_holdout_evaluator` unchanged for periodic true-holdout eval, since
+a `DQNAgent` loaded with the current mean weights is a completely ordinary evaluator input.
+
+**Verified before spending real compute:** a pure-Python round-trip test confirmed `_flatten`/
+`_unflatten` (state_dict <-> flat parameter vector) is numerically exact, and that a perturbed flat
+vector reloads into a fresh agent without error. Then a real, tiny SUMO smoke run (`--population 2
+--generations 1 --eval_episodes 1`) completed cleanly end to end -- initial random-weights holdout
+reward -8094.72, one generation later -7850.39 (a small move in the right direction, not meaningful
+on 2 individuals but confirming the mechanism actually updates weights and that the update doesn't
+break anything). Also cheap: ~15-20s per individual rollout, ~30s per holdout eval on this roster --
+noticeably cheaper than the gradient-based items, since there's no backward pass and no replay
+buffer to fill before a signal appears.
+
+**One informative side observation from the smoke run, not a bug:** the Q-gap diagnostic
+(`mean |Q(top1)-Q(top2)|`) exploded from ~0.05-0.1 (generation 0, random init, matching typical
+values seen elsewhere in this document) to 100-1200+ after just one generation of unconstrained
+parameter-space perturbation. Nothing in ES bounds output scale the way a bounded loss function
+(Huber loss + reward clipping, in the gradient-based path) implicitly does -- worth watching in the
+real pilot as a possible instability mode specific to this optimizer, not seen in any gradient-based
+item in this document.
+
+**Pilot launched:** population=8, generations=5, single seed (3) -- a properly-sized but still
+deliberately small first screen (per the same "short pilot before multi-seed investment" pattern
+used for the PPO/Munchausen algorithm swap, §73), not a claim of a finding either way. Results to
+follow.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
