@@ -192,8 +192,8 @@ split, not a clean win. Also costs real extra compute (a forward pass on every i
 tick, no skip-on-explore shortcut). Closed as inconclusive.
 
 ### TC-FedAvg (Topology-Conditioned FedAvg) — a bespoke design, added mid-queue per direct user
-request for something purpose-built rather than an existing named method: **promising, 6-seed
-confirmation pending**
+request for something purpose-built rather than an existing named method: **null at 6-seed rigor,
+another few-seed mirage**
 
 Motivated by the accumulated evidence that every AGGREGATION-strategy tweak tried in this project
 came back null and federation-vs-no-federation makes no difference either — the problem was never
@@ -203,9 +203,15 @@ differently for a 3-way vs. 5-way intersection. A small shared hypernetwork
 fraction, mean/max hop distance — computable for any intersection, including one never trained on)
 to a FiLM scale/shift on the fused representation. FedAvg itself is completely unchanged; only the
 shared function being averaged gains topology-awareness. Zero-initialized so it's an exact identity
-transform at the start of training. At 3 seeds: |diff|/SE 1.98 (best-round), 2.18 (mean), 2 of 3
-seeds clearly favoring it and the third roughly flat — the same qualitative shape as item 22's
-confirmed result, not item 23's direction-disagreeing one. 6-seed confirmation in progress.
+transform at the start of training.
+
+Looked promising at 3 seeds (|diff|/SE 1.98 best-round, 2.18 mean) but **did not hold at 6**:
+1.63 (best-round), **1.22 (mean, down from 2.18)**. 4 of 6 seeds favor it, 2 reverse it — the exact
+same two seeds (11, 21) that also hurt item 23's recurrent variant, suggesting those two draws are
+just harder for any new intervention on this roster rather than something specific to either idea.
+`topo`'s own seed-to-seed standard deviation roughly doubled vs. baseline on both measures. Closed
+as null — a real, carefully-verified idea that didn't survive scrutiny, same category as items 20/
+21/23, reinforcing item 22 as the one confirmed exception rather than the start of an easy streak.
 
 ### Items 24-25 — queued, not yet started
 
@@ -235,9 +241,10 @@ confirmed result, not item 23's direction-disagreeing one. 6-seed confirmation i
   effect relative to the baseline gap, not a fix.
 - Recurrent policy (item 23) is inconclusive — a real direction split across seeds (4 favor it,
   2 against), neither measure clears the bar cleanly. Closed, not a confirmed finding.
-- TC-FedAvg (bespoke topology-conditioning design) is the most promising lever found so far,
-  pending its 6-seed confirmation — same consistent-direction shape as item 22's confirmed win,
-  not item 23's inconsistent one.
+- TC-FedAvg (bespoke topology-conditioning design) also closed as null at 6 seeds — promising at 3
+  (both measures near/above the bar), evaporated at 6 (mean dropped from 2.18 to 1.22), the same
+  4-favor/2-reverse split as item 23, on the same two seeds. Two carefully-built, well-verified
+  ideas tried this session, neither confirmed — item 22 remains the sole confirmed training-time win.
 - Two more genuinely different mechanism hypotheses remain queued (items 24-25) and will be
   tested with the same rigor (3+ seeds from the start) before either gets cited as a real finding.
 

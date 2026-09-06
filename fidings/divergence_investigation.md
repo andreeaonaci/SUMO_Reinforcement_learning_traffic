@@ -5029,6 +5029,31 @@ seed swinging wildly in one direction while another swings the other way the way
 the profile that has actually replicated in this document before. **Extending to 6 seeds (17/21/25)
 immediately, per the same standing rule, before calling this confirmed.**
 
+**6-seed result: does NOT confirm -- another instance of this document's own few-seed-mirage
+pattern, closing TC-FedAvg out as null, not a real finding.**
+
+| | best-round (6-seed avg) | mean (6-seed avg) |
+|---|---:|---:|
+| baseline | -9296.84 (std 436.97) | -9675.20 (std 333.64) |
+| `--algo topo` | -8605.13 (std 844.86) | -9288.37 (std 628.03) |
+| \|diff\|/SE | 1.63 (down from 1.98 at 3 seeds) | **1.22 (down from 2.18 at 3 seeds)** |
+
+Per-seed best-round direction: 3/7/17/25 favor `topo` (two substantially: seed 7 -9141->-7445, seed
+25 -8997->-7873); 11/21 are WORSE than their baseline counterpart (-9009->-9088, -9019->-9383).
+**4 of 6 favor it, 2 of 6 reverse -- the exact same split item 23 showed, on the exact same two
+seeds (11 and 21)** -- worth noting as a pattern (these two seeds may simply be harder training
+draws for ANY new intervention on this roster, not specific to either idea) but not worth chasing
+further right now. `topo`'s own STANDARD DEVIATION roughly doubled vs. baseline on both measures
+(437->845 best-round, 334->628 mean) -- the topology-conditioning layer looks like it adds variance
+across training seeds without a reliable net direction, the same reading item 23's closeout reached
+for recurrence. **Verdict: TC-FedAvg does not replicate as a confirmed finding. Closed as null.**
+This is a real, if disappointing, result: two genuinely different, carefully-designed, well-verified
+mechanism-level ideas (recurrent memory, topology-conditioned FiLM) were built and tested this
+session with full rigor, and neither survived 6-seed scrutiny -- consistent with this document's
+broader pattern that most single-lever interventions at this roster/budget do not produce a real,
+replicable effect, and reinforcing potential-based reward shaping (item 22) as the one confirmed
+exception so far, not the start of an easy streak.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
