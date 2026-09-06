@@ -95,7 +95,10 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
                 algo: str = "dqn", d_model: int = 128, n_heads: int = 4,
                 munchausen_temp: float = 0.03, munchausen_alpha: float = 0.9,
                 use_batchnorm: bool = False, activation: str = "relu",
-                encoder_depth: int = 2, n_attn_layers: int = 1):
+                encoder_depth: int = 2, n_attn_layers: int = 1,
+                anchor_revert: bool = False, anchor_warmup_calls: int = 100,
+                anchor_check_every: int = 50, anchor_qgap_growth_threshold: float = 3.0,
+                anchor_pullback_beta: float = 0.5):
     """Single place that constructs the local/global agent -- DQNAgent
     (default, unchanged), PPOAgent (--algo ppo, agents/ppo.py), or
     MunchausenDQNAgent (--algo munchausen, agents/munchausen_dqn.py; see
@@ -180,6 +183,11 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
         activation=activation,
         encoder_depth=encoder_depth,
         n_attn_layers=n_attn_layers,
+        anchor_revert=anchor_revert,
+        anchor_warmup_calls=anchor_warmup_calls,
+        anchor_check_every=anchor_check_every,
+        anchor_qgap_growth_threshold=anchor_qgap_growth_threshold,
+        anchor_pullback_beta=anchor_pullback_beta,
     )
 
 
@@ -922,6 +930,11 @@ def main(args):
             encoder_depth=args.encoder_depth,
             n_attn_layers=args.n_attn_layers,
             lockin_reset_std_threshold=args.lockin_reset_std_threshold,
+            anchor_revert=args.anchor_revert,
+            anchor_warmup_calls=args.anchor_warmup_calls,
+            anchor_check_every=args.anchor_check_every,
+            anchor_qgap_growth_threshold=args.anchor_qgap_growth_threshold,
+            anchor_pullback_beta=args.anchor_pullback_beta,
         )
         history = server.run(
             rounds=args.rounds,
@@ -1161,6 +1174,34 @@ if __name__ == "__main__":
                               "(sec 41/42, tested, null), which resets exploration, not the buffer. "
                               "0.0 (default) is an exact no-op. --parallel only (needs server->"
                               "worker signaling the sequential path doesn't have wired up for this).")
+    parser.add_argument("--anchor_revert", action="store_true",
+                         help="Self-Anchoring Training with Confidence-Gated Reversion (bespoke "
+                              "design targeting this project's central retention/forgetting "
+                              "problem, see fidings/divergence_investigation.md). Each federated "
+                              "round, snapshots the round-start weights as an anchor, tracks a "
+                              "running Q-gap EMA during that round's local training (reusing "
+                              "sec 32-34/53's finding that Q-gap growth is the signature of "
+                              "confident lock-in), and blends weights partway back toward the "
+                              "anchor if Q-gap grows past --anchor_qgap_growth_threshold times its "
+                              "round-start baseline -- a partial pull-back, not a hard reset, so "
+                              "local training doesn't lose all forward progress. No extra forward "
+                              "pass or holdout eval needed (reuses q_values already computed for "
+                              "the TD loss). Default off (exact no-op). --algo dqn only for now.")
+    parser.add_argument("--anchor_warmup_calls", type=int, default=100,
+                         help="optimize() calls at the start of each round used to establish that "
+                              "round's baseline Q-gap before checking for reversion. Ignored "
+                              "unless --anchor_revert.")
+    parser.add_argument("--anchor_check_every", type=int, default=50,
+                         help="How often (in optimize() calls, after warm-up) to check the "
+                              "reversion trigger. Ignored unless --anchor_revert.")
+    parser.add_argument("--anchor_qgap_growth_threshold", type=float, default=3.0,
+                         help="Trigger a pull-back when the recent Q-gap EMA exceeds this many "
+                              "times the round's own baseline Q-gap. Ignored unless "
+                              "--anchor_revert.")
+    parser.add_argument("--anchor_pullback_beta", type=float, default=0.5,
+                         help="Blend fraction toward the anchor on a triggered pull-back "
+                              "(0=no-op, 1=hard reset to round-start weights). Ignored unless "
+                              "--anchor_revert.")
     parser.add_argument("--eval_every",            type=int,   default=1)
     parser.add_argument("--eval_episodes",         type=int,   default=5)
     parser.add_argument("--log_loss_every_steps",  type=int,   default=50,

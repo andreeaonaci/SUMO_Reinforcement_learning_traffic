@@ -5575,6 +5575,67 @@ separately. Results to follow. **Until the 6-seed re-verification lands, the hon
 whole line of investigation is: a real, still-possible effect that is now known to be considerably
 weaker and less certain than first reported, not a confirmed finding.**
 
+## 90. Self-Anchoring Training with Confidence-Gated Reversion: a bespoke mechanism built directly
+    for this project's own diagnosed bottleneck, per direct user request
+
+**2026-09-06.** User asked directly for a genuinely new solution targeting this project's own
+diagnosed bottleneck -- not an adaptation of an existing continual-learning method (EWC, etc.) --
+after the "search is easy, retention is hard" diagnosis was laid out plainly: a good policy is
+reachable but not retained, a pattern now observed identically across gradient-based DQN training
+(§32-34/51-53), a completely different gradient-free optimizer (evolution strategies, §84), and
+sequential curriculum training (§85/86, before its own correction). Reward-signal interventions
+(item 22) improve the AVERAGE quality of what's learned but don't touch retention at all, capping
+their ceiling regardless of further tuning.
+
+**Design:** give each federated round's local training an active memory of how it started, and a
+cheap, already-validated signal to detect drift toward the exact failure mode this document has
+characterized -- then pull back automatically, DURING training, rather than only picking a good
+checkpoint after the fact (§21's SWA/ensemble) or hoping a differently-shaped optimizer avoids the
+problem (§84's evolution strategies, which hit the identical symptom anyway).
+
+1. At the start of every `train()` call (= every federated round), snapshot the current weights as
+   `anchor_state`.
+2. During that round's `optimize()` calls, track a running EMA of the batch's mean Q-gap
+   (top1-top2 masked Q-value gap) -- reusing `q_values` already computed for the TD loss, no extra
+   forward pass. The first `--anchor_warmup_calls` calls establish the round's own BASELINE Q-gap
+   (frozen once warm-up ends), rather than using a fixed magic-number threshold that would need
+   re-tuning per checkpoint/scale (§84's smoke run showed Q-gap can range from ~0.05 to 1000+
+   depending on how unconstrained the optimizer is) -- self-calibrating per round instead.
+3. If the recent Q-gap EMA exceeds `--anchor_qgap_growth_threshold` (default 3x) times that round's
+   own baseline, blend the current weights PARTWAY back toward the round-start anchor
+   (`--anchor_pullback_beta`, default 0.5) -- a partial pull-back, not a hard reset, so local
+   training doesn't lose all forward progress even while resisting the lock-in slide.
+
+**Why this is genuinely different from everything already tried:** item 21 (SWA/ensemble) only
+combines checkpoints AFTER training, passively, no in-the-loop correction. Item 20 (replay-buffer
+reset) targeted a different hypothesized cause (stale self-generated data) and came back null. TC-
+FedAvg and item 24 target architecture/aggregation, not the moment-to-moment training dynamics
+within a single city's local training. Recurrent memory gives the network more INPUT context but no
+mechanism to notice or correct its own drift. This is the first mechanism in the entire investigation
+that actively monitors its own confidence signature and self-corrects mid-training, using a signal
+(Q-gap growth) this project's own §32-34/53 already validated as the specific marker of the
+pathology being targeted -- not a borrowed heuristic.
+
+**Implementation:** `agents/dqn.py::DQNAgent` gained `anchor_revert` (default False, exact no-op)
+and four tuning parameters, plus `_track_qgap_and_maybe_revert()`/`_apply_anchor_pullback()`.
+Wired through `federated/parallel_server.py` and `experiments/federated_training.py` as
+`--anchor_revert`/`--anchor_warmup_calls`/`--anchor_check_every`/`--anchor_qgap_growth_threshold`/
+`--anchor_pullback_beta`, `--algo dqn` only for now (RecurrentDQNAgent/TopologyConditionedDQNAgent
+override `optimize()` themselves and would need separate wiring, out of scope for this first test).
+
+**Verified before spending real compute:** a pure-Python test confirmed `train()` correctly
+establishes and stores an anchor, the pullback math is exactly correct (beta=0.5 toward a
+zero-vector anchor exactly halves the weights), and `anchor_revert=False` remains a true no-op.
+Then a real SUMO smoke run (`--rounds 1`, deliberately aggressive `--anchor_qgap_growth_threshold
+1.5`, matching how item 20's own smoke test used a deliberately-easy-to-trigger threshold) confirmed
+the mechanism fires repeatedly and logs correctly across all three cities, no crashes. Full `tests/`
+suite re-run: same 3 pre-existing unrelated failures, no new regressions.
+
+**Pilot launched** at the DEFAULT (moderate) threshold, matching item 22/23/24's exact protocol for
+direct comparability (`environments_c1_4_6 --rounds 5 --local_episodes 2 --pad_to_true_holdout
+--q_entropy_weight 0.05`), seeds 3/7/11 -- a first, deliberately small screen per the user's own
+request to check whether it's worth a larger commitment before doing so. Results to follow.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit

@@ -140,6 +140,11 @@ class DQNAgent:
         n_attn_layers: int = 1,
         recurrent: bool = False,
         topology_conditioned: bool = False,
+        anchor_revert: bool = False,
+        anchor_warmup_calls: int = 100,
+        anchor_check_every: int = 50,
+        anchor_qgap_growth_threshold: float = 3.0,
+        anchor_pullback_beta: float = 0.5,
     ):
         self.own_dim = own_dim
         self.neighbor_dim = neighbor_dim
@@ -255,6 +260,33 @@ class DQNAgent:
         # (default, exact no-op -- optimize() skips the entropy term
         # entirely rather than just multiplying by zero).
         self.q_entropy_weight = float(q_entropy_weight)
+        # Self-Anchoring Training with Confidence-Gated Reversion (bespoke design,
+        # fidings/divergence_investigation.md's "genuinely new solution for our own
+        # bottleneck" request): every mechanism tested against this project's
+        # central retention/forgetting problem (recurrent memory, topology-
+        # conditioning, Reptile-style blending, evolution strategies, sequential
+        # curriculum training) shares one symptom -- a good policy is reachable but
+        # not retained, matching §53's finding that the one good escape round ever
+        # found had a Q-gap 30-50x lower than its confidently-locked neighbors. This
+        # gives EACH ROUND's local training an active memory of how it started and a
+        # cheap, already-validated signal (Q-gap growth, no extra forward pass or
+        # holdout eval needed) to detect drift toward that exact lock-in pathology --
+        # then partially pulls the weights back toward the round-start anchor rather
+        # than letting local training degrade all the way to a confidently-wrong
+        # policy before the next round's aggregation ever sees it. anchor_revert
+        # defaults to False (exact no-op); the anchor itself is re-established fresh
+        # at the start of every train() call (see train()'s own reset of
+        # self._anchor_state below), not carried across rounds, so this doesn't
+        # interact with anything cross-round (aggregation, --resume, etc.).
+        self.anchor_revert = bool(anchor_revert)
+        self.anchor_warmup_calls = int(anchor_warmup_calls)
+        self.anchor_check_every = max(1, int(anchor_check_every))
+        self.anchor_qgap_growth_threshold = float(anchor_qgap_growth_threshold)
+        self.anchor_pullback_beta = float(anchor_pullback_beta)
+        self._anchor_state: Optional[Dict[str, "torch.Tensor"]] = None
+        self._anchor_qgap_ema: Optional[float] = None
+        self._recent_qgap_ema: Optional[float] = None
+        self._anchor_optimize_calls = 0
         logger.info(
             "own_dim=%d neighbor_dim=%d action_dim=%d k_max=%d eps_decay=%.0f",
             self.own_dim, self.neighbor_dim, self.action_dim, self.k_max, self.eps_decay,
@@ -554,7 +586,74 @@ class DQNAgent:
             self.q_target.load_state_dict(self.q.state_dict())
             self.q_target.eval()  # load_state_dict() doesn't touch train/eval mode
 
+        if self.anchor_revert:
+            # Reuses q_values/action_mask already computed above for the TD loss --
+            # no extra forward pass. See __init__'s comment for the full design.
+            self._track_qgap_and_maybe_revert(q_values, action_mask)
+
         return float(loss.item())
+
+    # ------------------------------------------------------------------
+    # Self-Anchoring Training with Confidence-Gated Reversion
+    # ------------------------------------------------------------------
+
+    def _track_qgap_and_maybe_revert(self, q_values: "torch.Tensor", action_mask: "torch.Tensor") -> None:
+        with torch.no_grad():
+            masked = _mask_q(q_values, action_mask)
+            if masked.shape[1] < 2:
+                return
+            top2 = torch.topk(masked, k=2, dim=1).values
+            gaps = top2[:, 0] - top2[:, 1]
+            finite = gaps[torch.isfinite(gaps)]
+            if finite.numel() == 0:
+                return
+            batch_qgap = float(finite.mean().item())
+
+        self._anchor_optimize_calls += 1
+        decay = 0.05
+        if self._recent_qgap_ema is None:
+            self._recent_qgap_ema = batch_qgap
+        else:
+            self._recent_qgap_ema = (1.0 - decay) * self._recent_qgap_ema + decay * batch_qgap
+
+        if self._anchor_qgap_ema is None:
+            # Still in the warm-up window that establishes THIS round's baseline
+            # Q-gap -- don't check for reversion until it's frozen.
+            if self._anchor_optimize_calls >= self.anchor_warmup_calls:
+                self._anchor_qgap_ema = self._recent_qgap_ema
+            return
+
+        if self._anchor_optimize_calls % self.anchor_check_every != 0:
+            return
+
+        if (
+            self._anchor_qgap_ema > 1e-8
+            and self._recent_qgap_ema > self.anchor_qgap_growth_threshold * self._anchor_qgap_ema
+            and self._anchor_state is not None
+        ):
+            self._apply_anchor_pullback()
+
+    def _apply_anchor_pullback(self) -> None:
+        """Blend current weights partway back toward this round's start-of-round
+        anchor -- a partial pull-back, not a hard reset, so local training doesn't
+        lose all forward progress even while resisting the confident-lock-in slide
+        the Q-gap growth just signaled."""
+        beta = self.anchor_pullback_beta
+        current = self.q.state_dict()
+        blended = {
+            k: beta * self._anchor_state[k].to(current[k].device, current[k].dtype) + (1.0 - beta) * current[k]
+            for k in current
+        }
+        self.q.load_state_dict(blended)
+        logger.info(
+            "Anchor-revert pullback: recent Q-gap %.4f exceeded %.1fx this round's "
+            "baseline %.4f -- blended %.0f%% back toward round-start weights.",
+            self._recent_qgap_ema, self.anchor_qgap_growth_threshold, self._anchor_qgap_ema,
+            beta * 100,
+        )
+        # Reset tracking off the post-pullback state so the same spike doesn't
+        # immediately re-trigger before the network has had a chance to move.
+        self._recent_qgap_ema = self._anchor_qgap_ema
 
     # ------------------------------------------------------------------
     # Persistence
@@ -649,6 +748,17 @@ class DQNAgent:
         total_steps = 0
         all_losses: List[float] = []   # across every episode this call
         action_counts: Counter = Counter()   # {action_index: times_taken}, this call
+
+        if self.anchor_revert:
+            # Fresh anchor every train() call (= every federated round, or every
+            # solo-training call for the diagnostic scripts) -- deliberately NOT
+            # carried across calls, so this has no cross-round state to reason
+            # about (no interaction with aggregation, --resume, etc.). See
+            # __init__'s comment for the full design.
+            self._anchor_state = {k: v.detach().clone() for k, v in self.q.state_dict().items()}
+            self._anchor_qgap_ema = None
+            self._recent_qgap_ema = None
+            self._anchor_optimize_calls = 0
 
         for ep in range(1, episodes + 1):
             obs_dict = env.reset()

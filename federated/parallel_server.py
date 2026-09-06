@@ -106,6 +106,11 @@ def _client_worker(
     activation: str = "relu",
     encoder_depth: int = 2,
     n_attn_layers: int = 1,
+    anchor_revert: bool = False,
+    anchor_warmup_calls: int = 100,
+    anchor_check_every: int = 50,
+    anchor_qgap_growth_threshold: float = 3.0,
+    anchor_pullback_beta: float = 0.5,
 ):
     """Runs inside its own process for the ENTIRE training run.
 
@@ -224,6 +229,10 @@ def _client_worker(
                 d_model=d_model, n_heads=n_heads,
                 use_batchnorm=use_batchnorm, activation=activation,
                 encoder_depth=encoder_depth, n_attn_layers=n_attn_layers,
+                anchor_revert=anchor_revert, anchor_warmup_calls=anchor_warmup_calls,
+                anchor_check_every=anchor_check_every,
+                anchor_qgap_growth_threshold=anchor_qgap_growth_threshold,
+                anchor_pullback_beta=anchor_pullback_beta,
             )
 
         while True:
@@ -359,6 +368,11 @@ class ParallelFederatedServer:
         encoder_depth: int = 2,
         n_attn_layers: int = 1,
         lockin_reset_std_threshold: float = 0.0,
+        anchor_revert: bool = False,
+        anchor_warmup_calls: int = 100,
+        anchor_check_every: int = 50,
+        anchor_qgap_growth_threshold: float = 3.0,
+        anchor_pullback_beta: float = 0.5,
     ):
         # item 20 (fidings sec 78): if >0, a round whose eval std_reward
         # falls below this threshold (the same std<50 screen already used
@@ -376,6 +390,11 @@ class ParallelFederatedServer:
         self.n_attn_layers = n_attn_layers
         self.use_batchnorm = use_batchnorm
         self.activation = activation
+        self.anchor_revert = anchor_revert
+        self.anchor_warmup_calls = anchor_warmup_calls
+        self.anchor_check_every = anchor_check_every
+        self.anchor_qgap_growth_threshold = anchor_qgap_growth_threshold
+        self.anchor_pullback_beta = anchor_pullback_beta
         self.global_model = global_model
         self.evaluator = evaluator
         self.checkpoint_dir = checkpoint_dir
@@ -480,6 +499,9 @@ class ParallelFederatedServer:
                     self.munchausen_temp, self.munchausen_alpha,
                     self.use_batchnorm, self.activation,
                     self.encoder_depth, self.n_attn_layers,
+                    self.anchor_revert, self.anchor_warmup_calls,
+                    self.anchor_check_every, self.anchor_qgap_growth_threshold,
+                    self.anchor_pullback_beta,
                 ),
                 daemon=True,
             )
