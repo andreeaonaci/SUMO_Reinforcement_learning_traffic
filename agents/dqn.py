@@ -146,6 +146,8 @@ class DQNAgent:
         anchor_qgap_growth_threshold: float = 3.0,
         anchor_pullback_beta: float = 0.5,
         cql_weight: float = 0.0,
+        distributional: bool = False,
+        n_quantiles: int = 21,
     ):
         self.own_dim = own_dim
         self.neighbor_dim = neighbor_dim
@@ -169,6 +171,8 @@ class DQNAgent:
             n_attn_layers=n_attn_layers,
             recurrent=recurrent,
             topology_conditioned=topology_conditioned,
+            distributional=distributional,
+            n_quantiles=n_quantiles,
         )
         self.q = NeighborAttentionQNetwork(**net_kwargs).to(self.device)
         self.q_target = NeighborAttentionQNetwork(**net_kwargs).to(self.device)

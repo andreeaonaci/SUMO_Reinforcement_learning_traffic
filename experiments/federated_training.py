@@ -40,6 +40,7 @@ from agents.ppo import PPOAgent
 from agents.munchausen_dqn import MunchausenDQNAgent
 from agents.recurrent_dqn import RecurrentDQNAgent
 from agents.topology_conditioned_dqn import TopologyConditionedDQNAgent
+from agents.qrdqn import QRDQNAgent
 from federated.utils import compute_eps_decay, set_seed
 
 run_dir = None
@@ -98,7 +99,8 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
                 encoder_depth: int = 2, n_attn_layers: int = 1,
                 anchor_revert: bool = False, anchor_warmup_calls: int = 100,
                 anchor_check_every: int = 50, anchor_qgap_growth_threshold: float = 3.0,
-                anchor_pullback_beta: float = 0.5, cql_weight: float = 0.0):
+                anchor_pullback_beta: float = 0.5, cql_weight: float = 0.0,
+                n_quantiles: int = 21):
     """Single place that constructs the local/global agent -- DQNAgent
     (default, unchanged), PPOAgent (--algo ppo, agents/ppo.py), or
     MunchausenDQNAgent (--algo munchausen, agents/munchausen_dqn.py; see
@@ -164,6 +166,21 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
             dueling=dueling,
             n_step=n_step,
             q_entropy_weight=q_entropy_weight,
+        )
+    if algo == "qrdqn":
+        return QRDQNAgent(
+            own_dim=own_dim,
+            neighbor_dim=neighbor_dim,
+            k_max=k_max,
+            action_dim=action_dim,
+            eps_decay=eps_decay,
+            head_fix=head_fix,
+            tau=tau,
+            target_update=target_update,
+            d_model=d_model, n_heads=n_heads,
+            mu=mu,
+            n_step=n_step,
+            n_quantiles=n_quantiles,
         )
     return DQNAgent(
         own_dim=own_dim,
@@ -937,6 +954,7 @@ def main(args):
             anchor_qgap_growth_threshold=args.anchor_qgap_growth_threshold,
             anchor_pullback_beta=args.anchor_pullback_beta,
             cql_weight=args.cql_weight,
+            n_quantiles=args.n_quantiles,
         )
         history = server.run(
             rounds=args.rounds,
@@ -1076,7 +1094,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--local_episodes",        type=int,   default=1)
     parser.add_argument("--algo", type=str, default="dqn",
-                         choices=["dqn", "ppo", "munchausen", "recurrent", "topo"],
+                         choices=["dqn", "ppo", "munchausen", "recurrent", "topo", "qrdqn"],
                          help="Local training algorithm. 'dqn' (default): agents/dqn.py, "
                               "unchanged. 'ppo': agents/ppo.py, an on-policy actor-critic with "
                               "an entropy-regularized stochastic policy. 'munchausen': "
@@ -1213,6 +1231,16 @@ if __name__ == "__main__":
                               "pathology (sec 32-34) from a different mechanism than anything tried "
                               "in the item-2X series. 0.0 (default) is an exact no-op. --algo dqn "
                               "only for now.")
+    parser.add_argument("--n_quantiles", type=int, default=21,
+                         help="Number of quantiles for --algo qrdqn (Dabney et al. 2017 "
+                              "distributional RL -- learns a distribution over returns per action "
+                              "instead of a scalar Q-value, structurally resisting this project's "
+                              "confident-lock-in pathology since a distributional value function "
+                              "always keeps a spread, even for a confidently-preferred action). "
+                              "Masked-head aggregation is forced off under qrdqn (the distributional "
+                              "head's final layer is action_dim*n_quantiles wide, not action_dim -- "
+                              "plain full-state FedAvg is used instead, same fallback as ppo). "
+                              "Ignored for every other --algo.")
     parser.add_argument("--eval_every",            type=int,   default=1)
     parser.add_argument("--eval_episodes",         type=int,   default=5)
     parser.add_argument("--log_loss_every_steps",  type=int,   default=50,

@@ -129,16 +129,33 @@ class NeighborAttentionQNetwork(nn.Module):
         n_attn_layers: int = 1,
         recurrent: bool = False,
         topology_conditioned: bool = False,
+        distributional: bool = False,
+        n_quantiles: int = 21,
     ):
         super().__init__()
         if dueling and actor_critic:
             raise ValueError("dueling and actor_critic are mutually exclusive head types.")
+        if distributional and (dueling or actor_critic):
+            raise ValueError("distributional is mutually exclusive with dueling/actor_critic.")
         self.k_max = k_max
         self.d_model = d_model
         self.n_hops = n_hops
         self.head_fix = head_fix
         self.dueling = dueling
         self.actor_critic = actor_critic
+        self.action_dim = action_dim
+        # Distributional RL (QR-DQN, Dabney et al. 2017): learn a distribution over
+        # returns per action instead of a scalar Q-value -- structurally resists the
+        # confident-lock-in pathology (§32-34) this project has characterized
+        # extensively, since collapsing to an overconfident POINT estimate is exactly
+        # what a distributional value function has to avoid representing (it always
+        # keeps a spread across n_quantiles, even for a confidently-preferred
+        # action). A genuinely different mechanism from every fix attempted so far
+        # (none of which changed what KIND of value function is being learned).
+        # distributional=False (default) leaves forward()/_q_from_features's return
+        # shape and the head structure completely unchanged.
+        self.distributional = distributional
+        self.n_quantiles = n_quantiles
         # "Upgraded DQN" (fidings/divergence_investigation.md, 2026-09-05):
         # BatchNorm1d + relu6/leaky_relu in place of the original plain-ReLU
         # design, tested against the overnight algorithm-swap campaign's
@@ -239,6 +256,13 @@ class NeighborAttentionQNetwork(nn.Module):
             # and value independently without slicing one tensor apart.
             self.policy_head = nn.Linear(d_model, action_dim)
             self.ac_value_head = nn.Linear(d_model, 1)
+        elif self.distributional:
+            # action_dim * n_quantiles outputs, reshaped to (B, action_dim,
+            # n_quantiles) in _q_from_features -- QRDQNAgent reads the full
+            # per-action quantile set via forward_quantiles(); every other
+            # caller (action selection, _mask_q, the evaluator) sees ordinary
+            # (B, action_dim) mean-Q values via the unchanged forward() path.
+            self.head.append(nn.Linear(d_model, action_dim * n_quantiles))
         else:
             self.head.append(nn.Linear(d_model, action_dim))
 
@@ -315,14 +339,20 @@ class NeighborAttentionQNetwork(nn.Module):
         return super().load_state_dict(state_dict, strict=strict)
 
     def _q_from_features(self, combined: torch.Tensor) -> torch.Tensor:
-        """Shared trunk -> Q-values, either straight through the plain head
-        or combined dueling-style (Q = V + A - mean(A)) if ``dueling``."""
+        """Shared trunk -> Q-values, either straight through the plain head,
+        combined dueling-style (Q = V + A - mean(A)) if ``dueling``, or the
+        per-quantile mean if ``distributional`` -- every caller of this
+        method (action selection, ``_mask_q``, the evaluator) sees ordinary
+        (B, action_dim) values regardless of which head type is active."""
         feat = self.head(combined)
-        if not self.dueling:
-            return feat
-        value = self.value_head(feat)
-        advantage = self.advantage_head(feat)
-        return value + (advantage - advantage.mean(dim=-1, keepdim=True))
+        if self.dueling:
+            value = self.value_head(feat)
+            advantage = self.advantage_head(feat)
+            return value + (advantage - advantage.mean(dim=-1, keepdim=True))
+        if self.distributional:
+            quantiles = feat.view(feat.shape[0], self.action_dim, self.n_quantiles)
+            return quantiles.mean(dim=-1)
+        return feat
 
     def _combined_features(
         self,
@@ -491,3 +521,22 @@ class NeighborAttentionQNetwork(nn.Module):
         logits = self.policy_head(feat)
         value = self.ac_value_head(feat).squeeze(-1)
         return logits, value
+
+    def forward_quantiles(
+        self,
+        own_obs: torch.Tensor,
+        neighbor_obs: torch.Tensor,
+        neighbor_mask: torch.Tensor,
+        hop_dist: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """QRDQNAgent entry point: own+neighbor obs -> (B, action_dim,
+        n_quantiles) full per-action return distributions. Only valid when
+        ``self.distributional=True``. Unmasked -- QRDQNAgent's optimize()
+        masks invalid actions itself before any argmax/loss computation,
+        matching this project's standing convention (``_mask_q`` is applied
+        by callers, not by this network)."""
+        if not self.distributional:
+            raise RuntimeError("forward_quantiles() called on a non-distributional network.")
+        combined = self._combined_features(own_obs, neighbor_obs, neighbor_mask, hop_dist)
+        feat = self.head(combined)
+        return feat.view(feat.shape[0], self.action_dim, self.n_quantiles)

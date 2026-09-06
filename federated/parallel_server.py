@@ -65,6 +65,7 @@ from agents.ppo import PPOAgent
 from agents.munchausen_dqn import MunchausenDQNAgent
 from agents.recurrent_dqn import RecurrentDQNAgent
 from agents.topology_conditioned_dqn import TopologyConditionedDQNAgent
+from agents.qrdqn import QRDQNAgent
 from federated.utils import set_seed
 
 logger = logging.getLogger(__name__)
@@ -112,6 +113,7 @@ def _client_worker(
     anchor_qgap_growth_threshold: float = 3.0,
     anchor_pullback_beta: float = 0.5,
     cql_weight: float = 0.0,
+    n_quantiles: int = 21,
 ):
     """Runs inside its own process for the ENTIRE training run.
 
@@ -216,6 +218,18 @@ def _client_worker(
                 init_steps_done=init_steps_done,
                 q_entropy_weight=q_entropy_weight,
                 d_model=d_model, n_heads=n_heads,
+            )
+        elif algo == "qrdqn":
+            agent = QRDQNAgent(
+                own_dim=own_dim, neighbor_dim=neighbor_dim, k_max=k_max,
+                action_dim=action_dim, eps_decay=eps_decay,
+                lr=lr, lr_decay=lr_decay, min_lr=min_lr,
+                head_fix=neighbor_attention,
+                tau=tau, target_update=target_update,
+                mu=mu, n_step=n_step,
+                init_steps_done=init_steps_done,
+                d_model=d_model, n_heads=n_heads,
+                n_quantiles=n_quantiles,
             )
         else:
             agent = DQNAgent(
@@ -376,6 +390,7 @@ class ParallelFederatedServer:
         anchor_qgap_growth_threshold: float = 3.0,
         anchor_pullback_beta: float = 0.5,
         cql_weight: float = 0.0,
+        n_quantiles: int = 21,
     ):
         # item 20 (fidings sec 78): if >0, a round whose eval std_reward
         # falls below this threshold (the same std<50 screen already used
@@ -399,6 +414,7 @@ class ParallelFederatedServer:
         self.anchor_qgap_growth_threshold = anchor_qgap_growth_threshold
         self.anchor_pullback_beta = anchor_pullback_beta
         self.cql_weight = cql_weight
+        self.n_quantiles = n_quantiles
         self.global_model = global_model
         self.evaluator = evaluator
         self.checkpoint_dir = checkpoint_dir
@@ -434,11 +450,16 @@ class ParallelFederatedServer:
         # get real masked-head aggregation). See fidings sec 74's
         # correction note and sec 75 for the batchnorm-off depth
         # experiments run instead once this was caught.
-        self.head_fix = bool(head_fix) and algo != "ppo" and not use_batchnorm
+        # Forced off under --algo qrdqn too: the distributional head's final
+        # Linear is action_dim*n_quantiles wide, not action_dim -- masked-head
+        # aggregation's per-action row indexing (head_key_names below) doesn't
+        # apply to that shape at all. Plain full-state FedAvg is used instead,
+        # same fallback as ppo/batchnorm above.
+        self.head_fix = bool(head_fix) and algo not in ("ppo", "qrdqn") and not use_batchnorm
         self.neighbor_attention = bool(neighbor_attention)
         self.fedavg_blend = float(max(0.0, min(1.0, fedavg_blend)))
         self._head_weight_key, self._head_bias_key = head_key_names(
-            dueling and algo != "ppo" and not use_batchnorm
+            dueling and algo not in ("ppo", "qrdqn") and not use_batchnorm
         )
         self.server_momentum = float(server_momentum)
         self._momentum_buffer: Optional[Dict[str, torch.Tensor]] = None
@@ -505,7 +526,7 @@ class ParallelFederatedServer:
                     self.encoder_depth, self.n_attn_layers,
                     self.anchor_revert, self.anchor_warmup_calls,
                     self.anchor_check_every, self.anchor_qgap_growth_threshold,
-                    self.anchor_pullback_beta, self.cql_weight,
+                    self.anchor_pullback_beta, self.cql_weight, self.n_quantiles,
                 ),
                 daemon=True,
             )
