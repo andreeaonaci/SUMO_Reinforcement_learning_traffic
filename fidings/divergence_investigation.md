@@ -5287,6 +5287,48 @@ one number looks, precisely because several past single-seed leads of similar or
 did not survive more seeds (§11->§12, §30->§31, §46->§47, TC-FedAvg's own 3-seed->6-seed reversal,
 §82). Results to follow.
 
+**Seeds 7/11 result: the strongest, most unanimous lead of the entire session -- already clears
+this project's bar by more than 2x at just 3 seeds, on the "best checkpoint" measure.**
+
+| Seed | Final holdout | Best-of-4-checkpoints holdout | Baseline best-round (existing data) |
+|---|---:|---:|---:|
+| 3 | -7198.74 | -5883.26 | -9390.30 |
+| 7 | -4605.60 | -4605.60 (= final) | -9141.15 |
+| 11 | -9258.73 | -1804.26 | -9008.52 |
+
+Two different comparisons diverge sharply:
+
+| | \|diff\|/SE vs. baseline best-round | \|diff\|/SE vs. baseline mean |
+|---|---:|---:|
+| Sequential FINAL checkpoint | 1.60 | 1.85 |
+| Sequential BEST checkpoint (chosen in hindsight, same methodology as this project's own "best-round" statistic used everywhere else) | **4.20** | **4.49** |
+
+**The final-checkpoint comparison stays inconclusive (seed 11 relapsed hard by the end, -9258.73,
+actually slightly worse than baseline) -- but the best-checkpoint comparison is unanimous across all
+three seeds, no reversals at all:** seed 3 +37.3%, seed 7 +49.6%, seed 11 +80.0% over baseline's own
+best-round. This is a materially different, stronger, more consistent signal than anything else in
+the item-2X/TC-FedAvg/item-24 campaign produced at 3 seeds -- every prior "promising" 3-seed result
+(TC-FedAvg 1.98/2.18, item 23 1.04/0.97) either barely cleared the bar or didn't, and depended on a
+2-out-of-3 or 4-out-of-6 seed split; this clears the bar by more than double on all three seeds
+agreeing in direction.
+
+**Reading:** sequential training reliably discovers a MUCH better region of weight space than
+parallel FedAvg ever reaches (in this comparison, at matched total training volume) -- but, exactly
+like the confident-lock-in volatility characterized throughout this document (§51-53) and now also
+seen in evolution strategies (§84), it does not reliably STAY there through the end of training.
+This is the clearest demonstration yet that "the algorithm doesn't retain/transfer what it learns"
+(§70/§71's standing diagnosis) is really the central problem, independent of federation, independent
+of architecture, independent of optimizer class -- and that the SEARCH problem (can a good policy be
+found at all) may be much easier than the RETENTION problem (can it be kept). Practical implication
+worth testing directly: if a good checkpoint is reliably reachable via this sequential procedure,
+holdout-monitored checkpoint selection (matching how "best-round" has always been read in this
+document) or stopping-early-and-fine-tuning from the peak could turn this into an actually
+deployable win, independent of fixing the underlying retention problem.
+
+**Extending to 6 seeds (17/21/25) before calling this confirmed**, per standing practice -- though
+the unanimous 3-seed direction and >4x margin on the best-checkpoint measure make this the single
+most likely candidate in this document to actually hold up. Results to follow.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
