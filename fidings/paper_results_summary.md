@@ -38,13 +38,14 @@ infrastructure:
    "3-4 orders of magnitude worse than baselines" gap was a confound, not a pure algorithm failure;
    the counterintuitive finding that a randomly-initialized network fine-tuned on the target city
    *beats* a federated-pretrained one (§70).
-3. **The 2026-09-06 session's central empirical discovery — the strongest, most novel, most
-   citable result in the project as of this writing:** sequential (non-federated) curriculum
-   training substantially and robustly beats parallel FedAvg on cross-topology holdout
-   generalization, confirmed at 6-seed rigor and replicated at a second, 3x-larger training budget,
-   with a real, precisely measured catastrophic-forgetting cost that does not erase the net gain.
-   See section A below. This is the section to lead a paper's results with if it holds up under
-   further validation.
+3. **A promising but not-yet-settled empirical lead:** sequential (non-federated) curriculum
+   training appeared to substantially and robustly beat parallel FedAvg on cross-topology holdout
+   generalization. **A real bug in the evaluation harness (a global-RNG leak between evaluation and
+   subsequent training, present in every single-process diagnostic script this session — see
+   `divergence_investigation.md` §88) was found to have substantially inflated the original numbers**
+   (best-checkpoint significance dropped from |diff|/SE 4.20 to 1.88 on re-verification at the same 3
+   seeds, §89) — real effect, direction plausible, but weaker and less certain than first reported.
+   Do not lead a paper with this until the corrected 6-seed re-verification lands; see section A.
 4. **Bespoke method designs, built from scratch for this exact problem rather than adapted from an
    existing named method (2026-09-06 session, per direct user request for genuinely new designs):**
    TC-FedAvg (a shared hypernetwork conditions the network's internal computation on a structural
@@ -53,30 +54,32 @@ infrastructure:
    complex city ordering + phased-in federation via focus-then-merge, synthesizing findings 2 and 3
    above — in progress, see section D).
 
-**Suggested paper framing given all of the above:** not "federated DQN traffic control fails," but
-"a characterized cross-topology generalization gap; a well-understood partial mechanism (confident
-lock-in); a thorough, rigorous elimination of the architecture and training-dynamics axes as
-culprits (six mechanisms tried in the 2026-09-06 session alone, one confirmed modest win); and a
-genuinely surprising positive result — abandoning federated averaging for simple sequential
-curriculum training substantially improves cross-topology generalization at matched compute, at the
-cost of measurable, characterized forgetting." Same category of contribution as the RESCO benchmark
-paper itself (whose own headline finding is also "published methods underperform simple baselines in
-realistic scenarios"), strengthened by finding 3 above turning it from a purely negative result into
-one with a genuine positive, actionable core.
+**Suggested paper framing given all of the above, and given finding 3's pending correction:** the
+safe, currently-defensible framing is "a characterized cross-topology generalization gap; a
+well-understood partial mechanism (confident lock-in); a thorough, rigorous elimination of the
+architecture and training-dynamics axes as culprits (six mechanisms tried in the 2026-09-06 session
+alone, one confirmed modest win, potential-based reward shaping)." Same category of contribution as
+the RESCO benchmark paper itself (whose own headline finding is also "published methods underperform
+simple baselines in realistic scenarios"). Finding 3 (sequential curriculum training) may add a
+second genuine positive result once its 6-seed re-verification completes — check
+`divergence_investigation.md` §89 for current status before adding it to a paper's framing.
 
 ---
 
-## A. Sequential (non-federated) curriculum training beats parallel FedAvg — the project's
-    strongest result, re-verification in progress
+## A. Sequential (non-federated) curriculum training vs. parallel FedAvg — real but weaker/less
+    certain than first reported; a bug inflated the original numbers
 
-**DO NOT CITE THE NUMBERS BELOW YET (2026-09-06): a real RNG-isolation bug was found in
+**DO NOT CITE THE NUMBERS BELOW (2026-09-06): a real RNG-isolation bug was found in
 `HoldoutEvaluator` after this section was written (`divergence_investigation.md` §88) — every
 single-process diagnostic script this session (including the one that produced this section's
 numbers) interleaves training and evaluation in one process, and evaluation's internal RNG reset was
 leaking into subsequent training, silently reducing effective seed independence. Fixed at the
-source; re-verification of this section's exact numbers is running now (§89). The DIRECTION of this
-finding may well survive — see §88 for why — but treat everything below as an unconfirmed lead until
-§89 reports a result, and update this section once it does.**
+source. Re-verification at the same 3 seeds (§89) already shows the effect is REAL but SUBSTANTIALLY
+WEAKER: best-checkpoint significance dropped from |diff|/SE 4.20 to 1.88 (best-round) and 4.49 to
+2.04 (mean), and one of the three original seeds (seed 7, originally +49.6%) now shows an
+essentially flat -0.7%. Extending to 6 seeds under the fix before any conclusion — check
+`divergence_investigation.md` §89 for the current status. Everything below this notice is the
+ORIGINAL, now-known-to-be-inflated claim, kept only so the correction is traceable — do not use it.**
 
 **The claim:** instead of training every city in parallel and averaging weights each round
 (FedAvg), fully training on one city, then continuing the SAME weights on the next city, then the

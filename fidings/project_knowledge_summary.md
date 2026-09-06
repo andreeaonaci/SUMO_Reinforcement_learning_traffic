@@ -245,11 +245,20 @@ re-test) from this session.** Final scorecard: item 22 is the one confirmed, rep
 inconclusive-leaning-null at 6-seed rigor; item 25 is inconclusive due to being under-powered as
 tested.
 
-### Sequential (non-federated) curriculum training — the strongest finding of the entire
-investigation, added per direct user request after the item-2X queue closed. **CORRECTION PENDING
-(2026-09-06): a real RNG-isolation bug was found in `HoldoutEvaluator` (§88 in the investigation
-log) that affected the numbers below — re-verification in progress, see §89. Do not cite these exact
-numbers in a paper draft until §89 confirms them.**
+### Sequential (non-federated) curriculum training — weaker and less certain than originally
+reported; a real RNG-isolation bug inflated the original result
+
+**MAJOR CORRECTION, 2026-09-06:** a real RNG-isolation bug in `HoldoutEvaluator` (§88 in the
+investigation log) was silently reducing effective seed independence across every seed's training
+trajectory (see §88's full mechanism). Fixed at the source. Re-verifying under the fix (§89) at the
+original 3 seeds shows the effect is REAL BUT SUBSTANTIALLY WEAKER than first reported: best-
+checkpoint \|diff\|/SE dropped from 4.20 to **1.88** (best-round) and 4.49 to **2.04** (mean) — right
+at this project's bar rather than clearing it by 4x, and one of the three seeds (seed 7) that
+originally showed +49.6% now shows an essentially flat -0.7%. **The numbers below are the ORIGINAL,
+now-known-to-be-inflated ones, kept for the historical record of what was first claimed — do not
+cite them.** Extending to 6 seeds under the fix before drawing any real conclusion; see §89 for the
+current status and check back for the 6-seed result before treating this as settled in either
+direction.
 
 Instead of training every city in parallel and averaging weights each round (FedAvg), fully train
 on city_1, then CONTINUE the same weights on city_4, then city_6 — one pass, no aggregation step at
@@ -279,18 +288,23 @@ sharpest demonstration yet of, this document's standing diagnosis (§70/§71) th
 search or data, is the binding constraint: this result shows a much better policy is easily
 reachable via a completely different, much simpler training procedure, it just isn't perfectly kept.
 
-**Escalation to 3x training budget (§86) confirms and sharpens this further — now the single most
-important empirical finding of the whole project.** Training city_1 ALONE for 30 episodes reaches a
-holdout reward of -2453.37 — better than any other result anywhere in this document outside
-rule-based baselines. The matched parallel-FedAvg baseline at the same budget got WORSE with more
-rounds (best -9450.14 vs. the smaller budget's -9390.30), widening the gap from both directions:
-sequential's best checkpoint beats it by **+74.0%** (best-round) / **+75.8%** (mean); even the final
-checkpoint, after relapsing, still beats it by +19-25%. Single seed at this larger budget, but
-combined with §85's 6-seed confirmation at the smaller one, this is a well-triangulated result
-across two budgets, not a one-off. It also sharpens the "search vs. retention" diagnosis into its
-cleanest form yet: a policy far better than anything federated training has ever produced is
-trivially reachable by just training on ONE city for a while — the entire remaining problem is
-keeping it.
+**The §86 (3x budget) numbers below are ALSO from the pre-fix, buggy code and are being
+re-verified alongside §85's 6-seed re-run (§89) — do not cite either.** Original (now-superseded)
+claim, kept for the historical record only: training city_1 ALONE for 30 episodes reached a holdout
+reward of -2453.37, and the matched parallel-FedAvg baseline at the same budget got worse with more
+rounds, giving sequential's best checkpoint a claimed +74.0%/+75.8% edge. Whether this specific
+number survives re-verification is unknown as of this writing — §85's own 3-seed re-verification
+already showed the effect is real but much weaker than first reported (best-checkpoint |diff|/SE
+dropped from 4.20 to 1.88), so the §86 single-seed number should be treated with at least as much
+caution until it's independently re-run under the fix.
+
+**Current honest status (2026-09-06, pending the 6-seed re-verification):** sequential training
+appears to produce a real but more modest and less certain generalization benefit than first
+reported — direction plausible, magnitude and significance not yet resolved. This is still a
+meaningful result methodologically (a genuinely different training paradigm, no new architecture) but
+should not yet be called "the headline finding of the project" until the corrected 6-seed number is
+in. Check `divergence_investigation.md` §89 for the current state before citing anything from this
+section.
 
 ---
 
@@ -322,19 +336,20 @@ keeping it.
   training/aggregation-time mechanisms were tried (replay reset, recurrent memory, topology-
   conditioned FiLM, Reptile-style blending, evolution strategies); exactly one (item 22,
   potential-based reward shaping) confirmed as a real, replicated win.
-- **Sequential (non-federated) curriculum training, tried after the queue closed, is the strongest
-  confirmed result in the whole investigation** — |diff|/SE 3.48-6.32 at 6-seed rigor (vs. item 22's
-  2.5), every single seed agreeing in direction on the best-checkpoint measure, and — unlike
-  everything else this session — the effect got MORE significant with more seeds, not less. Comes
-  with a real, measured catastrophic-forgetting cost, but the net holdout gain survives it.
+- **Sequential (non-federated) curriculum training, tried after the queue closed, LOOKED like the
+  strongest result in the whole investigation but a real bug (§88) inflated it substantially.** The
+  original |diff|/SE 3.48-6.32 at "6-seed rigor" was generated under a since-fixed RNG-isolation bug
+  that silently reduced effective seed independence. Re-verified under the fix at 3 seeds (§89): the
+  best-checkpoint measure is now 1.88-2.04 — right at this project's bar, not clearing it by 4x+ — and
+  one of the three original seeds that showed a strong effect now shows essentially none. Still a
+  live, plausible lead, not dismissed, but nowhere near as settled as first reported. 6-seed
+  re-verification in progress; treat as unresolved until it lands.
 
-**For a paper:** the defensible framing has shifted meaningfully with this last result. Instead of
-"federated DQN traffic control fails," the strongest available framing is now: "a characterized
-cross-topology generalization gap; a mechanism (confident lock-in); a replicated test-time
-mitigation (fine-tuning); a thorough, rigorous elimination of the architecture and training-dynamics
-axes as culprits (five mechanisms tried, one confirmed modest win); and a genuinely surprising
-positive result — that abandoning federated averaging in favor of simple sequential curriculum
-training substantially improves cross-topology generalization at matched compute, at the cost of
-measurable forgetting on earlier-seen cities." That last piece, if it continues to hold at larger
-scale, is a real, citable, non-obvious empirical finding in its own right, not just a negative
-result — potentially the headline finding of the whole project.
+**For a paper:** given the correction above, the safest current framing stays close to what §58-61
+already established: "a characterized cross-topology generalization gap; a mechanism (confident
+lock-in); a replicated test-time mitigation (fine-tuning); a thorough, rigorous elimination of the
+architecture and training-dynamics axes as culprits (five mechanisms tried, one confirmed modest
+win, potential-based reward shaping)." The sequential-training result may yet add a second genuine
+positive finding once re-verification completes, but it should not be treated as settled or used as
+the headline until then — citing an inflated number and having to retract it later would cost more
+credibility than waiting for the corrected one.

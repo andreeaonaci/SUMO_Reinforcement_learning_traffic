@@ -5538,6 +5538,43 @@ are first stated in `fidings/project_knowledge_summary.md` and `fidings/paper_re
 well -- do not cite those numbers from a paper draft until the re-verification section below reports
 a result.
 
+## 89. §85/86 re-verification under the RNG-isolation fix: the original result was substantially
+    INFLATED by the bug -- weaker, borderline picture at 3 seeds, extending to 6 before any
+    conclusion
+
+**2026-09-06.** First batch of the re-verification (seeds 3/7/11, `environments_c1_4_6`, 10
+episodes/city, identical protocol to §85 otherwise) is in. **The original numbers do not hold up --
+this is a real, substantial correction, not a minor adjustment.**
+
+| | \|diff\|/SE vs. baseline best-round | \|diff\|/SE vs. baseline mean |
+|---|---:|---:|
+| Sequential FINAL (post-fix) | 0.85 (was 1.60 pre-fix) | 1.22 (was 1.85) |
+| Sequential BEST checkpoint (post-fix) | **1.88** (was 4.20 pre-fix) | **2.04** (was 4.49) |
+
+Per-seed, best-checkpoint improvement over baseline's own best-round: seed 3 +51.7%, seed 11 +75.0%,
+**seed 7 -0.7% (essentially flat -- this same seed showed +49.6% under the buggy code)**. The
+best-checkpoint measure now lands right at this project's own significance bar rather than clearing
+it by more than 4x; the final-checkpoint measure is clearly below it. This is a materially weaker,
+much less certain result than what §85 originally reported.
+
+**Reading:** the RNG-isolation bug (§88) was not a cosmetic issue -- it was inflating this specific
+result by giving every seed's LATER training phases the exact same (fixed, eval-clobbered)
+exploration/replay-sampling randomness, so seeds only differed in their initial network weights, not
+in the full stochasticity a genuinely independent run should have. Apparently that shared,
+non-independent randomness stream happened to be a favorable one for this particular experiment (all
+3 original seeds landing on the positive side once their SHARED downstream randomness kicked in),
+which is exactly the kind of hidden correlation between "seeds" that under-powers a comparison's
+true variance and can make an unlucky coincidence look like a robust, unanimous effect. Now that each
+seed's full trajectory is genuinely independent, seed 7 draws a materially different (flat) outcome.
+
+**Not yet closing this out either way.** 3 seeds under the corrected code is not enough to conclude
+the effect is real, borderline, or gone -- extending to the full 6 seeds (17/21/25 added, matching
+§85's original seed set) before drawing any conclusion, exactly the discipline this document applies
+to every other result. The §86 (3x budget) single-seed re-verification is also in progress
+separately. Results to follow. **Until the 6-seed re-verification lands, the honest status of this
+whole line of investigation is: a real, still-possible effect that is now known to be considerably
+weaker and less certain than first reported, not a confirmed finding.**
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
