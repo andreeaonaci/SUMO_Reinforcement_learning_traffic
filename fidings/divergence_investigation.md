@@ -5681,6 +5681,27 @@ is; improving the threshold sensitivity is the right next step before spending m
 concluding the mechanism doesn't work from an undersampled trigger rate. A lower growth threshold
 (more sensitive, e.g. 2.0x) is the natural next pilot -- launching next.
 
+**More sensitive threshold (2.0x) result: now engages reliably in all 3 seeds, still directionally
+promising but not yet significant.**
+
+| Seed | Pullback triggers | Best-round vs. baseline | Mean vs. baseline |
+|---|---:|---:|---:|
+| 3 | 14 | +7.0% | +4.0% |
+| 7 | 27 | **+36.7%** | +11.4% |
+| 11 | 27 | -4.7% | -6.1% |
+
+Aggregate: |diff|/SE = 1.07 (best-round), 0.58 (mean) -- still below the bar, but the calibration
+issue is resolved (the mechanism now fires 14-27 times per run instead of 0-4) and 2 of 3 seeds are
+clearly positive. **Seed 11 is notable: it is the SAME seed that showed the negative/reversing
+result for both TC-FedAvg (§82) and recurrent policy (§81)** -- three independent, unrelated
+mechanisms all found seed 11 to be their worst performer, suggestive that this particular training
+draw is just a harder starting point for this roster generally, not specific evidence against any
+one of these interventions. Given system load was severe during this run (see below), and given
+this is genuinely promising-but-unresolved at 3 seeds (matching the profile that has gone both ways
+elsewhere in this document), extending to 6 seeds is the right next step once compute is available
+again -- not yet done as of this writing, holding off due to heavy concurrent system load from the
+§85/86 re-verification batch still running.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
