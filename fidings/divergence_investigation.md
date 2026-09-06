@@ -5210,6 +5210,40 @@ win; items 20 (replay-buffer reset) and 24 (Reptile-style blending) are confirme
 are inconclusive-leaning-null at 6-seed rigor; item 25 (evolution strategies) is inconclusive due to
 being genuinely under-powered as tested, not evidence against the paradigm itself.
 
+## 85. Sequential (non-federated) curriculum training, per direct user request: does fully training
+    on one city, then continuing on the next, then the next, generalize better than parallel FedAvg?
+
+**2026-09-06.** Per direct user request after the item-2X queue closed out: instead of training
+every city in parallel and averaging weights each round (FedAvg), fully train on city_1, then
+CONTINUE training the exact same weights on city_4, then city_6 -- one pass, no going back, no
+aggregation step at all. Motivation, directly from this project's own evidence: every federation-
+vs-no-federation comparison (§49/§50/§64) found parallel FedAvg makes no measurable difference over
+training each city independently, while the one thing that HAS reliably worked is sequential
+adaptation -- fine-tuning a pretrained checkpoint on a new city (§66-69). This asks whether that same
+"sequentially adapt to one more city" mechanism, applied across the WHOLE training roster instead of
+only once at holdout-eval time, produces a model that generalizes better than parallel FedAvg does.
+A genuinely different training paradigm, not a variant of anything in the item-2X series.
+
+**Implementation:** `diagnostics/sequential_training.py`, reusing `DQNAgent.train()`,
+`build_federated_env`/`ActionMaskPadder`, and `HoldoutEvaluator` directly -- no new agent class or
+network code needed, since this is purely an orchestration change (which envs get trained on, in
+what order, with no averaging step) rather than an architecture or algorithm change. Per the user's
+own suggestion, total per-city training volume is kept comparable to the existing parallel-baseline
+data (items 22/23/24/TC-FedAvg's baseline arm: `--rounds 5 --local_episodes 2` = 10 total local
+episodes/city) by giving each city `--episodes_per_city 10` delivered as one continuous block
+instead of interleaved 2-episode rounds -- same total SUMO training volume, sequential-vs-parallel
+is the only manipulated variable. Two things measured beyond the final holdout number: (1) holdout
+eval after EACH city finishes, to see whether progressive exposure helps/hurts/fluctuates; (2) a
+catastrophic-forgetting check -- each training city's own in-distribution performance measured right
+after its own training phase, then again at the very end after every later city has also trained.
+
+**Verified before spending real compute:** a 1-episode-per-city, 1-eval-episode smoke run completed
+end to end with no errors (exit 0), and its final-stage numbers were internally consistent (city_6,
+trained last, showed byte-identical reward at its own post-training check and the final forgetting-
+check re-eval, since no further training happened in between -- exactly what should happen with
+deterministic eval, sec 35). Real pilot launched: `--episodes_per_city 10 --seed 3`, matching the
+existing baseline data's total per-city training volume. Results to follow.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
