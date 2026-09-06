@@ -5425,6 +5425,41 @@ holdout-monitored checkpoint selection during sequential training (matching how 
 always been read in this document, and directly reusable infrastructure -- no new code needed) may
 already be a deployable recipe, independent of ever solving the underlying retention problem.
 
+## 87. Progressive Curriculum FedAvg (PCFT): a bespoke synthesis of §85/86's sequential-training win
+    and §66-70's fine-tuning mechanism, per direct user request
+
+**2026-09-06.** User proposed combining two things now confirmed in this document rather than
+picking one: order training cities from SIMPLEST to most complex (by intersection count -- the
+opposite of §85/86's incidental city_1(16)->city_4(3)->city_6(7) ordering, which happened to start
+with the MOST complex city), and progressively phase federation in -- warm up solo on the simplest
+city, then each time a new city is introduced, give it a short FOCUS phase (fine-tune the current
+shared weights on that city alone, exactly §66-70's proven mechanism) before folding it into a
+genuine multi-city FedAvg pool for several rounds, rather than jumping straight to full averaging.
+A bespoke design per direct request, not an existing named method (matching the same "build
+something new for our exact case" brief that produced TC-FedAvg earlier this session).
+
+**Implementation:** `diagnostics/progressive_curriculum_fedavg.py`. Cities ranked by
+`len(env.ts_ids)` after one reset (city_4=3, city_6=7, city_1=16 intersections, confirmed). Warm-up
+phase and each city's focus phase reuse `DQNAgent.train()` directly (same mechanism as
+`sequential_training.py`). The FedAvg phases reuse `federated/aggregation.py::aggregate_round`
+(the exact masked-head-aggregation primitive the real `--parallel` pipeline uses) directly -- no
+reimplementation of the aggregation math. Each active city keeps its OWN persistent `DQNAgent`
+(replay buffer + optimizer state survive across rounds, `agent.start_round(shared_state)` resets
+only the weights at the start of each round) -- matching the real federated pipeline's warm-start
+convention exactly, so already-active cities stay anchored against forgetting while new cities'
+focus-phase adaptation gets blended in via ordinary FedAvg. Holdout eval after every phase; a final
+catastrophic-forgetting check (each city's own in-distribution performance) at the end, same
+methodology as §85.
+
+**Verified before spending real compute:** a real, tiny SUMO smoke run (`--warmup_episodes 1
+--focus_episodes 1 --fedavg_rounds 1 --local_episodes 1`) completed end to end with no errors --
+correct city ranking, correct warm-up -> focus -> FedAvg phase alternation for both newly-added
+cities, correct final forgetting check across all three. Real pilot launched: `--warmup_episodes 10
+--focus_episodes 5 --fedavg_rounds 3 --local_episodes 2`, seeds 3/7/11 (matching the standard
+3-seed-then-6-seed screening convention). Results to follow.
+
+## Open questions / next steps
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
