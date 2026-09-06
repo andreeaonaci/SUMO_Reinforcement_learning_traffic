@@ -4985,9 +4985,24 @@ mean_hop, max_hop all exactly 0, not NaN or an arbitrary padding value); (4) the
 loop (act_batch/remember/optimize across 25 ticks, single-obs `act`/`q_values`, checkpoint
 state_dict round-trip including the new `topo_hyper.*` keys) all work; (5) plain `DQNAgent` is
 completely unaffected. Full `tests/` suite re-run: same 3 pre-existing unrelated failures, no new
-regressions. A real SUMO smoke run (`--algo topo`, 1 round, 3 cities) is in progress as this section
-is being written; the actual multi-seed comparison pilot (matching items 22/23's exact protocol) is
-next once that confirms clean.
+regressions. The real SUMO smoke run (`--algo topo`, 1 round, 3 cities) confirmed clean, no crash.
+
+**3-seed pilot result: the second lever in this whole document (after item 22) to show a
+consistent, non-outlier-driven direction, both measures at or above the bar already at 3 seeds.**
+
+| | best-round (3-seed avg) | mean(5 rounds, 3-seed avg) |
+|---|---:|---:|
+| baseline | -9179.99 | -9515.65 |
+| `--algo topo` | -8209.51 | -8869.75 |
+| \|diff\|/SE | 1.98 | **2.18** |
+
+Per-seed: seed 3 (-9390->-8095 best, -9687->-8712 mean) and seed 7 (-9141->-7445 best, -9396->-8479
+mean) both clearly favor `topo`; seed 11 is roughly flat (best-round very slightly worse, -9009 vs.
+-9088; mean very slightly better, -9463 vs. -9418). This is the same qualitative shape as item 22's
+confirmed result (a couple of seeds carrying a real improvement, the rest roughly neutral, not one
+seed swinging wildly in one direction while another swings the other way the way item 23's did) --
+the profile that has actually replicated in this document before. **Extending to 6 seeds (17/21/25)
+immediately, per the same standing rule, before calling this confirmed.**
 
 ## Open questions / next steps
 
