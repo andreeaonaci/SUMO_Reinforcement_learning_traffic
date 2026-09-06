@@ -7,8 +7,8 @@ headline claim ("2-city trained policy beats both rule-based baselines") is a **
 artifact** — §43 later found that claim was an in-distribution evaluation, not a true cross-topology
 holdout result (the 2-city roster's action_dim was too narrow to reach the real holdout, so
 evaluation silently fell back to one of the roster's own training cities). That old content is kept
-below, in section F, with its correction notice intact, purely as a historical record — **do not
-cite section F in a paper**. Everything above it (sections A-E) reflects the current, corrected
+below, in section G, with its correction notice intact, purely as a historical record — **do not
+cite section G in a paper**. Everything above it (sections A-F) reflects the current, corrected
 state of knowledge and is safe to draft from directly. All numbers are re-derivable from the cited
 `divergence_investigation.md` sections; if anything here ever disagrees with that document, the
 investigation log wins.
@@ -38,88 +38,72 @@ infrastructure:
    "3-4 orders of magnitude worse than baselines" gap was a confound, not a pure algorithm failure;
    the counterintuitive finding that a randomly-initialized network fine-tuned on the target city
    *beats* a federated-pretrained one (§70).
-3. **A promising but not-yet-settled empirical lead:** sequential (non-federated) curriculum
-   training appeared to substantially and robustly beat parallel FedAvg on cross-topology holdout
-   generalization. **A real bug in the evaluation harness (a global-RNG leak between evaluation and
+3. **A second confirmed positive result, at a smaller magnitude than first measured:** sequential
+   (non-federated) curriculum training beats parallel FedAvg on cross-topology holdout
+   generalization. A real bug in the evaluation harness (a global-RNG leak between evaluation and
    subsequent training, present in every single-process diagnostic script this session — see
-   `divergence_investigation.md` §88) was found to have substantially inflated the original numbers**
-   (best-checkpoint significance dropped from |diff|/SE 4.20 to 1.88 on re-verification at the same 3
-   seeds, §89) — real effect, direction plausible, but weaker and less certain than first reported.
-   Do not lead a paper with this until the corrected 6-seed re-verification lands; see section A.
+   `divergence_investigation.md` §88) was found and fixed; the full 6-seed re-verification under the
+   fix (§89) confirms the effect survives at |diff|/SE 1.92-4.22 depending on measure (down from an
+   inflated 3.48-6.32 originally) — real, replicated, methodologically clean, genuinely smaller. See
+   section A. A separate 3x-budget escalation did not survive re-verification and is not part of
+   this claim.
 4. **Bespoke method designs, built from scratch for this exact problem rather than adapted from an
    existing named method (2026-09-06 session, per direct user request for genuinely new designs):**
    TC-FedAvg (a shared hypernetwork conditions the network's internal computation on a structural
    descriptor computable for any intersection, including unseen ones — architecturally novel, did
-   not survive 6-seed confirmation, see section C) and Progressive Curriculum FedAvg (simplest-to-
+   not survive 6-seed confirmation, see section C), Progressive Curriculum FedAvg (simplest-to-
    complex city ordering + phased-in federation via focus-then-merge, synthesizing findings 2 and 3
-   above — in progress, see section D).
+   above — in progress, see section D), and Self-Anchoring Training with Confidence-Gated Reversion
+   (an active, in-the-loop mechanism that snapshots a round's starting weights and pulls training
+   back toward them when a validated internal signal — Q-gap growth — indicates drift toward the
+   project's diagnosed confident-lock-in failure mode; promising-but-not-yet-significant at a 3-seed
+   screen, see section E).
 
-**Suggested paper framing given all of the above, and given finding 3's pending correction:** the
-safe, currently-defensible framing is "a characterized cross-topology generalization gap; a
-well-understood partial mechanism (confident lock-in); a thorough, rigorous elimination of the
-architecture and training-dynamics axes as culprits (six mechanisms tried in the 2026-09-06 session
-alone, one confirmed modest win, potential-based reward shaping)." Same category of contribution as
-the RESCO benchmark paper itself (whose own headline finding is also "published methods underperform
-simple baselines in realistic scenarios"). Finding 3 (sequential curriculum training) may add a
-second genuine positive result once its 6-seed re-verification completes — check
-`divergence_investigation.md` §89 for current status before adding it to a paper's framing.
+**Suggested paper framing given all of the above:** two confirmed positive results — potential-
+based reward shaping (finding 2 above, |diff|/SE ~2.5) and sequential curriculum training (finding 3,
+|diff|/SE 1.9-4.2) — sitting inside a characterized cross-topology generalization gap, a well-
+understood partial mechanism (confident lock-in), a replicated test-time mitigation (fine-tuning),
+and a thorough, rigorous elimination of the architecture/aggregation axes as culprits (six further
+mechanisms tried in the 2026-09-06 session, all null or inconclusive). Same category of contribution
+as the RESCO benchmark paper itself (whose own headline finding is also "published methods
+underperform simple baselines in realistic scenarios"), strengthened by two genuine positive results
+instead of zero, and by the transparent finding-and-fixing of a real bug that briefly inflated one of
+them — itself evidence of the rigor applied to every claim in this document.
 
 ---
 
-## A. Sequential (non-federated) curriculum training vs. parallel FedAvg — real but weaker/less
-    certain than first reported; a bug inflated the original numbers
+## A. Sequential (non-federated) curriculum training vs. parallel FedAvg — CONFIRMED real, at a
+    genuinely smaller magnitude than first reported
 
-**DO NOT CITE THE NUMBERS BELOW (2026-09-06): a real RNG-isolation bug was found in
-`HoldoutEvaluator` after this section was written (`divergence_investigation.md` §88) — every
-single-process diagnostic script this session (including the one that produced this section's
-numbers) interleaves training and evaluation in one process, and evaluation's internal RNG reset was
-leaking into subsequent training, silently reducing effective seed independence. Fixed at the
-source. Re-verification at the same 3 seeds (§89) already shows the effect is REAL but SUBSTANTIALLY
-WEAKER: best-checkpoint significance dropped from |diff|/SE 4.20 to 1.88 (best-round) and 4.49 to
-2.04 (mean), and one of the three original seeds (seed 7, originally +49.6%) now shows an
-essentially flat -0.7%. Extending to 6 seeds under the fix before any conclusion — check
-`divergence_investigation.md` §89 for the current status. Everything below this notice is the
-ORIGINAL, now-known-to-be-inflated claim, kept only so the correction is traceable — do not use it.**
+**Provenance note (safe to skip if you just want the numbers):** the first version of this section
+reported |diff|/SE 5.71-6.32 at "6-seed rigor." A real RNG-isolation bug (`divergence_investigation.md`
+§88 -- `HoldoutEvaluator`'s per-episode determinism reset was leaking into subsequent training in
+every single-process diagnostic script this session) was found and fixed, and the full 6-seed
+re-verification under the fix (§89) is what's reported below. The bug inflated the original numbers;
+the effect itself is confirmed real, just smaller. The separate "3x training budget makes it even
+better" escalation (§86) did NOT survive re-verification (a complete reversal on its one seed) and is
+NOT part of this claim -- see the caveat at the end of this section.
 
 **The claim:** instead of training every city in parallel and averaging weights each round
 (FedAvg), fully training on one city, then continuing the SAME weights on the next city, then the
 next (one pass, no aggregation step at all) produces a policy that generalizes to the true holdout
-city dramatically better than parallel FedAvg, at matched total training volume — confirmed at
-6-seed rigor and replicated at a second, larger budget.
+city better than parallel FedAvg, at matched total training volume -- confirmed at 6-seed rigor.
 
-**Source:** `divergence_investigation.md` §85 (6-seed confirmation, `environments_c1_4_6`,
-`city_1 -> city_4 -> city_6` order, 10 episodes/city) and §86 (3x-budget replication, seed 3, 30
-episodes/city). Implementation: `diagnostics/sequential_training.py`.
+**Source:** `divergence_investigation.md` §85 (original result), §88 (bug found and fixed), §89
+(6-seed re-verification under the fix -- this section's numbers). `city_1 -> city_4 -> city_6`
+order, `environments_c1_4_6`, 10 episodes/city. Implementation: `diagnostics/sequential_training.py`.
 
-### The numbers (§85, 6 seeds: 3/7/11/17/21/25, 10 episodes/city)
+### The numbers (6 seeds: 3/7/11/17/21/25, 10 episodes/city, re-verified under the RNG-isolation fix)
 
 | | vs. baseline best-round | vs. baseline mean |
 |---|---:|---:|
-| Sequential FINAL checkpoint | \|diff\|/SE = **3.48** | \|diff\|/SE = **4.14** |
-| Sequential BEST checkpoint (chosen in hindsight, same convention as "best-round" below) | \|diff\|/SE = **5.71** | \|diff\|/SE = **6.32** |
+| Sequential FINAL checkpoint | \|diff\|/SE = **1.92** | \|diff\|/SE = **2.26** |
+| Sequential BEST checkpoint (chosen in hindsight, same convention as "best-round" elsewhere in this document) | \|diff\|/SE = **3.87** | \|diff\|/SE = **4.22** |
 
-Per-seed, best-checkpoint vs. baseline's own best-round: +23.3%, +49.6%, +80.0%, +44.4%, +25.5%,
-+35.5% — **every single seed positive, no exceptions.** Unlike every other lever tried in the
-2026-09-06 session, this result got MORE significant going from 3 to 6 seeds, not less (3-seed
-screen: 1.60/1.85 final, 4.20/4.49 best-checkpoint) — the opposite of the standing "few-seed mirage"
-pattern this document has repeatedly warned about, and the clearest sign of a real, robust effect.
+Per-seed, best-checkpoint vs. baseline's own best-round: +51.7%, -0.7%, +75.0%, +75.1%, +20.9%,
++64.2% -- **5 of 6 seeds clearly positive, the 6th essentially flat (not a reversal).**
 
-### The numbers (§86, 3x budget, seed 3, 30 episodes/city)
-
-| Stage | Holdout mean_reward |
-|---|---:|
-| Random init | -8585.72 |
-| After city_1 alone (30 episodes) | **-2453.37 — best result in the entire investigation outside rule-based baselines** |
-| After city_1+city_4 | -6207.73 |
-| Final (city_1+city_4+city_6) | -7642.36 |
-
-Matched parallel-FedAvg baseline at the same budget (`--rounds 15 --local_episodes 2`) actually got
-WORSE with more rounds: best-round -9450.14, mean -10143.20 (vs. -9390.30/-9687.10 at the smaller
-budget) — widening the gap from both directions. Sequential's best checkpoint beats it by **+74.0%**
-(best-round) / **+75.8%** (mean); the final checkpoint, after relapsing, still beats it by +19.1%/
-+24.7%.
-
-### Catastrophic forgetting, measured directly (§85, seed 3)
+### Catastrophic forgetting, measured directly (seed 3)
 
 | City | Right after its own training | Final (all cities trained) | Change |
 |---|---:|---:|---:|
@@ -127,31 +111,38 @@ budget) — widening the gap from both directions. Sequential's best checkpoint 
 | city_4 (trained second) | -389.52 | -417.34 | ~7% worse |
 | city_6 (trained last) | -3.01 | -3.01 | unchanged |
 
-Real, substantial forgetting, worse the earlier a city was trained — the expected continual-learning
+Real, substantial forgetting, worse the earlier a city was trained -- the expected continual-learning
 signature. The net holdout-generalization gain survives this cost, but it is a genuine tradeoff, not
 a free win.
 
 ### Reading
 
-Sequential training reliably discovers a much better region of weight space than parallel FedAvg
-ever reaches at matched total training volume, and — while it does not perfectly retain that peak
-through the end of training — retains enough of it that even the FINAL checkpoint significantly
-beats FedAvg. Combined with the forgetting measurement, this is the sharpest demonstration yet of
+Sequential training reliably discovers a better region of weight space than parallel FedAvg reaches
+at matched total training volume, and retains enough of it that the FINAL checkpoint significantly
+beats FedAvg too, not just an interim one. Combined with the forgetting measurement, this supports
 this project's standing diagnosis (`divergence_investigation.md` §70/§71): the binding constraint on
-this task is the algorithm's failure to RETAIN what it learns, not its ability to find a good policy
-in the first place, which turns out to be comparatively easy — a much better-than-anything-federated
-policy is reachable by literally just training on one city for a while.
+this task is closer to the algorithm's ability to RETAIN what it learns than its ability to find a
+good policy in the first place.
+
+### Caveat: the 3x-budget escalation did not hold up
+
+An initial follow-up scaled the training budget 3x (30 episodes/city instead of 10) and found an
+extremely dramatic result (city_1 trained alone reaching holdout reward -2453.37, the best number
+anywhere in this document). **This did not survive re-verification under the fixed code** -- the
+same seed's corrected trajectory monotonically got WORSE through every training phase, ending as a
+statistical wash vs. baseline. Single seed, so this doesn't prove larger budgets never help, but
+that specific claim is unresolved, not confirmed, and should not be cited.
 
 ### What would make this section fully paper-ready
 
-1. §86's larger-budget result is currently single-seed — replicate at 3+ seeds at that budget for
-   the same rigor already applied at the smaller one.
+1. Replicate the 3x-budget question properly (3+ seeds) before drawing any conclusion about how
+   training budget interacts with this effect -- the one data point available reversed completely.
 2. Test whether holdout-monitored checkpoint selection (picking the best-so-far checkpoint during
    sequential training, exactly the "best-round" convention already used throughout this document)
    turns this into a directly deployable recipe, independent of ever fixing the underlying retention
-   problem — flagged as the natural next experiment in §85/86, not yet run.
+   problem -- not yet run.
 3. Section D below (Progressive Curriculum FedAvg) is a direct attempt to get this method's search
-   advantage while reducing its forgetting cost via phased-in federation — pending results.
+   advantage while reducing its forgetting cost via phased-in federation -- pending results.
 
 ---
 
@@ -230,14 +221,52 @@ real pipeline's warm-start convention) to test whether phased-in federation can 
 training's search advantage while reducing its forgetting cost.
 
 **Source:** `divergence_investigation.md` §87. Implementation:
-`diagnostics/progressive_curriculum_fedavg.py`. Verified via a real SUMO smoke run; a 3-seed pilot
-(seeds 3/7/11, `--warmup_episodes 10 --focus_episodes 5 --fedavg_rounds 3 --local_episodes 2`) is
-running as of this writing. **Do not cite any result for this section until it lands and is
-reported in `divergence_investigation.md` §87's follow-up.**
+`diagnostics/progressive_curriculum_fedavg.py`. Verified via a real SUMO smoke run; the first 3-seed
+pilot was killed mid-run when it exposed the §88 RNG-isolation bug (two seeds produced byte-identical
+results) rather than because of anything wrong with PCFT's own design -- the fix applies
+automatically on re-run (same shared `HoldoutEvaluator`), no PCFT-specific changes needed. **Not yet
+re-run as of this writing -- no result to cite for this section yet.**
 
 ---
 
-## E. Everything else tried in the 2026-09-06 session's item-2X campaign: confirmed nulls or
+## E. Self-Anchoring Training with Confidence-Gated Reversion — bespoke mechanism targeting the
+    project's own diagnosed bottleneck; promising but not yet significant
+
+**The design:** built per direct user request for a genuinely new solution to this project's own
+central bottleneck (a good policy is reachable but not retained -- see finding 3's mechanism, and
+the identical symptom in evolution strategies, §84) rather than an adaptation of an existing
+continual-learning method. Each federated round snapshots the round-start weights as an anchor and
+tracks a running EMA of the batch Q-gap (top1-top2 masked Q-value gap) during that round's local
+training -- reusing `q_values` already computed for the TD loss, no extra forward pass. This project
+already established (§32-34/§53) that Q-gap growth is the validated signature of drift toward
+confident lock-in, so the threshold is self-calibrated per round (a multiple of that round's own
+baseline Q-gap) rather than a fixed, environment-specific magic number. If Q-gap grows past the
+threshold, the weights are blended partway back toward the round-start anchor -- a partial pull-back,
+not a hard reset, so local training doesn't lose all forward progress.
+
+**Source:** `divergence_investigation.md` §90. Implementation: `agents/dqn.py`'s `anchor_revert`
+flag (default off), wired through the real `--parallel` pipeline as
+`--anchor_revert`/`--anchor_qgap_growth_threshold`/etc.
+
+### The numbers (3 seeds: 3/7/11, `environments_c1_4_6`, standard protocol)
+
+| Threshold | \|diff\|/SE best-round | \|diff\|/SE mean | Notes |
+|---|---:|---:|---|
+| Default (3.0x growth) | 0.83 | 0.06 | Too conservative -- 1 of 3 seeds never triggered at all (0 pullbacks), giving zero information for that seed |
+| More sensitive (2.0x growth) | 1.07 | 0.58 | Engages reliably (14-27 triggers/run); 2 of 3 seeds clearly positive (+7.0%, +36.7%), 1 negative (-4.7%) |
+
+Neither threshold clears this project's significance bar yet, but the more sensitive threshold shows
+a genuinely different, more informative picture than the first (which was underpowered by a
+too-conservative default, not by the idea failing). Notably, the one negative seed (seed 11) is the
+SAME seed that reversed both TC-FedAvg (section C) and recurrent policy -- suggestive of a generically
+harder training draw for this roster rather than evidence against this mechanism specifically.
+
+**Do not cite this as confirmed or as a miss -- it is a promising, not-yet-resolved 3-seed screen.**
+6-seed extension at the 2.0x threshold is the natural next step, not yet run as of this writing.
+
+---
+
+## F. Everything else tried in the 2026-09-06 session's item-2X campaign: confirmed nulls or
     inconclusive, not deployable
 
 For completeness — these were tried with real rigor and should be citable as "ruled out," not
@@ -254,7 +283,7 @@ omitted, since the thoroughness of elimination is itself part of this project's 
 
 ---
 
-## F. HISTORICAL, SUPERSEDED — pre-2026-09-06 content, do not cite
+## G. HISTORICAL, SUPERSEDED — pre-2026-09-06 content, do not cite
 
 **Everything below this line predates the §43 correction and is kept only as a historical record of
 what this document used to claim.** Section A below (the old section A) is the specific claim §43

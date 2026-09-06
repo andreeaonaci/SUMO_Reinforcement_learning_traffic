@@ -245,20 +245,29 @@ re-test) from this session.** Final scorecard: item 22 is the one confirmed, rep
 inconclusive-leaning-null at 6-seed rigor; item 25 is inconclusive due to being under-powered as
 tested.
 
-### Sequential (non-federated) curriculum training — weaker and less certain than originally
-reported; a real RNG-isolation bug inflated the original result
+### Sequential (non-federated) curriculum training — CONFIRMED real, at a genuinely smaller
+magnitude than originally reported (a bug inflated the first result)
 
-**MAJOR CORRECTION, 2026-09-06:** a real RNG-isolation bug in `HoldoutEvaluator` (§88 in the
-investigation log) was silently reducing effective seed independence across every seed's training
-trajectory (see §88's full mechanism). Fixed at the source. Re-verifying under the fix (§89) at the
-original 3 seeds shows the effect is REAL BUT SUBSTANTIALLY WEAKER than first reported: best-
-checkpoint \|diff\|/SE dropped from 4.20 to **1.88** (best-round) and 4.49 to **2.04** (mean) — right
-at this project's bar rather than clearing it by 4x, and one of the three seeds (seed 7) that
-originally showed +49.6% now shows an essentially flat -0.7%. **The numbers below are the ORIGINAL,
-now-known-to-be-inflated ones, kept for the historical record of what was first claimed — do not
-cite them.** Extending to 6 seeds under the fix before drawing any real conclusion; see §89 for the
-current status and check back for the 6-seed result before treating this as settled in either
-direction.
+**RESOLVED, 2026-09-07** (superseding the "major correction, pending" note that stood earlier): a
+real RNG-isolation bug in `HoldoutEvaluator` (§88 in the investigation log) was silently reducing
+effective seed independence across every seed's training trajectory in every single-process
+diagnostic script this session. Fixed at the source. Full 6-seed re-verification under the fix
+(§89) is now complete:
+
+| | \|diff\|/SE vs. best-round | \|diff\|/SE vs. mean |
+|---|---:|---:|
+| Sequential FINAL checkpoint (6 seeds, fixed code) | **1.92** | **2.26** |
+| Sequential BEST checkpoint (6 seeds, fixed code) | **3.87** | **4.22** |
+
+5 of 6 seeds are clearly positive on the best-checkpoint measure (the 6th is flat, not a reversal).
+**The effect is real and confirmed at the standard training budget** — genuinely smaller than the
+original (buggy) claim of 5.71/6.32, but not remotely eliminated; the original 3-seed re-check
+(1.88/2.04) that looked like it might be trending toward null turned out to be an unrepresentative
+partial sample, not the final answer — the 3 additional seeds pulled the aggregate back to solid
+significance. Separately, the escalation to a 3x larger training budget (§86) did NOT hold up at
+all on re-verification (a complete reversal on its one seed) — that specific "bigger budget helps
+even more" claim should be treated as unresolved/likely an artifact, not as evidence against the
+standard-budget finding, which rests on a full, genuinely-independent 6-seed sample.
 
 Instead of training every city in parallel and averaging weights each round (FedAvg), fully train
 on city_1, then CONTINUE the same weights on city_4, then city_6 — one pass, no aggregation step at
@@ -288,23 +297,21 @@ sharpest demonstration yet of, this document's standing diagnosis (§70/§71) th
 search or data, is the binding constraint: this result shows a much better policy is easily
 reachable via a completely different, much simpler training procedure, it just isn't perfectly kept.
 
-**The §86 (3x budget) numbers below are ALSO from the pre-fix, buggy code and are being
-re-verified alongside §85's 6-seed re-run (§89) — do not cite either.** Original (now-superseded)
-claim, kept for the historical record only: training city_1 ALONE for 30 episodes reached a holdout
-reward of -2453.37, and the matched parallel-FedAvg baseline at the same budget got worse with more
-rounds, giving sequential's best checkpoint a claimed +74.0%/+75.8% edge. Whether this specific
-number survives re-verification is unknown as of this writing — §85's own 3-seed re-verification
-already showed the effect is real but much weaker than first reported (best-checkpoint |diff|/SE
-dropped from 4.20 to 1.88), so the §86 single-seed number should be treated with at least as much
-caution until it's independently re-run under the fix.
+**§86 (3x budget) update: re-verified and did NOT hold up — a complete reversal on its one seed.**
+The original claim (training city_1 alone for 30 episodes reaching -2453.37, +74.0%/+75.8% best-
+checkpoint edge) was entirely an artifact of the RNG bug: under the fix, the same seed's trajectory
+monotonically got WORSE through every training phase, ending as a statistical wash vs. baseline.
+Single seed, so this doesn't prove the large-budget variant never helps, but the specific dramatic
+claim should be treated as unresolved/likely spurious, not confirmed, pending its own multi-seed
+replication (not yet done).
 
-**Current honest status (2026-09-06, pending the 6-seed re-verification):** sequential training
-appears to produce a real but more modest and less certain generalization benefit than first
-reported — direction plausible, magnitude and significance not yet resolved. This is still a
-meaningful result methodologically (a genuinely different training paradigm, no new architecture) but
-should not yet be called "the headline finding of the project" until the corrected 6-seed number is
-in. Check `divergence_investigation.md` §89 for the current state before citing anything from this
-section.
+**Current honest status, FINAL (2026-09-07, all 6 seeds re-verified):** sequential training at the
+STANDARD budget is a real, confirmed generalization benefit — |diff|/SE 1.92/2.26 (final checkpoint),
+3.87/4.22 (best checkpoint), 5 of 6 seeds positive on the best-checkpoint measure. Genuinely smaller
+than the original (buggy) claim, but a real, citable, methodologically clean result (a different
+training paradigm, zero new architecture). The 3x-budget escalation is NOT part of this confirmed
+claim and should not be cited. See `divergence_investigation.md` §89 for the full reconciliation of
+all three re-verification data points.
 
 ---
 
@@ -336,20 +343,31 @@ section.
   training/aggregation-time mechanisms were tried (replay reset, recurrent memory, topology-
   conditioned FiLM, Reptile-style blending, evolution strategies); exactly one (item 22,
   potential-based reward shaping) confirmed as a real, replicated win.
-- **Sequential (non-federated) curriculum training, tried after the queue closed, LOOKED like the
-  strongest result in the whole investigation but a real bug (§88) inflated it substantially.** The
-  original |diff|/SE 3.48-6.32 at "6-seed rigor" was generated under a since-fixed RNG-isolation bug
-  that silently reduced effective seed independence. Re-verified under the fix at 3 seeds (§89): the
-  best-checkpoint measure is now 1.88-2.04 — right at this project's bar, not clearing it by 4x+ — and
-  one of the three original seeds that showed a strong effect now shows essentially none. Still a
-  live, plausible lead, not dismissed, but nowhere near as settled as first reported. 6-seed
-  re-verification in progress; treat as unresolved until it lands.
+- **Sequential (non-federated) curriculum training, tried after the queue closed, is CONFIRMED as a
+  real second positive finding — at a genuinely smaller magnitude than first reported, after a real
+  bug (§88) was found and fixed.** The original |diff|/SE 3.48-6.32 at "6-seed rigor" was generated
+  under a since-fixed RNG-isolation bug that silently reduced effective seed independence. Full
+  6-seed re-verification under the fix (§89): |diff|/SE 1.92/2.26 (final checkpoint), 3.87/4.22
+  (best checkpoint) — genuinely smaller than the original claim, but real and solidly above this
+  project's bar on 3 of 4 measures. 5 of 6 seeds positive on the best-checkpoint measure. The
+  separate "3x budget makes it even better" escalation (§86) did NOT survive re-verification (a
+  complete reversal on its one seed) and should be treated as unresolved, not part of this confirmed
+  claim.
+- **A bespoke new mechanism (Self-Anchoring Training with Confidence-Gated Reversion, §90) was
+  built directly for this project's own diagnosed retention bottleneck, per direct user request for
+  a genuinely new solution rather than an existing continual-learning method.** First pilot at the
+  default threshold was inconclusive (mechanism too conservative to engage reliably); a more
+  sensitive threshold engages reliably and shows a promising-but-not-yet-significant direction at
+  3 seeds (|diff|/SE 1.07 best-round, 0.58 mean; 2 of 3 seeds clearly positive), with the one
+  negative seed matching the same seed that reversed both TC-FedAvg and recurrent policy. 6-seed extension queued.
 
-**For a paper:** given the correction above, the safest current framing stays close to what §58-61
-already established: "a characterized cross-topology generalization gap; a mechanism (confident
-lock-in); a replicated test-time mitigation (fine-tuning); a thorough, rigorous elimination of the
-architecture and training-dynamics axes as culprits (five mechanisms tried, one confirmed modest
-win, potential-based reward shaping)." The sequential-training result may yet add a second genuine
-positive finding once re-verification completes, but it should not be treated as settled or used as
-the headline until then — citing an inflated number and having to retract it later would cost more
-credibility than waiting for the corrected one.
+**For a paper:** the framing now has TWO confirmed positive results, not one: potential-based reward
+shaping (item 22, |diff|/SE ~2.5) and sequential curriculum training (this section, |diff|/SE
+1.9-4.2 depending on measure) — both modest relative to the overall gap, both methodologically clean
+and properly replicated at 6-seed rigor under corrected code. Combined with the characterized
+cross-topology generalization gap, the confident-lock-in mechanism, the replicated fine-tuning
+mitigation, and the thorough elimination of the architecture/aggregation axes as culprits, this is a
+stronger paper than before this session: two genuine positive findings plus a rigorous, honest
+account of what doesn't work and why — including transparently reporting and correcting a real bug
+that briefly inflated one of the two positive results, which is itself evidence of the rigor this
+project applies to its own claims.

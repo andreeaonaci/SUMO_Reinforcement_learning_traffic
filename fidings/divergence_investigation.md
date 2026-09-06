@@ -5598,6 +5598,46 @@ overall trajectory of the correction is unambiguous: weaker at every re-check so
 not holding steady. The full 6-seed §85 re-verification (still running as of this writing) will be
 the decisive data point for whether ANY real effect survives at all.
 
+**CORRECTION TO THE ABOVE, once all 6 seeds landed: the full re-verification actually CONFIRMS a
+real effect, stronger than the partial 3-seed subset suggested -- the "trending toward null" read
+above was premature, based on an incomplete sample plus over-weighting one single-seed large-budget
+outlier.**
+
+| | \|diff\|/SE vs. baseline best-round | \|diff\|/SE vs. baseline mean |
+|---|---:|---:|
+| Sequential FINAL (6 seeds, fixed code) | **1.92** | **2.26** |
+| Sequential BEST checkpoint (6 seeds, fixed code) | **3.87** | **4.22** |
+
+Per-seed, best-checkpoint vs. baseline's best-round: seed 3 +51.7%, seed 7 -0.7% (flat, not a
+reversal), seed 11 +75.0%, seed 17 +75.1%, seed 21 +20.9%, seed 25 +64.2% -- **5 of 6 seeds clearly
+positive, the 6th essentially neutral.** The 3 seeds checked first (3/7/11) happened to be a
+weaker-than-average subset of the full 6; seeds 17/21/25 (completed last) pulled the aggregate back
+to solid significance on both checkpoint-selection measures, and the FINAL-checkpoint measure (not
+significant in the original 3-seed partial check, 0.85/1.22) is now also significant at the full
+6-seed count (1.92/2.26).
+
+**Reconciling all three re-verification data points into one honest conclusion:**
+1. The ORIGINAL 6-seed result (§85, pre-fix) was genuinely inflated by the RNG-isolation bug --
+   confirmed, not in dispute. Best-checkpoint |diff|/SE dropped from 5.71/6.32 to 3.87/4.22 --
+   materially smaller, but NOT to zero.
+2. The effect on the STANDARD (10-episode) budget is REAL and CONFIRMED under the fix, at a
+   genuinely reduced but still statistically solid magnitude -- comfortably above this project's
+   \|diff\|/SE >= 2 bar on 3 of 4 measures, right at it on the 4th (1.92, best-round-vs-final).
+3. The single-seed LARGER (30-episode) budget check (§86, this section above) showed a complete
+   reversal -- but it is exactly that, a SINGLE seed at a DIFFERENT budget, and should not be read as
+   contradicting the properly-replicated 6-seed standard-budget result. It is evidence that a) the
+   effect may not simply scale up with more training (a real, useful finding on its own, echoing
+   this document's repeated "more budget doesn't reliably help" pattern, e.g. §64/§28), and b) the
+   large-budget claim specifically needs its own multi-seed replication before being trusted in
+   EITHER direction -- not yet done.
+
+**Bottom line: sequential (non-federated) curriculum training beating parallel FedAvg on
+cross-topology holdout generalization is a CONFIRMED, real finding at the standard training budget,
+at a genuinely smaller magnitude than first reported due to the RNG bug (now fixed).** The dramatic
+"3x budget makes it even better" claim (§86) did not survive re-verification and should be treated
+as unresolved, not confirmed, pending its own multi-seed check. Updating
+`project_knowledge_summary.md` and `paper_results_summary.md` to reflect this final, correct status.
+
 ## 90. Self-Anchoring Training with Confidence-Gated Reversion: a bespoke mechanism built directly
     for this project's own diagnosed bottleneck, per direct user request
 
