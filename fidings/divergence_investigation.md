@@ -5636,6 +5636,28 @@ direct comparability (`environments_c1_4_6 --rounds 5 --local_episodes 2 --pad_t
 --q_entropy_weight 0.05`), seeds 3/7/11 -- a first, deliberately small screen per the user's own
 request to check whether it's worth a larger commitment before doing so. Results to follow.
 
+**Result: genuinely mixed, not a clean win -- but informative about calibration, not a rejection of
+the idea.**
+
+| Seed | Pullback triggers this run | Best-round vs. baseline | Mean vs. baseline |
+|---|---:|---:|---:|
+| 3 | **0** (never engaged) | 0.0% (byte-identical to baseline) | 0.0% |
+| 7 | 4 | **+18.3%** | +6.3% |
+| 11 | 3 | -1.6% | -5.6% |
+
+Aggregate: |diff|/SE = 0.83 (best-round), 0.06 (mean) -- essentially null at 3 seeds, driven by
+seed 3 never triggering the mechanism at all (a true no-op run, giving zero information either way,
+not a confirmed miss) and the two seeds that DID trigger disagreeing in direction. **Reading: the
+default `--anchor_qgap_growth_threshold=3.0` is calibrated too conservatively to reliably engage --
+1 of 3 seeds' Q-gap growth never crossed 3x its own round-start baseline at all during 5 rounds.**
+This isn't evidence against the underlying idea (a good policy is reachable but not retained, and
+Q-gap growth is a validated marker of drift toward that) -- it's evidence the specific threshold
+chosen for this first pilot doesn't fire often enough to be tested fairly. Per the user's own
+framing (test small, then either scale up or improve first): **not yet worth a larger commitment as-
+is; improving the threshold sensitivity is the right next step before spending more compute**, not
+concluding the mechanism doesn't work from an undersampled trigger rate. A lower growth threshold
+(more sensitive, e.g. 2.0x) is the natural next pilot -- launching next.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
