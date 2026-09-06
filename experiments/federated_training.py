@@ -98,7 +98,7 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
                 encoder_depth: int = 2, n_attn_layers: int = 1,
                 anchor_revert: bool = False, anchor_warmup_calls: int = 100,
                 anchor_check_every: int = 50, anchor_qgap_growth_threshold: float = 3.0,
-                anchor_pullback_beta: float = 0.5):
+                anchor_pullback_beta: float = 0.5, cql_weight: float = 0.0):
     """Single place that constructs the local/global agent -- DQNAgent
     (default, unchanged), PPOAgent (--algo ppo, agents/ppo.py), or
     MunchausenDQNAgent (--algo munchausen, agents/munchausen_dqn.py; see
@@ -188,6 +188,7 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
         anchor_check_every=anchor_check_every,
         anchor_qgap_growth_threshold=anchor_qgap_growth_threshold,
         anchor_pullback_beta=anchor_pullback_beta,
+        cql_weight=cql_weight,
     )
 
 
@@ -935,6 +936,7 @@ def main(args):
             anchor_check_every=args.anchor_check_every,
             anchor_qgap_growth_threshold=args.anchor_qgap_growth_threshold,
             anchor_pullback_beta=args.anchor_pullback_beta,
+            cql_weight=args.cql_weight,
         )
         history = server.run(
             rounds=args.rounds,
@@ -1202,6 +1204,15 @@ if __name__ == "__main__":
                          help="Blend fraction toward the anchor on a triggered pull-back "
                               "(0=no-op, 1=hard reset to round-start weights). Ignored unless "
                               "--anchor_revert.")
+    parser.add_argument("--cql_weight", type=float, default=0.0,
+                         help="Conservative Q-Learning (Kumar et al. 2020), discrete-action form: "
+                              "adds cql_weight * (logsumexp(Q over valid actions) - Q(taken action)) "
+                              "to the loss -- pushes down Q-values the replay data doesn't support, "
+                              "without penalizing confidence in the correct action the way "
+                              "--q_entropy_weight does. Targets this project's own confident-lock-in "
+                              "pathology (sec 32-34) from a different mechanism than anything tried "
+                              "in the item-2X series. 0.0 (default) is an exact no-op. --algo dqn "
+                              "only for now.")
     parser.add_argument("--eval_every",            type=int,   default=1)
     parser.add_argument("--eval_episodes",         type=int,   default=5)
     parser.add_argument("--log_loss_every_steps",  type=int,   default=50,

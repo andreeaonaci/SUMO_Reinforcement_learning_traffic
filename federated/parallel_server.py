@@ -111,6 +111,7 @@ def _client_worker(
     anchor_check_every: int = 50,
     anchor_qgap_growth_threshold: float = 3.0,
     anchor_pullback_beta: float = 0.5,
+    cql_weight: float = 0.0,
 ):
     """Runs inside its own process for the ENTIRE training run.
 
@@ -233,6 +234,7 @@ def _client_worker(
                 anchor_check_every=anchor_check_every,
                 anchor_qgap_growth_threshold=anchor_qgap_growth_threshold,
                 anchor_pullback_beta=anchor_pullback_beta,
+                cql_weight=cql_weight,
             )
 
         while True:
@@ -373,6 +375,7 @@ class ParallelFederatedServer:
         anchor_check_every: int = 50,
         anchor_qgap_growth_threshold: float = 3.0,
         anchor_pullback_beta: float = 0.5,
+        cql_weight: float = 0.0,
     ):
         # item 20 (fidings sec 78): if >0, a round whose eval std_reward
         # falls below this threshold (the same std<50 screen already used
@@ -395,6 +398,7 @@ class ParallelFederatedServer:
         self.anchor_check_every = anchor_check_every
         self.anchor_qgap_growth_threshold = anchor_qgap_growth_threshold
         self.anchor_pullback_beta = anchor_pullback_beta
+        self.cql_weight = cql_weight
         self.global_model = global_model
         self.evaluator = evaluator
         self.checkpoint_dir = checkpoint_dir
@@ -501,7 +505,7 @@ class ParallelFederatedServer:
                     self.encoder_depth, self.n_attn_layers,
                     self.anchor_revert, self.anchor_warmup_calls,
                     self.anchor_check_every, self.anchor_qgap_growth_threshold,
-                    self.anchor_pullback_beta,
+                    self.anchor_pullback_beta, self.cql_weight,
                 ),
                 daemon=True,
             )

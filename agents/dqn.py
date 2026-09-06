@@ -145,6 +145,7 @@ class DQNAgent:
         anchor_check_every: int = 50,
         anchor_qgap_growth_threshold: float = 3.0,
         anchor_pullback_beta: float = 0.5,
+        cql_weight: float = 0.0,
     ):
         self.own_dim = own_dim
         self.neighbor_dim = neighbor_dim
@@ -287,6 +288,17 @@ class DQNAgent:
         self._anchor_qgap_ema: Optional[float] = None
         self._recent_qgap_ema: Optional[float] = None
         self._anchor_optimize_calls = 0
+        # Conservative Q-Learning (Kumar et al. 2020), discrete-action form: penalize
+        # LogSumExp(Q) over all VALID actions minus Q(taken action) -- pushes down
+        # Q-values for actions the replay data doesn't support taking here, without
+        # penalizing confidence in the correct action the way q_entropy_weight does
+        # (that term penalizes ANY peaked distribution; this one only penalizes
+        # overestimation relative to what the data actually shows). Targets this
+        # project's own "confident lock-in" pathology (§32-34) from a different angle
+        # -- a genuinely different mechanism than anything tried in the item-2X
+        # series, an established offline-RL technique for exactly this overestimation
+        # failure mode. 0.0 (default) is an exact no-op.
+        self.cql_weight = float(cql_weight)
         logger.info(
             "own_dim=%d neighbor_dim=%d action_dim=%d k_max=%d eps_decay=%.0f",
             self.own_dim, self.neighbor_dim, self.action_dim, self.k_max, self.eps_decay,
@@ -559,6 +571,15 @@ class DQNAgent:
             probs = torch.softmax(q_masked_for_entropy, dim=1)
             entropy = -(probs * torch.log(probs.clamp_min(1e-12))).sum(dim=1)
             loss = loss - self.q_entropy_weight * entropy.mean()
+
+        if self.cql_weight > 0:
+            # Discrete CQL(H): logsumexp over valid actions only (invalid ones are
+            # -inf via _mask_q, so exp(-inf)=0 and they don't contribute) minus the
+            # Q-value of the action actually taken in this transition.
+            q_masked_for_cql = _mask_q(q_values, action_mask)
+            logsumexp_q = torch.logsumexp(q_masked_for_cql, dim=1)
+            cql_term = (logsumexp_q - q_taken.squeeze(1)).mean()
+            loss = loss + self.cql_weight * cql_term
 
         if self.mu > 0 and self._global_params is not None:
             # Fused multi-tensor ops instead of a Python loop doing one
