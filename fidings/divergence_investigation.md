@@ -5054,6 +5054,41 @@ broader pattern that most single-lever interventions at this roster/budget do no
 replicable effect, and reinforcing potential-based reward shaping (item 22) as the one confirmed
 exception so far, not the start of an easy streak.
 
+## 83. Item 24 (meta-learning aggregation) re-examined: it already exists in this codebase and was
+    already tried once (§72 pilot C) -- re-testing under the CURRENT protocol before accepting that
+    stale result
+
+**2026-09-06.** Before building anything new for item 24, checked whether "Reptile-style
+meta-learning aggregation instead of plain FedAvg" already has an implementation to test. It does:
+`--fedavg_blend` (`federated/parallel_server.py`/`server.py`), implemented since at least
+2026-08-15, computes exactly the Reptile update rule -- `global_new = blend*aggregated +
+(1-blend)*global_old` each round, i.e. a damped step toward the round's FedAvg aggregate rather than
+fully replacing the global model with it, `blend=1.0` (default) an exact no-op. This is mechanically
+identical to what a from-scratch "meta-learning aggregation" implementation would have produced, so
+building a second one would have been pure duplication.
+
+**It was already tested once, §72 pilot C, and came back a clean single-seed miss** (`blend=0.5`,
+`environments_c1_4`, `--dueling --n_step 3`, 20 rounds, no `q_entropy_weight`, no potential shaping
+-- best -5414.22 / mean -7507.08 vs. baseline's -2855.95 / -6624.90, worse on both measures) --
+deprioritized per this project's own standing decision rule for a clean single-seed miss (§37/§41/
+§54/§65's precedent). **Re-testing anyway, under the CURRENT protocol, before accepting that result
+as final:** §72's pilot predates `q_entropy_weight=0.05` becoming the standard baseline (items 20-23
+and TC-FedAvg above all use it) and used a different, smaller roster (`environments_c1_4` vs.
+`environments_c1_4_6`) with a different architecture config (`--dueling --n_step 3`, neither used in
+today's pilots) -- enough protocol drift that a single old single-seed miss under a materially
+different setup shouldn't be trusted as the final word, especially given today's two other
+mechanism-level misses (§81/§82) already show this roster/budget is a harsh filter that a real
+effect should still be able to clear.
+
+**Going straight to 6 seeds this time** (skipping the 3-seed screen) -- both item 23 and TC-FedAvg
+looked borderline-to-promising at 3 seeds and evaporated at 6, so a 3-seed screen has stopped being
+informative enough to act on for this roster/protocol; better to spend the compute on one properly-
+powered comparison than two under-powered ones in sequence. Reusing the exact baseline data already
+collected for items 22/23/TC-FedAvg's pilots (identical config: `environments_c1_4_6 --rounds 5
+--local_episodes 2 --pad_to_true_holdout --q_entropy_weight 0.05`, seeds 3/7/11/17/21/25, plain
+`--algo dqn`) rather than re-running it -- only the `--fedavg_blend 0.5` treatment arm needs fresh
+compute. Results to follow.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
