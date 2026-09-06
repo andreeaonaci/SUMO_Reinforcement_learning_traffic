@@ -5742,6 +5742,33 @@ elsewhere in this document), extending to 6 seeds is the right next step once co
 again -- not yet done as of this writing, holding off due to heavy concurrent system load from the
 §85/86 re-verification batch still running.
 
+**Full 6-seed result (seeds 17/21/25 added, once system load cleared): directionally positive but
+does NOT clear the significance bar -- inconclusive, same honest treatment as item 23/TC-FedAvg.**
+
+| | \|diff\|/SE best-round | \|diff\|/SE mean |
+|---|---:|---:|
+| 6 seeds, 2.0x threshold | **1.53** | **0.90** |
+
+Per-seed: seed 3 +7.0%/+4.0%, seed 7 +36.7%/+11.4%, seed 11 -4.7%/-6.1%, seed 17 +10.0%/+7.0%, seed
+21 +12.5%/+2.0%, seed 25 -2.6%/-2.9%. **4 of 6 seeds positive** (one strong outlier at seed 7,
++36.7%), 2 mildly negative (seeds 11 and 25). Seed 11 negative yet again -- now the fourth different
+mechanism this session (TC-FedAvg, recurrent policy, and both anchor-revert thresholds) where this
+specific seed underperforms, strengthening the read that it's a generically hard training draw for
+this roster rather than evidence against any of these interventions individually.
+
+**Verdict: Self-Anchoring Training with Confidence-Gated Reversion is closed as inconclusive, not
+confirmed.** The idea is well-motivated (built directly from this project's own validated Q-gap/
+lock-in evidence, not a borrowed heuristic) and the calibration fix (moving from the too-conservative
+default to a threshold that actually engages) was a real, necessary correction -- but even properly
+calibrated and engaging reliably (10-27 triggers per run across all 6 seeds), the aggregate effect
+doesn't reach this project's own bar. A majority-positive, non-significant result at 6 seeds is
+exactly the profile this document treats as "a real, plausible direction that didn't pan out to
+significance," not as either a confirmed win or a clean miss -- consistent with how items 23 and
+TC-FedAvg were closed out. Not pursuing further tuning (e.g. a third threshold value) without a
+different reason to believe the next value would behave qualitatively differently -- matches this
+project's standing discipline against endless post-hoc hyperparameter search on an already-tested
+idea.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit

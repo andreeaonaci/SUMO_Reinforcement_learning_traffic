@@ -56,8 +56,8 @@ infrastructure:
    above — in progress, see section D), and Self-Anchoring Training with Confidence-Gated Reversion
    (an active, in-the-loop mechanism that snapshots a round's starting weights and pulls training
    back toward them when a validated internal signal — Q-gap growth — indicates drift toward the
-   project's diagnosed confident-lock-in failure mode; promising-but-not-yet-significant at a 3-seed
-   screen, see section E).
+   project's diagnosed confident-lock-in failure mode; closed as inconclusive at 6-seed rigor, see
+   section E).
 
 **Suggested paper framing given all of the above:** two confirmed positive results — potential-
 based reward shaping (finding 2 above, |diff|/SE ~2.5) and sequential curriculum training (finding 3,
@@ -230,7 +230,7 @@ re-run as of this writing -- no result to cite for this section yet.**
 ---
 
 ## E. Self-Anchoring Training with Confidence-Gated Reversion — bespoke mechanism targeting the
-    project's own diagnosed bottleneck; promising but not yet significant
+    project's own diagnosed bottleneck; CLOSED as inconclusive at 6-seed rigor
 
 **The design:** built per direct user request for a genuinely new solution to this project's own
 central bottleneck (a good policy is reachable but not retained -- see finding 3's mechanism, and
@@ -248,21 +248,21 @@ not a hard reset, so local training doesn't lose all forward progress.
 flag (default off), wired through the real `--parallel` pipeline as
 `--anchor_revert`/`--anchor_qgap_growth_threshold`/etc.
 
-### The numbers (3 seeds: 3/7/11, `environments_c1_4_6`, standard protocol)
+### The numbers (`environments_c1_4_6`, standard protocol)
 
-| Threshold | \|diff\|/SE best-round | \|diff\|/SE mean | Notes |
-|---|---:|---:|---|
-| Default (3.0x growth) | 0.83 | 0.06 | Too conservative -- 1 of 3 seeds never triggered at all (0 pullbacks), giving zero information for that seed |
-| More sensitive (2.0x growth) | 1.07 | 0.58 | Engages reliably (14-27 triggers/run); 2 of 3 seeds clearly positive (+7.0%, +36.7%), 1 negative (-4.7%) |
+| Threshold | Seeds | \|diff\|/SE best-round | \|diff\|/SE mean | Notes |
+|---|---:|---:|---:|---|
+| Default (3.0x growth) | 3 | 0.83 | 0.06 | Too conservative -- 1 of 3 seeds never triggered at all |
+| Sensitive (2.0x growth) | 3 | 1.07 | 0.58 | Engages reliably; 2 of 3 positive |
+| Sensitive (2.0x growth) | **6** | **1.53** | **0.90** | Engages reliably (10-27 triggers/run); **4 of 6 seeds positive** (one outlier +36.7%), 2 mildly negative |
 
-Neither threshold clears this project's significance bar yet, but the more sensitive threshold shows
-a genuinely different, more informative picture than the first (which was underpowered by a
-too-conservative default, not by the idea failing). Notably, the one negative seed (seed 11) is the
-SAME seed that reversed both TC-FedAvg (section C) and recurrent policy -- suggestive of a generically
-harder training draw for this roster rather than evidence against this mechanism specifically.
-
-**Do not cite this as confirmed or as a miss -- it is a promising, not-yet-resolved 3-seed screen.**
-6-seed extension at the 2.0x threshold is the natural next step, not yet run as of this writing.
+**Verdict: inconclusive, not confirmed** -- the calibration fix (default too conservative → a
+threshold that reliably engages) was a real, necessary correction, but even properly calibrated, the
+6-seed aggregate doesn't clear this project's bar. Same honest treatment as items 23/TC-FedAvg: a
+majority-positive but non-significant result, not cited as a working method. Notably, seed 11
+underperformed across FOUR different mechanisms this session (TC-FedAvg, recurrent policy, and both
+anchor-revert thresholds) -- suggestive of a generically hard training draw for this roster, not
+specific evidence against any one intervention.
 
 ---
 

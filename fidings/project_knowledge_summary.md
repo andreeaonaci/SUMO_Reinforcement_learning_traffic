@@ -353,13 +353,16 @@ all three re-verification data points.
   separate "3x budget makes it even better" escalation (§86) did NOT survive re-verification (a
   complete reversal on its one seed) and should be treated as unresolved, not part of this confirmed
   claim.
-- **A bespoke new mechanism (Self-Anchoring Training with Confidence-Gated Reversion, §90) was
-  built directly for this project's own diagnosed retention bottleneck, per direct user request for
-  a genuinely new solution rather than an existing continual-learning method.** First pilot at the
-  default threshold was inconclusive (mechanism too conservative to engage reliably); a more
-  sensitive threshold engages reliably and shows a promising-but-not-yet-significant direction at
-  3 seeds (|diff|/SE 1.07 best-round, 0.58 mean; 2 of 3 seeds clearly positive), with the one
-  negative seed matching the same seed that reversed both TC-FedAvg and recurrent policy. 6-seed extension queued.
+- **A bespoke new mechanism (Self-Anchoring Training with Confidence-Gated Reversion, §90), built
+  directly for this project's own diagnosed retention bottleneck per direct user request, is CLOSED
+  as inconclusive at 6-seed rigor** — |diff|/SE 1.53 (best-round) / 0.90 (mean), 4 of 6 seeds
+  positive (one strong outlier +36.7%) but not clearing the bar. The calibration fix (default
+  threshold too conservative to engage at all for some seeds → a more sensitive one that reliably
+  fires 10-27 times per run) was a real, necessary correction, but even properly engaging, the
+  aggregate effect falls short of significance — same honest treatment as items 23/TC-FedAvg. The
+  same seed (11) underperformed across four different mechanisms this session (TC-FedAvg, recurrent
+  policy, and both anchor-revert thresholds), suggesting a generically hard training draw for this
+  roster rather than evidence against any one intervention.
 
 **For a paper:** the framing now has TWO confirmed positive results, not one: potential-based reward
 shaping (item 22, |diff|/SE ~2.5) and sequential curriculum training (this section, |diff|/SE
