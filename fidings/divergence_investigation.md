@@ -4904,6 +4904,29 @@ via `git stash` comparison), no new regressions; `tests/test_flag_wiring.py`'s 1
 borderline, per this document's own standing rule -- see item 22's own 3-seed-then-6-seed path
 above). Results to follow.
 
+**3-seed result: near-null, both measures well below the bar, with unusually high seed-to-seed
+variance in the recurrent arm.**
+
+| | best-round (3-seed avg) | mean(5 rounds, 3-seed avg) |
+|---|---:|---:|
+| baseline | -9179.99 | -9515.65 |
+| `--algo recurrent` | -7842.69 | -9017.83 |
+| \|diff\|/SE | 1.04 | 0.97 |
+
+Per-seed best-round: baseline -9390/-9141/-9009 (tight, consistent) vs. recurrent -8496/**-5366**/
+-9665 (seed 7 an outlier win, seed 11 actually *worse* than every baseline seed). This is a
+different failure signature than item 22's clean 5-of-6-seeds-agree pattern -- here the seeds
+disagree on DIRECTION, not just magnitude, which is itself evidence against a real effect (a
+genuine improvement should show up as "better, to varying degrees," not "much better for one seed,
+worse for another"). Recurrence also cost real wall-clock: ~54 min for the 3-seed recurrent batch
+vs. ~40 min for baseline at the same concurrency, since `act_batch` must run a real forward pass for
+every intersection every tick (no skip-the-network-call-on-explore shortcut, unlike the stateless
+agents) -- a real cost for a result that isn't currently showing a real benefit.
+
+**Extending to 6 seeds (17/21/25 added) before closing this out**, per the same standing rule
+applied to item 22 -- 0.97-1.04 is not as dead-null as item 20's 0.30/0.38, and the per-seed
+direction-disagreement is worth checking isn't just bad luck on 3 seeds specifically.
+
 ## 82. TC-FedAvg (Topology-Conditioned FedAvg): a bespoke design, not an existing named method,
     built per direct user request after discussing what "2026-standard" federated-learning ideas
     could apply here
