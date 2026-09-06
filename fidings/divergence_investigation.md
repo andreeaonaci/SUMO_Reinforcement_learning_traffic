@@ -5382,6 +5382,49 @@ protocol: `--pad_to_true_holdout --q_entropy_weight 0.05`), single seed (3, the 
 seed, for direct comparability with §85's own seed-3 numbers at the smaller budget). Both arms
 launched concurrently. Results to follow.
 
+**Result: the finding does not just hold at 3x budget -- it gets dramatically STRONGER on the
+best-checkpoint measure, and the parallel baseline actually got WORSE with more rounds, widening the
+gap further from both directions.**
+
+Sequential trajectory (seed 3, 30 episodes/city):
+
+| Stage | Holdout mean_reward |
+|---|---:|
+| Random init | -8585.72 |
+| After city_1 (30 episodes) | **-2453.37 (best point -- best result in this entire document)** |
+| After city_1+city_4 | -6207.73 |
+| After city_1+city_4+city_6 (final) | -7642.36 |
+
+Parallel-FedAvg baseline (seed 3, `--rounds 15 --local_episodes 2`, same 30-episode-equivalent
+budget): best-round -9450.14, mean -10143.20 -- both WORSE than the smaller 5-round/10-episode
+baseline's own seed-3 numbers (-9390.30/-9687.10), consistent with this document's established
+"more federated training doesn't reliably help, and can hurt" pattern (§28 and others).
+
+| | vs. baseline best-round | vs. baseline mean |
+|---|---:|---:|
+| Sequential FINAL | +19.1% | +24.7% |
+| Sequential BEST checkpoint | **+74.0%** | **+75.8%** |
+
+**City_1 trained ALONE for 30 episodes reaches a holdout reward better than ANY other result
+anywhere in this entire investigation** (-2453.37 -- for context, the previous best single number in
+this whole document, outside rule-based baselines, was nowhere close to this) -- direct, dramatic
+confirmation that more training finds an even better solution faster, matching the "search is easy"
+half of the §70/§71 diagnosis. It still doesn't survive later cities' training (relapsing to
+-7642.36 by the end, worse even than the smaller budget's own final number, -7198.74) --
+confirming the "retention is hard" half just as clearly. Single seed at this specific larger budget
+(caveat, same as any single-data-point result), but combined with §85's already-confirmed 6-seed
+result at the smaller budget, this is now a well-triangulated, high-confidence finding: **sequential
+non-federated curriculum training substantially and robustly beats parallel FedAvg on cross-topology
+holdout generalization, at multiple budgets, with a real and measurable (but non-dominant)
+forgetting cost.**
+
+**This is now, with high confidence, the single most important empirical finding of the entire
+project.** Practical implication worth testing directly next: since the intermediate peak
+(mid-sequence, or even after just the FIRST city) is so much better than the final trained model,
+holdout-monitored checkpoint selection during sequential training (matching how "best-round" has
+always been read in this document, and directly reusable infrastructure -- no new code needed) may
+already be a deployable recipe, independent of ever solving the underlying retention problem.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit

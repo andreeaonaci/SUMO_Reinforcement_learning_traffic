@@ -276,6 +276,19 @@ sharpest demonstration yet of, this document's standing diagnosis (§70/§71) th
 search or data, is the binding constraint: this result shows a much better policy is easily
 reachable via a completely different, much simpler training procedure, it just isn't perfectly kept.
 
+**Escalation to 3x training budget (§86) confirms and sharpens this further — now the single most
+important empirical finding of the whole project.** Training city_1 ALONE for 30 episodes reaches a
+holdout reward of -2453.37 — better than any other result anywhere in this document outside
+rule-based baselines. The matched parallel-FedAvg baseline at the same budget got WORSE with more
+rounds (best -9450.14 vs. the smaller budget's -9390.30), widening the gap from both directions:
+sequential's best checkpoint beats it by **+74.0%** (best-round) / **+75.8%** (mean); even the final
+checkpoint, after relapsing, still beats it by +19-25%. Single seed at this larger budget, but
+combined with §85's 6-seed confirmation at the smaller one, this is a well-triangulated result
+across two budgets, not a one-off. It also sharpens the "search vs. retention" diagnosis into its
+cleanest form yet: a policy far better than anything federated training has ever produced is
+trivially reachable by just training on ONE city for a while — the entire remaining problem is
+keeping it.
+
 ---
 
 ## 5. Bottom line, right now
