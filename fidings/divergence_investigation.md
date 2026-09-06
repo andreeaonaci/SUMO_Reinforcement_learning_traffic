@@ -5244,6 +5244,49 @@ check re-eval, since no further training happened in between -- exactly what sho
 deterministic eval, sec 35). Real pilot launched: `--episodes_per_city 10 --seed 3`, matching the
 existing baseline data's total per-city training volume. Results to follow.
 
+**Seed-3 result: the largest single-seed lead of the entire session -- and a real, measured
+catastrophic-forgetting cost, exactly as continual-learning theory predicts.**
+
+Holdout trajectory (progressive sequential exposure):
+
+| Stage | Holdout mean_reward |
+|---|---:|
+| Random init | -8585.72 |
+| After city_1 | -8391.42 |
+| After city_1+city_4 | **-5883.26 (best point)** |
+| After city_1+city_4+city_6 (final) | -7198.74 |
+
+Against the existing parallel-FedAvg baseline at the SAME seed (3) and SAME total per-city training
+volume (10 episodes/city): best-round -9390.30, mean(5 rounds) -9687.10 (from items 22/23/24's
+baseline data). Sequential training's FINAL checkpoint beats FedAvg's best-round by ~23.3% and its
+mean by ~25.7%; the best INTERMEDIATE checkpoint (after city_1+city_4, before city_6) beats FedAvg's
+best-round by ~37.4%. This is a substantially larger single-seed gap than TC-FedAvg's own initial
+3-seed screen that later evaporated (§82) -- worth taking seriously, but precisely the kind of
+dramatic-looking single number this document's own standing rule exists to guard against.
+
+Catastrophic forgetting, measured directly (each city's own in-distribution reward right after its
+own training phase vs. again at the very end):
+
+| City | Right after own training | Final (all cities trained) | Change |
+|---|---:|---:|---:|
+| city_1 (trained first) | -2053.65 | -3369.62 | **64% worse** |
+| city_4 (trained second) | -389.52 | -417.34 | ~7% worse |
+| city_6 (trained last) | -3.01 | -3.01 | unchanged (no training after it) |
+
+city_1's own performance degrades substantially once city_4/city_6 are trained afterward -- real,
+substantial forgetting, worse the earlier a city was trained (exactly the expected continual-
+learning signature: more subsequent gradient steps had the chance to overwrite it). Also notable:
+the best HOLDOUT checkpoint was not the final one -- it was mid-sequence (after city_1+city_4,
+before city_6) -- the same "best-round-so-far, not final-round" pattern this document has seen
+repeatedly elsewhere (§51/§52, §69's checkpoint-selection recommendation), now showing up in a
+completely different training paradigm too.
+
+**Extending to seeds 7/11 immediately (3-seed screen) before drawing any conclusion**, per this
+document's own standing rule -- applied here with the same rigor regardless of how promising this
+one number looks, precisely because several past single-seed leads of similar or smaller magnitude
+did not survive more seeds (§11->§12, §30->§31, §46->§47, TC-FedAvg's own 3-seed->6-seed reversal,
+§82). Results to follow.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
