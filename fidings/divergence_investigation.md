@@ -5804,7 +5804,11 @@ fastest-signal first. Item 1 launched using existing checkpoints (no training ne
 confirmatory rigor directly since no new compute is being spent). Item 2 implemented
 (`agents/dqn.py`'s `cql_weight` flag, verified via unit test + real SUMO smoke run, see the commit
 history) and its 3-seed pilot (`--cql_weight 0.1`, matching the standard `environments_c1_4_6`
-protocol) launched. Results to follow for both.
+protocol) launched. Item 3 (QR-DQN, `agents/networks.py`'s `distributional`/`n_quantiles` +
+`agents/qrdqn.py::QRDQNAgent`) also implemented and verified (pure-Python mechanics test + real SUMO
+smoke run, both clean) -- its own pilot held back briefly since the system was oversubscribed
+(load ~22 on 12 cores) from items 1/2 already running concurrently; launching once load clears.
+Results to follow for all three.
 
 ## Open questions / next steps
 
