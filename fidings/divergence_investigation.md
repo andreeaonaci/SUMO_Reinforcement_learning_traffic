@@ -5810,6 +5810,19 @@ smoke run, both clean) -- its own pilot held back briefly since the system was o
 (load ~22 on 12 cores) from items 1/2 already running concurrently; launching once load clears.
 Results to follow for all three.
 
+**CQL (item 2) 3-seed result: the strongest, most unanimous first screen since item 22 and
+sequential training -- both measures already clear the bar, no exceptions across seeds.**
+
+| | \|diff\|/SE best-round | \|diff\|/SE mean |
+|---|---:|---:|
+| `--cql_weight 0.1`, 3 seeds | **2.35** | **2.80** |
+
+Per-seed: seed 3 +13.9%/+5.3%, seed 7 +2.4%/+2.5%, seed 11 +16.8%/+8.2% -- **all three positive, no
+reversals.** This is the same qualitative shape as item 22's and sequential training's own confirmed
+results (a majority/unanimous positive direction, not one outlier seed dragging the average) rather
+than TC-FedAvg/recurrent's pattern (mixed directions). Extending to 6 seeds (17/21/25) immediately
+before calling this confirmed, per standing discipline -- launched, results to follow.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
