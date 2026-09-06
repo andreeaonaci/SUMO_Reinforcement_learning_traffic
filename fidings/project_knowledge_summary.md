@@ -181,15 +181,39 @@ roster diversity, replay-buffer reset) came back null or negative. Not yet teste
 training budget or other weight values — flagged as a good follow-up once the item-2X queue is
 finished, not urgent right now.
 
-### Items 23-25 — queued, not yet started
+### Item 23 — Recurrent policy (GRU): **inconclusive, not confirmed**
 
-- **23. Recurrent policy (LSTM/GRU over recent ticks).** Every architecture tried in §73-76 was
-  still a purely reactive function of one tick's snapshot. Temporal memory is a genuinely different
-  axis (time, not capacity).
+A GRUCell-based hidden state per intersection (stored-state DRQN, `agents/recurrent_dqn.py`,
+`--algo recurrent`) gave the network actual memory across ticks — every architecture tried in
+§73-76 was still a purely reactive function of one tick's snapshot. At 6-seed rigor: |diff|/SE 1.63
+(best-round), 1.98 (mean) — mean sits right at the bar without clearing it, best-round stays clearly
+under. 4 of 6 seeds favor it (two substantially) but 2 of 6 are actively worse — a real direction
+split, not a clean win. Also costs real extra compute (a forward pass on every intersection every
+tick, no skip-on-explore shortcut). Closed as inconclusive.
+
+### TC-FedAvg (Topology-Conditioned FedAvg) — a bespoke design, added mid-queue per direct user
+request for something purpose-built rather than an existing named method: **promising, 6-seed
+confirmation pending**
+
+Motivated by the accumulated evidence that every AGGREGATION-strategy tweak tried in this project
+came back null and federation-vs-no-federation makes no difference either — the problem was never
+*how* weights get combined, but that the one shared function being averaged has no way to behave
+differently for a 3-way vs. 5-way intersection. A small shared hypernetwork
+(`NeighborAttentionQNetwork.topo_hyper`) maps a 4-dim structural descriptor (valid-action/-neighbor
+fraction, mean/max hop distance — computable for any intersection, including one never trained on)
+to a FiLM scale/shift on the fused representation. FedAvg itself is completely unchanged; only the
+shared function being averaged gains topology-awareness. Zero-initialized so it's an exact identity
+transform at the start of training. At 3 seeds: |diff|/SE 1.98 (best-round), 2.18 (mean), 2 of 3
+seeds clearly favoring it and the third roughly flat — the same qualitative shape as item 22's
+confirmed result, not item 23's direction-disagreeing one. 6-seed confirmation in progress.
+
+### Items 24-25 — queued, not yet started
+
 - **24. Meta-learning aggregation (Reptile/MAML-style) instead of plain FedAvg.** The one lever
   that's actually worked (fine-tuning) succeeds *despite* FedAvg optimizing for the wrong thing (a
   good fixed policy on average, not a good starting point for adaptation) — this targets that
-  mismatch directly.
+  mismatch directly. (Superseded in spirit by TC-FedAvg above, built instead per direct user request
+  for a bespoke design; still worth trying on its own merits if TC-FedAvg's confirmation holds.)
 - **25. Evolution strategies (gradient-free policy optimization).** The most radical departure: no
   Q-values, no TD-bootstrapping at all — sidesteps the entire diagnosed confident-lock-in mechanism
   class rather than patching around it.
@@ -209,9 +233,13 @@ finished, not urgent right now.
   modest training-time improvement (|diff|/SE 2.5 on both measures, 6 seeds, no single-outlier
   dependence) — the first training-time lever in this whole document to hold up. Still a small
   effect relative to the baseline gap, not a fix.
-- Three more genuinely different mechanism hypotheses remain queued (items 23-25) and will be
-  tested with the same rigor (3+ seeds from the start, or multiple independent windows for
-  eval-time tricks) before any of them gets cited as a real finding.
+- Recurrent policy (item 23) is inconclusive — a real direction split across seeds (4 favor it,
+  2 against), neither measure clears the bar cleanly. Closed, not a confirmed finding.
+- TC-FedAvg (bespoke topology-conditioning design) is the most promising lever found so far,
+  pending its 6-seed confirmation — same consistent-direction shape as item 22's confirmed win,
+  not item 23's inconsistent one.
+- Two more genuinely different mechanism hypotheses remain queued (items 24-25) and will be
+  tested with the same rigor (3+ seeds from the start) before either gets cited as a real finding.
 
 **For a paper:** the defensible framing remains what §58-61 of the investigation log established —
 not "federated DQN traffic control fails," but "a characterized, budget-resistant cross-topology

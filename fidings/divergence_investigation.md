@@ -4927,6 +4927,31 @@ agents) -- a real cost for a result that isn't currently showing a real benefit.
 applied to item 22 -- 0.97-1.04 is not as dead-null as item 20's 0.30/0.38, and the per-seed
 direction-disagreement is worth checking isn't just bad luck on 3 seeds specifically.
 
+**6-seed result: does NOT clear the bar cleanly -- closing item 23 out as inconclusive/not
+confirmed, distinct from item 22's clean win.**
+
+| | best-round (6-seed avg) | mean (6-seed avg) |
+|---|---:|---:|
+| baseline | -9296.84 | -9675.20 |
+| `--algo recurrent` | -8129.76 | -8917.56 |
+| \|diff\|/SE | 1.63 | 1.98 |
+
+Per-seed best-round direction: seeds 3/7/17/25 favor recurrent (two substantially: seed 7 -9141
+->-5366, seed 25 -8997->-6894); seeds 11/21 are WORSE than their baseline counterpart (-9009->-9665,
+-9019->-9614). **4 of 6 favor it, but 2 of 6 actively reverse** -- a real split, not item 22's
+"5 clearly agree, 1 near-exact tie" shape. Mean-reward's |diff|/SE lands right at 1.98, essentially
+on the bar but not over it; best-round stays clearly under at 1.63. **Verdict: item 23 does not
+replicate as a confirmed finding.** The raw averages look directionally positive, and it costs real
+extra wall-clock (recurrent's per-tick forward pass on every intersection, win or lose, made this
+batch noticeably slower than plain DQN at the same settings) for a benefit that isn't statistically
+solid and doesn't show the consistent-direction signature this document treats as the marker of a
+real effect. Reasonable reading: recurrent memory doesn't reliably help OR hurt this task at this
+budget -- it may simply add variance (a genuinely different, more expressive credit-assignment
+path can go either way depending on what a given training run's random draws happen to reinforce)
+without a clear net benefit. Item 23 closed as inconclusive; moving on. TC-FedAvg (the topology-
+conditioning idea, tested in parallel) remains the more promising lever of the two -- see its own
+section above for the pending 6-seed confirmation.
+
 ## 82. TC-FedAvg (Topology-Conditioned FedAvg): a bespoke design, not an existing named method,
     built per direct user request after discussing what "2026-standard" federated-learning ideas
     could apply here
@@ -5040,10 +5065,14 @@ one at a time, before moving to the next:**
     non-outlier-driven win** -- modest (~4-7.5% better, not close to closing the baseline gap) but
     genuine. `--potential_shaping_weight`/`--potential_shaping_gamma` in
     `experiments/federated_training.py`.
-23. **Recurrent policy (LSTM/GRU over recent ticks).** Every architecture tested in §73-76 (wider,
-    deeper, more attention layers) was still a purely reactive function of one tick's snapshot.
-    Temporal memory is a genuinely different axis (time, not space/capacity) and a policy with
-    history can't collapse into "always pick action X" the same way a stateless one can.
+23. ~~Recurrent policy (LSTM/GRU over recent ticks).~~ **DONE, §81: inconclusive, not confirmed --
+    |diff|/SE 1.63 (best-round), 1.98 (mean) at 6 seeds, 4/6 seeds favor it but 2/6 actively worse.**
+    Every architecture tested in §73-76 (wider, deeper, more attention layers) was still a purely
+    reactive function of one tick's snapshot -- a GRUCell-based hidden state (stored-state DRQN,
+    `agents/recurrent_dqn.py`, `--algo recurrent`) gave the network actual temporal memory, a
+    genuinely different axis (time, not space/capacity). Doesn't reliably help or hurt at this
+    budget; costs real extra compute (a forward pass on every intersection every tick, no skip-on-
+    explore shortcut). Closed as inconclusive, not a confirmed finding.
 24. **Meta-learning aggregation (Reptile/MAML-style) instead of plain FedAvg.** The one lever that's
     actually worked in this whole project is fine-tuning (§66-70) -- but FedAvg optimizes the
     global model to be a good *fixed policy on average*, not a good *starting point for local
