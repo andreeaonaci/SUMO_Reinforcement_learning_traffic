@@ -1,184 +1,286 @@
 # Paper-Ready Results Summary
 
-**Status of this document:** written from the numbers already recorded in
-`divergence_investigation.md` (sections cited inline) and
-`no_federation_vs_federated_comparison.md`, produced on a different machine.
-This machine (a fresh WSL environment set up 2026-08-15) does not yet have
-the raw `results/*/federated_history.json` / checkpoint files those numbers
-came from — only the summary statistics already written into the docs. The
-numbers below should be treated as reliable for drafting (they're the
-project's own documented, multi-seed results) but **re-verify against the
-actual `results/` files once copied over**, and update this doc if anything
-doesn't match. Everything here is re-derivable from the cited sections.
+**Status of this document, rewritten 2026-09-06:** the previous version of this file dated from
+2026-08-15 and predates the entire §43-onward reframing of this project's central story (see
+`CLAUDE.md`'s "RESUME HERE" section and `divergence_investigation.md` §43-86). Its old section A's
+headline claim ("2-city trained policy beats both rule-based baselines") is a **confirmed-superseded
+artifact** — §43 later found that claim was an in-distribution evaluation, not a true cross-topology
+holdout result (the 2-city roster's action_dim was too narrow to reach the real holdout, so
+evaluation silently fell back to one of the roster's own training cities). That old content is kept
+below, in section F, with its correction notice intact, purely as a historical record — **do not
+cite section F in a paper**. Everything above it (sections A-E) reflects the current, corrected
+state of knowledge and is safe to draft from directly. All numbers are re-derivable from the cited
+`divergence_investigation.md` sections; if anything here ever disagrees with that document, the
+investigation log wins.
 
 ---
 
-## A. Solidified result: 2-city trained policy beats both rule-based baselines on best-achieved performance
+## Novelty / contribution framing
 
-**The claim:** on a 2-city federated roster (`city_1` + `city_4`), the
-current best-known training config (`--dueling --n_step 3`, masked-head
-aggregation on) reaches a policy whose best-round performance clearly beats
-both `fixed_time` and `max_pressure` rule-based control, with proper 5-seed
-statistical grounding on both sides of the comparison.
+Four distinct layers of contribution, useful for structuring a paper's framing (introduction /
+related work) and for keeping straight what's actually new here versus what's supporting
+infrastructure:
 
-### The numbers
+1. **Architecture (established before the 2026-09-06 session):** a genuinely topology-agnostic
+   "foundation model" for traffic-signal control — one shared DQN controls intersections of
+   arbitrarily different topologies (3-way/4-way/5-way, differing neighbor counts) purely through
+   `action_mask`/`neighbor_mask`, no per-topology code paths, masked neighbor-attention handling any
+   number of neighbors. Federated learning is applied across genuinely heterogeneous topologies, not
+   just non-iid data on the same topology — an unusual combination in the FL literature, and
+   different from how most traffic-signal RL work (including the RESCO benchmark this project's city
+   configs are drawn from) trains per-network models rather than one model shared across
+   structurally different networks.
+2. **Mechanistic diagnostics (established before 2026-09-06, real contributions in their own
+   right):** the "confident lock-in" failure mode, rigorously demonstrated via byte-identical
+   rewards across 30 different random seeds and tied directly to Q-value confidence
+   (`divergence_investigation.md` §32-34); separating training-budget/eval-protocol confounds from
+   the genuine cross-topology generalization gap (§58-61) — showing most of the originally-reported
+   "3-4 orders of magnitude worse than baselines" gap was a confound, not a pure algorithm failure;
+   the counterintuitive finding that a randomly-initialized network fine-tuned on the target city
+   *beats* a federated-pretrained one (§70).
+3. **The 2026-09-06 session's central empirical discovery — the strongest, most novel, most
+   citable result in the project as of this writing:** sequential (non-federated) curriculum
+   training substantially and robustly beats parallel FedAvg on cross-topology holdout
+   generalization, confirmed at 6-seed rigor and replicated at a second, 3x-larger training budget,
+   with a real, precisely measured catastrophic-forgetting cost that does not erase the net gain.
+   See section A below. This is the section to lead a paper's results with if it holds up under
+   further validation.
+4. **Bespoke method designs, built from scratch for this exact problem rather than adapted from an
+   existing named method (2026-09-06 session, per direct user request for genuinely new designs):**
+   TC-FedAvg (a shared hypernetwork conditions the network's internal computation on a structural
+   descriptor computable for any intersection, including unseen ones — architecturally novel, did
+   not survive 6-seed confirmation, see section C) and Progressive Curriculum FedAvg (simplest-to-
+   complex city ordering + phased-in federation via focus-then-merge, synthesizing findings 2 and 3
+   above — in progress, see section D).
 
-| condition | n seeds | metric | value |
-|---|---:|---|---:|
-| Trained DQN | 5 | mean reward (across 20 rounds) | -2030.4 (std 515.0) |
-| Trained DQN | 5 | **best-round reward** | **-43.9** |
-| `fixed_time` baseline | 5 | mean reward | -472.400 (std 70.311) |
-| `max_pressure` baseline | 5 | mean reward | -240.698 (std 25.784) |
+**Suggested paper framing given all of the above:** not "federated DQN traffic control fails," but
+"a characterized cross-topology generalization gap; a well-understood partial mechanism (confident
+lock-in); a thorough, rigorous elimination of the architecture and training-dynamics axes as
+culprits (six mechanisms tried in the 2026-09-06 session alone, one confirmed modest win); and a
+genuinely surprising positive result — abandoning federated averaging for simple sequential
+curriculum training substantially improves cross-topology generalization at matched compute, at the
+cost of measurable, characterized forgetting." Same category of contribution as the RESCO benchmark
+paper itself (whose own headline finding is also "published methods underperform simple baselines in
+realistic scenarios"), strengthened by finding 3 above turning it from a purely negative result into
+one with a genuine positive, actionable core.
 
-Sources: trained DQN — `divergence_investigation.md` §21 (5-seed
-`dueling+n_step` validation) and §20 (2-city fix-ON arm, reused directly by
-§21). Baselines — §29 (5-seed `--eval_sumo_seed 1-5` sweep via
-`--baseline_controller`, no training needed).
+---
+
+## A. Sequential (non-federated) curriculum training beats parallel FedAvg — the project's
+    strongest confirmed result
+
+**The claim:** instead of training every city in parallel and averaging weights each round
+(FedAvg), fully training on one city, then continuing the SAME weights on the next city, then the
+next (one pass, no aggregation step at all) produces a policy that generalizes to the true holdout
+city dramatically better than parallel FedAvg, at matched total training volume — confirmed at
+6-seed rigor and replicated at a second, larger budget.
+
+**Source:** `divergence_investigation.md` §85 (6-seed confirmation, `environments_c1_4_6`,
+`city_1 -> city_4 -> city_6` order, 10 episodes/city) and §86 (3x-budget replication, seed 3, 30
+episodes/city). Implementation: `diagnostics/sequential_training.py`.
+
+### The numbers (§85, 6 seeds: 3/7/11/17/21/25, 10 episodes/city)
+
+| | vs. baseline best-round | vs. baseline mean |
+|---|---:|---:|
+| Sequential FINAL checkpoint | \|diff\|/SE = **3.48** | \|diff\|/SE = **4.14** |
+| Sequential BEST checkpoint (chosen in hindsight, same convention as "best-round" below) | \|diff\|/SE = **5.71** | \|diff\|/SE = **6.32** |
+
+Per-seed, best-checkpoint vs. baseline's own best-round: +23.3%, +49.6%, +80.0%, +44.4%, +25.5%,
++35.5% — **every single seed positive, no exceptions.** Unlike every other lever tried in the
+2026-09-06 session, this result got MORE significant going from 3 to 6 seeds, not less (3-seed
+screen: 1.60/1.85 final, 4.20/4.49 best-checkpoint) — the opposite of the standing "few-seed mirage"
+pattern this document has repeatedly warned about, and the clearest sign of a real, robust effect.
+
+### The numbers (§86, 3x budget, seed 3, 30 episodes/city)
+
+| Stage | Holdout mean_reward |
+|---|---:|
+| Random init | -8585.72 |
+| After city_1 alone (30 episodes) | **-2453.37 — best result in the entire investigation outside rule-based baselines** |
+| After city_1+city_4 | -6207.73 |
+| Final (city_1+city_4+city_6) | -7642.36 |
+
+Matched parallel-FedAvg baseline at the same budget (`--rounds 15 --local_episodes 2`) actually got
+WORSE with more rounds: best-round -9450.14, mean -10143.20 (vs. -9390.30/-9687.10 at the smaller
+budget) — widening the gap from both directions. Sequential's best checkpoint beats it by **+74.0%**
+(best-round) / **+75.8%** (mean); the final checkpoint, after relapsing, still beats it by +19.1%/
++24.7%.
+
+### Catastrophic forgetting, measured directly (§85, seed 3)
+
+| City | Right after its own training | Final (all cities trained) | Change |
+|---|---:|---:|---:|
+| city_1 (trained first) | -2053.65 | -3369.62 | **64% worse** |
+| city_4 (trained second) | -389.52 | -417.34 | ~7% worse |
+| city_6 (trained last) | -3.01 | -3.01 | unchanged |
+
+Real, substantial forgetting, worse the earlier a city was trained — the expected continual-learning
+signature. The net holdout-generalization gain survives this cost, but it is a genuine tradeoff, not
+a free win.
 
 ### Reading
 
-- **Best-round beats both baselines outright**: -43.9 vs -472.4 / -240.7 —
-  not close, and not a single-seed fluke (best-round numbers per seed:
-  -13.5, -18.9, -142.8, -20.8, -23.5 — four of five seeds beat -25; even the
-  worst seed's best round, -142.8, still clears both baseline means).
-- **Mean reward across all 20 rounds is the opposite direction**: -2030.4
-  is worse than both baselines' means. This is the honest, load-bearing
-  caveat — the claim here is specifically about *best-achievable policy*,
-  not *average round-to-round performance*. The paper should frame this as
-  "the trained policy is capable of a near-optimal signal-control policy,
-  round-to-round training is still noisy" rather than "the trained policy
-  is better than fixed-time control" unqualified.
-- **Evaluation caveat, already known and must be stated explicitly in the
-  paper's methodology section**: the 2-city roster's global `action_dim`
-  (5) is narrower than `city_5_holdout`'s (8), so `make_holdout_evaluator`
-  falls back to evaluating on `city_1` — one of the roster's own *training*
-  cities (§25, §29; confirmed on all 20/20 runs' logs). This is an
-  in-distribution evaluation, not evidence of generalization to an unseen
-  city. Only the 7-city roster (`environments/`) evaluates on the true
-  `city_5_holdout`.
-- This session added `--pad_to_true_holdout` (see
-  `experiments/federated_training.py`) specifically to let a future 2-city
-  run evaluate against the real holdout instead. Not yet run — doing so
-  would produce a *new*, more defensible number, but is a fresh experiment,
-  not a re-derivation of the numbers above (those remain valid as
-  in-distribution results, just labeled correctly).
+Sequential training reliably discovers a much better region of weight space than parallel FedAvg
+ever reaches at matched total training volume, and — while it does not perfectly retain that peak
+through the end of training — retains enough of it that even the FINAL checkpoint significantly
+beats FedAvg. Combined with the forgetting measurement, this is the sharpest demonstration yet of
+this project's standing diagnosis (`divergence_investigation.md` §70/§71): the binding constraint on
+this task is the algorithm's failure to RETAIN what it learns, not its ability to find a good policy
+in the first place, which turns out to be comparatively easy — a much better-than-anything-federated
+policy is reachable by literally just training on one city for a while.
 
-### What "solidifying" this further would mean
+### What would make this section fully paper-ready
 
-1. Re-run the same 5-seed 2-city config on this machine once there's a safe
-   RAM window (the current 7-city diagnostic batch — see §B below — has
-   this VM at ~1.1GB free) to confirm it reproduces under this machine's
-   SUMO 1.27.1 / gymnasium 1.3.0 / pettingzoo 1.27.0 versions, which differ
-   from whatever produced the original numbers.
-2. Optionally rerun with `--pad_to_true_holdout` to get a true-holdout
-   version of the same claim, strictly stronger for the paper if the result
-   holds up (best-round still beating baselines on a genuinely unseen
-   city, not just an in-distribution one).
+1. §86's larger-budget result is currently single-seed — replicate at 3+ seeds at that budget for
+   the same rigor already applied at the smaller one.
+2. Test whether holdout-monitored checkpoint selection (picking the best-so-far checkpoint during
+   sequential training, exactly the "best-round" convention already used throughout this document)
+   turns this into a directly deployable recipe, independent of ever fixing the underlying retention
+   problem — flagged as the natural next experiment in §85/86, not yet run.
+3. Section D below (Progressive Curriculum FedAvg) is a direct attempt to get this method's search
+   advantage while reducing its forgetting cost via phased-in federation — pending results.
 
 ---
 
-## B. Phase 2 aggregation-strategy comparison: status, not yet actionable
+## B. Potential-based reward shaping using `max_pressure`'s own signal — confirmed, modest
+    training-time improvement
 
-**Task #12 asked to "revisit... once the 7-city gap is addressed."** It
-isn't addressed yet (see §C) — this section documents where Phase 2
-actually stands so it's not mistaken for a settled question.
+**The claim:** adding a potential-based reward shaping term (Ng, Harada & Russell 1999 — provably
+does not change the optimal policy, unlike ad hoc reward shaping) using `max_pressure`'s own
+pressure signal as the potential function gives a small but real, statistically confirmed
+improvement over plain FedAvg.
 
-### The numbers (7-city, `--dueling --n_step 3`, masked-head fix on)
+**Source:** `divergence_investigation.md` §80. Implementation: `--potential_shaping_weight`/
+`--potential_shaping_gamma` in `experiments/federated_training.py`, `RewardShapingWrapper` in
+`environments/federated_env.py`.
 
-Source: `divergence_investigation.md` §27, auto-generated by
-`experiments/analyze_phase2_strategies.py`.
+### The numbers (6 seeds: 3/7/11/17/21/25, `environments_c1_4_6`, 5 rounds x 2 episodes)
 
-| strategy | seeds | mean reward | std | best-round mean | vs `fedavg` \|diff\|/SE |
-|---|---:|---:|---:|---:|---:|
-| `clustered_fedavg`   | 5 | -6494.5 | 681.5 | -4053.9 | 0.85 |
-| `gradient_survival`  | 5 | -6933.2 | 576.4 | -1566.6 | 0.03 |
-| `ema_loss`           | 3 | -8022.6 | 586.1 | -4390.0 | 2.11 |
-| `velocity_novelty`   | 5 | -8045.0 | 793.6 | -4687.7 | 2.11 |
-| `ema_alignment`      | 3 | -8419.7 | 587.5 | -4785.3 | 2.87 |
-| `fedavg` (reference) | 5 | -6918.4 | 889.0 | -2182.0 | — |
+| | best-round (6-seed avg) | mean (6-seed avg) |
+|---|---:|---:|
+| baseline (`q_entropy_weight=0.05` only) | -9296.84 | -9675.20 |
+| `+ potential_shaping_weight=0.1` | -8602.09 | -9277.03 |
+| \|diff\|/SE | **2.53** | **2.49** |
 
-Rule-based baselines on the same holdout, for scale: `fixed_time` -2.250
-(std 0.505), `max_pressure` -0.044 (std 0.016) — §25, 5 seeds.
+5 of 6 seeds favor it, the 6th a near-exact tie (not a reversal). ~4-7.5% improvement — real and
+replicated, but modest relative to the overall gap to rule-based baselines. The first training-time
+lever in the entire item-2X campaign to hold up (four others — replay-buffer reset, recurrent
+policy, Reptile-style aggregation blending, evolution strategies — all came back null or
+inconclusive; see `divergence_investigation.md` §78/§81/§83/§84 for the full negative-result
+tally).
 
 ### Reading
 
-- **No strategy clears the project's own |diff|/SE ≥ 2 significance bar
-  over plain `fedavg`.** `clustered_fedavg` is numerically best (0.85,
-  a lead, not a result) and the only one that doesn't look actively worse.
-- **This is a genuine negative/null result on the question Phase 2 was
-  designed to answer** ("does smarter aggregation beat plain FedAvg") — not
-  a data gap. `ema_loss`/`velocity_novelty`/`ema_alignment` all clear
-  significance in the *wrong* direction (worse than fedavg).
-- **The comparison is arguably premature regardless of outcome**: every
-  strategy tested, including the best one, is still 3-4 orders of magnitude
-  worse than trivial rule-based control. Picking a "winning" aggregation
-  strategy among options that all lose badly to `fixed_time` doesn't yet
-  answer a question worth leading a paper with.
-
-### What would make this section paper-ready
-
-Nothing further to compute from existing data — the honest write-up is
-already "no aggregation strategy tested beats plain FedAvg, and the more
-important open problem is why all of them lose to simple heuristics." Don't
-scale this comparison to more seeds/strategies until §C's blocker moves;
-per the project's own Phase 2 decision-gate guidance, more seeds on a
-question already this clearly null just spends compute without changing the
-conclusion.
+Since `Phi(s)` tracks exactly the signal `max_pressure` itself greedily maximizes, this shaping term
+teaches the DQN a denser, better-aligned per-tick learning signal without changing what the optimal
+policy actually is — a purely dynamics-side intervention that moved the needle, consistent with the
+project's standing diagnosis that the core problem is a learning-dynamics/retention issue, not
+insufficient data or capacity.
 
 ---
 
-## C. Task #7: candidate fix implemented this session, not yet validated
+## C. TC-FedAvg (Topology-Conditioned FedAvg) — a real, well-verified negative result
 
-**Diagnosis already on record** (§26, §28): the 7-city trained policy
-handles steady-state throughput reasonably (arrival counts close to the
-rule-based baselines') but is far worse at draining queues to zero by
-episode end (waiting_time=426s vs `max_pressure`'s 2.9s despite similar
-throughput) — not a collapsed/degenerate policy, not a low-confidence
-network (Q-gap actually *higher* at 7-city than the best 2-city checkpoint).
-§28 ruled out undertraining directly: a 40-round extension run regresses
-past round 20 rather than converging, so the ceiling is structural
-(aggregation instability / client drift), not "needs more rounds."
+**The claim tested:** a small shared hypernetwork maps a 4-dim structural descriptor (valid-action/
+-neighbor fraction, mean/max hop distance — computable for any intersection including one never
+trained on) to a FiLM scale/shift on the network's internal representation, so the ONE shared
+function FedAvg averages gains explicit topology-awareness, without changing the aggregation
+mechanism itself.
 
-**Candidate fix implemented, informed by that diagnosis:**
-`--reward_shaping_wait_weight` / `--reward_shaping_stopped_weight`
-(`experiments/federated_training.py`, wired through
-`environments/federated_env.py::RewardShapingWrapper`, training-side only —
-never applied during holdout evaluation, so eval numbers stay comparable to
-existing unshaped runs and to the rule-based baselines). Directly targets
-the diagnosed gap: if the base reward doesn't sufficiently penalize
-residual per-intersection waiting time/queue length, shaping the training
-reward to weight those terms more heavily should push the policy toward
-actually clearing queues, not just avoiding gridlock.
+**Source:** `divergence_investigation.md` §82. Implementation: `agents/networks.py`'s
+`topology_conditioned` flag, `agents/topology_conditioned_dqn.py`.
 
-**Real bug caught and fixed while wiring this up, before it could
-silently invalidate the experiment**: `RewardShapingWrapper.wait_weight`
-was looking up an info key (`{ts}_waiting_time`) that has never existed in
-`sumo_rl`'s per-agent info dict (the real key is
-`{ts}_accumulated_waiting_time`) — a third instance of the exact
-"config knob that looks like it does something but silently doesn't" bug
-class this project has now hit three times (§10, §24, this one). Fixed the
-key name, and made the wrapper raise loudly instead of silently defaulting
-to 0 on any future key mismatch (`stopped_weight` -> `{ts}_stopped`, which
-is actually SUMO's `get_total_queued()` under a misleading name, already
-correct; `queue_weight` has no distinct metric to read yet and will now
-raise if enabled rather than silently no-op). Covered by
-`tests/test_flag_wiring.py`.
+### The numbers (6 seeds, same protocol as section B)
 
-**Not yet done — needs a real training run, blocked on the same RAM
-constraint as everything else right now:**
-1. A 7-city run with `--reward_shaping_wait_weight` (and/or
-   `_stopped_weight`) set, compared against the existing unshaped `fedavg`
-   5-seed baseline (§23: mean -6918.4, best-round -2182.0).
-2. Once the currently-running `no_federation` vs `federated` diagnostic
-   (task #5) and the weight-divergence measurement
-   (`analyse/weight_divergence.py`, task #6, ready to run against those
-   checkpoints) land, use those results to decide whether reward shaping
-   alone is enough or needs to be paired with an aggregation-side fix
-   (client-drift is a different mechanism than reward-signal insufficiency
-   -- they're not mutually exclusive, and the diagnosis doesn't yet
-   distinguish how much each contributes to the 7-city gap).
+| | best-round | mean |
+|---|---:|---:|
+| \|diff\|/SE at 3 seeds | 1.98 | 2.18 |
+| \|diff\|/SE at 6 seeds | **1.63** | **1.22** |
 
-**Do not cite this as a working fix in the paper yet** — it's a
-well-reasoned, tested-for-correctness (the code does what it claims),
-un-validated-for-effectiveness candidate. Validate before claiming it
-helps.
+Promising at 3 seeds, evaporated at 6 — the standard "few-seed mirage" pattern this document has
+repeatedly documented. **Do not cite as a working method.** Useful negative result: it rules out
+"the network just needs an explicit topology signal at the representation level" as a fix, given a
+mathematically clean, well-motivated, carefully verified implementation of that exact idea.
+
+---
+
+## D. Progressive Curriculum FedAvg — in progress, not yet resolved
+
+**The design:** a bespoke synthesis of sections A and B/§66-70's fine-tuning mechanism, per direct
+user request. Orders training cities from simplest to most complex by intersection count
+(`city_4` (3) -> `city_6` (7) -> `city_1` (16) — the opposite of section A's incidental ordering,
+which happened to start with the most complex city). Warms up solo on the simplest city, then for
+each new city gives it a short focus fine-tune phase (starting from the current shared weights, the
+exact §66-70 mechanism) before folding it into genuine multi-city FedAvg for several rounds, with
+already-active cities keeping persistent replay buffers/optimizer state across rounds (matching the
+real pipeline's warm-start convention) to test whether phased-in federation can retain sequential
+training's search advantage while reducing its forgetting cost.
+
+**Source:** `divergence_investigation.md` §87. Implementation:
+`diagnostics/progressive_curriculum_fedavg.py`. Verified via a real SUMO smoke run; a 3-seed pilot
+(seeds 3/7/11, `--warmup_episodes 10 --focus_episodes 5 --fedavg_rounds 3 --local_episodes 2`) is
+running as of this writing. **Do not cite any result for this section until it lands and is
+reported in `divergence_investigation.md` §87's follow-up.**
+
+---
+
+## E. Everything else tried in the 2026-09-06 session's item-2X campaign: confirmed nulls or
+    inconclusive, not deployable
+
+For completeness — these were tried with real rigor and should be citable as "ruled out," not
+omitted, since the thoroughness of elimination is itself part of this project's contribution
+(framing point 2 above):
+
+| Item | Result | \|diff\|/SE | Source |
+|---|---|---:|---|
+| Replay-buffer reset on detected lock-in | Confirmed null | 0.30 / 0.38 | §78 |
+| SWA/ensemble checkpoint combination (eval-time) | Real but not deployable — only helps on volatile training windows, can't tell in advance | n/a | §79 |
+| Recurrent policy (GRU hidden state) | Inconclusive — seeds disagree on direction | 1.63 / 1.98 | §81 |
+| Meta-learning aggregation (`--fedavg_blend`, Reptile-style) | Confirmed null | 0.82 / 0.07 | §83 |
+| Evolution strategies (OpenAI-ES) | Inconclusive — genuinely under-powered pilot (8 individuals x 1 episode/generation), not a fair test | n/a | §84 |
+
+---
+
+## F. HISTORICAL, SUPERSEDED — pre-2026-09-06 content, do not cite
+
+**Everything below this line predates the §43 correction and is kept only as a historical record of
+what this document used to claim.** Section A below (the old section A) is the specific claim §43
+found to be an artifact — see `CLAUDE.md`'s "RESUME HERE" section for the full correction. Sections
+B and C below (old numbering) describe Phase 2 aggregation-strategy comparisons and a reward-shaping
+candidate fix that were both superseded by the much more thorough item-2X campaign and the §58-61
+budget/protocol reframing. None of this should appear in a paper draft.
+
+<details>
+<summary>Old section A (superseded, click to expand)</summary>
+
+### [SUPERSEDED] 2-city trained policy beats both rule-based baselines on best-achieved performance
+
+**Correction, 2026-09-06:** this claim was confirmed at full 5-seed rigor to be an artifact of
+evaluating in-distribution, not on a true holdout — see `divergence_investigation.md` §43. The
+2-city roster's action_dim was too narrow to reach the real `city_5_holdout`, so evaluation silently
+fell back to `city_1`, one of the roster's own training cities. At true holdout, the trained DQN
+loses decisively to both rule-based baselines at every roster size tested. Do not cite the numbers
+that originally appeared in this section.
+
+</details>
+
+<details>
+<summary>Old sections B and C (superseded, click to expand)</summary>
+
+### [SUPERSEDED] Phase 2 aggregation-strategy comparison
+
+Superseded by the much more thorough aggregation-strategy elimination in the 2026-09-06 session
+(section E above, and `divergence_investigation.md`'s broader aggregation-strategy history) — the
+Phase 2 sweep's conclusion (no strategy clears plain FedAvg) still holds directionally, but the
+numbers below are from an earlier, less-corrected protocol and should not be cited directly. See
+`divergence_investigation.md` for the current, correct comparisons.
+
+### [SUPERSEDED] Task #7 reward-shaping candidate fix
+
+The ad hoc `--reward_shaping_wait_weight`/`--reward_shaping_stopped_weight` mechanism described here
+was tested once (§44) and found inconclusive; it has been superseded as a research direction by the
+POTENTIAL-BASED reward shaping in section B above, which is mathematically guaranteed not to change
+the optimal policy (unlike this ad hoc version) and IS confirmed to work. Cite section B instead.
+
+</details>
