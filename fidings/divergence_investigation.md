@@ -5944,6 +5944,16 @@ this now, before the final numbers are in, specifically so this document's own f
 checked against this interim read rather than only against hindsight. Full 3-seed final comparison
 still pending -- the run has not yet finished.
 
+**Update: the predicted relapse happened.** Seed 3's first FedAvg round with all 3 cities pooled
+(`['city_4','city_6','city_1']`) landed at -4793.17 -- more than 2x worse than the -2108.94
+pre-pooling number, moving back toward this run's typical range, exactly the "reachable, not
+retained" pattern §51/§52 already characterized. Seed 7 stayed flat-bad (-9551.04 -> -9729.73);
+seed 11 improved some but is still deep in bad territory (-9932.87 -> -7391.74). Two more FedAvg
+rounds remain in this final phase before the run's actual endpoint -- not calling this closed yet,
+but the interim outlier is already fading as predicted, reinforcing rather than overturning this
+document's standing read that a good-looking checkpoint reached mid-training here is not a reliable
+signal of what the FINAL model will look like.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
