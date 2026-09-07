@@ -5850,6 +5850,37 @@ tonight's standard `q_entropy_weight=0.05` baseline data would confound "distrib
 protocol, `q_entropy_weight` at its CLI default of 0.0) alongside it for a clean, single-variable
 comparison. Results to follow for both.
 
+**Item 3 (QR-DQN) 3-seed result: negative, not just unconfirmed -- majority of seeds underperform
+the matched baseline on both measures, and the aggregate direction itself points the wrong way.**
+
+| | \|diff\|/SE best-round | \|diff\|/SE mean |
+|---|---:|---:|
+| QR-DQN (`--algo qrdqn`) vs. matched no-q_entropy baseline, 3 seeds | 1.69 | 1.13 |
+
+Per-seed: seed 3 -12.5%/-5.2%, seed 7 -20.6%/-9.0%, seed 11 -1.1%/+2.1% -- **2 of 3 seeds worse on
+both measures**, the third essentially flat. Unlike CQL's item (which at least had a clean, unanimous
+3-seed screen before weakening at 6), this pilot never produced a positive signal to begin with --
+the diff is negative (QR-DQN underperforming) on both aggregate measures, and neither clears the
+project's \|diff\|/SE >= 2 bar in either direction. Per standing discipline (extend to 6 seeds only
+when a pilot shows a promising, majority-positive direction), **this does not warrant 6-seed
+escalation** -- there is no positive trend to confirm. **Item 3 (QR-DQN) closed as a negative
+result at 3 seeds**, distinct from CQL/TC-FedAvg/anchor-revert's "promising-then-null" pattern: this
+one simply didn't show promise from the start. A plausible mechanistic read (not verified further,
+noted for completeness): the quantile-regression loss is a harder optimization target than scalar
+TD error at this project's per-city sample budget (2 local episodes/round, 5 rounds) -- the
+structural resistance to overconfident point estimates may need more gradient steps to pay off than
+this project's standard cheap-pilot budget provides, but testing that would be a new, separate
+experiment (a QR-DQN budget curve), not a re-run of this one. Run dirs: QR-DQN
+`results/run_2026_09_07-03_39_01_748750` (s3), `results/run_2026_09_07-03_39_01_748747` (s7),
+`results/run_2026_09_07-04_20_38_758259` (s11); matched baseline
+`results/run_2026_09_07-03_39_27_749157` (s3), `results/run_2026_09_07-03_39_27_749156` (s7),
+`results/run_2026_09_07-04_18_44_757790` (s11).
+
+**Three of four §91 candidates now resolved: ensemble (pending its own eval's completion), CQL
+(closed not-confirmed), QR-DQN (closed negative). Proceeding to item 4 (proper MAML meta-learning
+aggregation), the highest-complexity candidate, per the pre-registered order and the user's standing
+autonomous-work grant.**
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit

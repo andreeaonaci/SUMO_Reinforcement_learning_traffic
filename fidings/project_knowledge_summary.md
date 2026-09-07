@@ -374,3 +374,36 @@ stronger paper than before this session: two genuine positive findings plus a ri
 account of what doesn't work and why — including transparently reporting and correcting a real bug
 that briefly inflated one of the two positive results, which is itself evidence of the rigor this
 project applies to its own claims.
+
+---
+
+## 6. Four candidate "significantly improve" ideas (2026-09-07, `divergence_investigation.md` §91),
+   tested unsupervised per the user's explicit standing delegation before going to sleep
+
+Four mechanisms genuinely different from everything above, all targeting the confident-lock-in/
+retention bottleneck directly, pre-registered before results were known:
+
+- **Conservative Q-Learning (CQL, discrete form, `--cql_weight`)** — penalizes Q-value
+  overestimation directly (logsumexp over valid actions minus taken action's Q). **3-seed screen was
+  the cleanest, most unanimous positive result of the whole session (2.35/2.80, all 3 seeds positive,
+  no exceptions) — but weakened to 1.05/1.14 at 6 seeds, with seed 21 reversing hard (-14.4%/-4.1%).
+  Closed as NOT CONFIRMED.** The strongest illustration yet that even a perfectly clean 3-seed screen
+  is not sufficient — this project's 6-seed-before-confirming rule exists precisely for cases like
+  this one.
+- **Distributional RL (QR-DQN, `agents/qrdqn.py::QRDQNAgent`)** — learns a quantile distribution over
+  returns per action instead of a scalar Q-value, structurally resisting collapse to an overconfident
+  point estimate. **3-seed pilot came back negative, not merely unconfirmed** — 1.69/1.13 |diff|/SE,
+  2 of 3 seeds worse than a matched no-q_entropy baseline on both measures, no positive trend to
+  extend to 6 seeds. **Closed as a negative result at 3 seeds.** Unlike CQL/TC-FedAvg/anchor-revert
+  (promising-then-null), this one never showed promise to begin with.
+- **True ensemble of independently-trained seeds** (majority-vote across genuinely independent final
+  checkpoints, distinct from item 21's same-run temporally-adjacent-checkpoint SWA) and **proper MAML
+  meta-learning aggregation** (gradients through the fine-tuning process itself, a more principled
+  version of item 24's already-null `--fedavg_blend` proxy) — status as of this write-up: see the
+  live RESUME HERE section of `CLAUDE.md` / §91 for whichever of these has since completed, this
+  summary file lags real-time slightly during the unsupervised stretch.
+
+Running tally after 2 of 4: zero of the four new candidates confirmed so far, consistent with this
+project's dominant pattern (most levers are null; the rare real ones — item 22, sequential training —
+are modest, not transformative). No result yet from this stretch should be read as evidence the
+overall generalization gap is close to solved.
