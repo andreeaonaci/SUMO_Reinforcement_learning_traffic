@@ -5823,6 +5823,25 @@ results (a majority/unanimous positive direction, not one outlier seed dragging 
 than TC-FedAvg/recurrent's pattern (mixed directions). Extending to 6 seeds (17/21/25) immediately
 before calling this confirmed, per standing discipline -- launched, results to follow.
 
+**6-seed result: weakens substantially -- another few-seed mirage, NOT confirmed.**
+
+| | \|diff\|/SE best-round | \|diff\|/SE mean |
+|---|---:|---:|
+| 3 seeds | 2.35 | 2.80 |
+| **6 seeds** | **1.05** | **1.14** |
+
+Per-seed: seed 3 +13.9%/+5.3%, seed 7 +2.4%/+2.5%, seed 11 +16.8%/+8.2%, seed 17 +10.0%/+7.9%,
+**seed 21 -14.4%/-4.1% (a hard reversal)**, seed 25 +0.2%/-0.9% (essentially flat). 4 of 6 positive,
+but this is now the same "mixed, not confirmed" profile as anchor-revert (§90) and TC-FedAvg (§82),
+not the unanimous-direction pattern that actually held up for item 22 and sequential training. The
+initial 3-seed screen's unanimity (all 3 positive, no exceptions) turned out to be, in hindsight, an
+unrepresentative sample rather than a signal of unusual robustness -- a useful reminder that even a
+CLEAN 3-seed screen with no internal disagreement is not sufficient on its own; this document's
+6-seed-before-confirming discipline exists precisely to catch cases like this. **CQL (item 2 of §91)
+closed as not confirmed at the tested weight (0.1).** Not pursuing further weight tuning without a
+specific reason to expect a different value to behave qualitatively differently, matching this
+project's standing discipline against endless post-hoc hyperparameter search.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
