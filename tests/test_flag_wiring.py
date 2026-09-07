@@ -728,3 +728,66 @@ def test_trunk_lr_scale_default_is_exact_noop():
         "trunk_lr_scale=1.0 (default) must produce a single optimizer param group, "
         "byte-identical to the optimizer construction before this flag existed."
     )
+
+
+# ---------------------------------------------------------------------------
+# 8. lora_adapter -- low-rank residual ADDED on top of a fully-normally-trained
+#    trunk, per direct user request 2026-09-07 (tried after --trunk_lr_scale's
+#    negative result showed that RESTRICTING the trunk starves it early on).
+# ---------------------------------------------------------------------------
+
+def test_lora_adapter_default_init_is_exact_noop():
+    """lora_up is zero-initialized, so lora_adapter=True must produce the
+    EXACT same output as lora_adapter=False at construction time -- the
+    whole point of zero-init adapters (matches topology_conditioned's own
+    zero-init FiLM convention) is that they can't destabilize early
+    training before they've learned anything."""
+    from agents.networks import NeighborAttentionQNetwork
+
+    torch.manual_seed(3)
+    net_plain = NeighborAttentionQNetwork(own_dim=6, neighbor_dim=3, k_max=2, action_dim=4)
+    torch.manual_seed(3)
+    net_lora = NeighborAttentionQNetwork(own_dim=6, neighbor_dim=3, k_max=2, action_dim=4,
+                                          lora_adapter=True, lora_rank=4)
+
+    own = torch.randn(4, 6)
+    neighbors = torch.randn(4, 2, 3)
+    neighbor_mask = torch.ones(4, 2)
+
+    assert torch.equal(net_plain(own, neighbors, neighbor_mask), net_lora(own, neighbors, neighbor_mask)), (
+        "lora_adapter=True at construction (before any training) must be numerically identical "
+        "to lora_adapter=False -- lora_up's zero-init isn't actually zero, or isn't being applied."
+    )
+
+
+def test_lora_adapter_params_actually_train():
+    """After real optimizer steps, the adapter's own parameters (lora_down/
+    lora_up) must have moved -- confirming they're actually wired into the
+    autograd graph and the optimizer, not just present but dead weight.
+    Two steps, not one: with lora_up zero-initialized, d(output)/d(lora_down)
+    is exactly zero on step 1 (it's multiplied by lora_up's all-zero weight
+    in the chain rule) -- only lora_up gets a real gradient that first step.
+    Once lora_up moves off zero, lora_down starts receiving real gradient
+    too, from step 2 onward. This is the standard, expected LoRA cold-start
+    behavior, not a bug -- the test reflects that instead of asserting both
+    move after a single step."""
+    from agents.dqn import DQNAgent
+
+    agent = DQNAgent(own_dim=6, neighbor_dim=3, k_max=2, action_dim=4, lora_adapter=True, lora_rank=4)
+    net = agent.q
+
+    down_before = net.lora_down.weight.detach().clone()
+    up_before = net.lora_up.weight.detach().clone()
+
+    for _ in range(2):
+        own = torch.randn(8, 6)
+        neighbors = torch.randn(8, 2, 3)
+        neighbor_mask = torch.ones(8, 2)
+        q = net(own, neighbors, neighbor_mask)
+        loss = q.pow(2).mean()
+        agent.optimizer.zero_grad()
+        loss.backward()
+        agent.optimizer.step()
+
+    assert not torch.equal(down_before, net.lora_down.weight), "lora_down must receive real gradient updates by step 2."
+    assert not torch.equal(up_before, net.lora_up.weight), "lora_up must receive real gradient updates."

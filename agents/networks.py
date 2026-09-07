@@ -133,6 +133,8 @@ class NeighborAttentionQNetwork(nn.Module):
         n_quantiles: int = 21,
         bounded_q: bool = False,
         q_bound_scale: float = 5.0,
+        lora_adapter: bool = False,
+        lora_rank: int = 8,
     ):
         super().__init__()
         if dueling and actor_critic:
@@ -342,6 +344,26 @@ class NeighborAttentionQNetwork(nn.Module):
             nn.init.zeros_(self.topo_hyper[-1].weight)
             nn.init.zeros_(self.topo_hyper[-1].bias)
 
+        # LoRA-style low-rank adapter ("architecture-level retention" proposal,
+        # per direct user request 2026-09-07, tried after --trunk_lr_scale's negative
+        # result showed that RESTRICTING the trunk's own learning starves it (it's
+        # still random-init early in training and needs to adapt fast, not slowly).
+        # This instead ADDS a small low-rank residual correction on top of `combined`
+        # -- the trunk keeps training completely normally, at full LR, with zero
+        # restriction; the adapter is pure extra capacity, not a reallocation of
+        # existing capacity. down: (d_model*2 -> lora_rank), up: (lora_rank ->
+        # d_model*2), up-projection zero-initialized so lora_adapter=True starts as
+        # an EXACT identity (combined + up(down(combined)) == combined at init,
+        # since up's weights are all zero) -- same zero-init-adapter convention as
+        # `topo_hyper` above, so this can never destabilize early training the way
+        # an arbitrarily-initialized residual branch could.
+        self.lora_adapter = lora_adapter
+        self.lora_rank = lora_rank
+        if self.lora_adapter:
+            self.lora_down = nn.Linear(d_model * 2, lora_rank, bias=False)
+            self.lora_up = nn.Linear(lora_rank, d_model * 2, bias=False)
+            nn.init.zeros_(self.lora_up.weight)
+
     def load_state_dict(self, state_dict, strict: bool = True):
         """Backward-compat shim: checkpoints saved before the "stacked
         attention" refactor (fidings sec 76, 2026-09-05) used flat
@@ -502,6 +524,8 @@ class NeighborAttentionQNetwork(nn.Module):
                 "..., hidden) instead of forward(), which has no hidden state to work with."
             )
         combined = self._combined_features(own_obs, neighbor_obs, neighbor_mask, hop_dist)
+        if self.lora_adapter:
+            combined = combined + self.lora_up(self.lora_down(combined))
         if self.topology_conditioned:
             if action_mask is None:
                 raise RuntimeError(

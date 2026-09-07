@@ -166,6 +166,8 @@ class DQNAgent:
         bounded_q: bool = False,
         q_bound_scale: float = 5.0,
         trunk_lr_scale: float = 1.0,
+        lora_adapter: bool = False,
+        lora_rank: int = 8,
     ):
         self.own_dim = own_dim
         self.neighbor_dim = neighbor_dim
@@ -193,6 +195,8 @@ class DQNAgent:
             n_quantiles=n_quantiles,
             bounded_q=bounded_q,
             q_bound_scale=q_bound_scale,
+            lora_adapter=lora_adapter,
+            lora_rank=lora_rank,
         )
         self.q = NeighborAttentionQNetwork(**net_kwargs).to(self.device)
         self.q_target = NeighborAttentionQNetwork(**net_kwargs).to(self.device)

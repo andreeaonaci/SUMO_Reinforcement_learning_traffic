@@ -117,6 +117,8 @@ def _client_worker(
     bounded_q: bool = False,
     q_bound_scale: float = 5.0,
     trunk_lr_scale: float = 1.0,
+    lora_adapter: bool = False,
+    lora_rank: int = 8,
 ):
     """Runs inside its own process for the ENTIRE training run.
 
@@ -255,6 +257,8 @@ def _client_worker(
                 bounded_q=bounded_q,
                 q_bound_scale=q_bound_scale,
                 trunk_lr_scale=trunk_lr_scale,
+                lora_adapter=lora_adapter,
+                lora_rank=lora_rank,
             )
 
         while True:
@@ -400,6 +404,8 @@ class ParallelFederatedServer:
         bounded_q: bool = False,
         q_bound_scale: float = 5.0,
         trunk_lr_scale: float = 1.0,
+        lora_adapter: bool = False,
+        lora_rank: int = 8,
     ):
         # item 20 (fidings sec 78): if >0, a round whose eval std_reward
         # falls below this threshold (the same std<50 screen already used
@@ -427,6 +433,8 @@ class ParallelFederatedServer:
         self.bounded_q = bounded_q
         self.q_bound_scale = q_bound_scale
         self.trunk_lr_scale = trunk_lr_scale
+        self.lora_adapter = lora_adapter
+        self.lora_rank = lora_rank
         self.global_model = global_model
         self.evaluator = evaluator
         self.checkpoint_dir = checkpoint_dir
@@ -543,6 +551,7 @@ class ParallelFederatedServer:
                     self.anchor_check_every, self.anchor_qgap_growth_threshold,
                     self.anchor_pullback_beta, self.cql_weight, self.n_quantiles,
                     self.bounded_q, self.q_bound_scale, self.trunk_lr_scale,
+                    self.lora_adapter, self.lora_rank,
                 ),
                 daemon=True,
             )

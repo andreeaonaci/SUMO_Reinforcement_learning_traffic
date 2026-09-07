@@ -101,7 +101,7 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
                 anchor_check_every: int = 50, anchor_qgap_growth_threshold: float = 3.0,
                 anchor_pullback_beta: float = 0.5, cql_weight: float = 0.0,
                 n_quantiles: int = 21, bounded_q: bool = False, q_bound_scale: float = 5.0,
-                trunk_lr_scale: float = 1.0):
+                trunk_lr_scale: float = 1.0, lora_adapter: bool = False, lora_rank: int = 8):
     """Single place that constructs the local/global agent -- DQNAgent
     (default, unchanged), PPOAgent (--algo ppo, agents/ppo.py), or
     MunchausenDQNAgent (--algo munchausen, agents/munchausen_dqn.py; see
@@ -210,6 +210,8 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
         bounded_q=bounded_q,
         q_bound_scale=q_bound_scale,
         trunk_lr_scale=trunk_lr_scale,
+        lora_adapter=lora_adapter,
+        lora_rank=lora_rank,
     )
 
 
@@ -858,6 +860,28 @@ def main(args):
             activation=args.activation,
             encoder_depth=args.encoder_depth,
             n_attn_layers=args.n_attn_layers,
+            anchor_revert=args.anchor_revert,
+            anchor_warmup_calls=args.anchor_warmup_calls,
+            anchor_check_every=args.anchor_check_every,
+            anchor_qgap_growth_threshold=args.anchor_qgap_growth_threshold,
+            anchor_pullback_beta=args.anchor_pullback_beta,
+            cql_weight=args.cql_weight,
+            n_quantiles=args.n_quantiles,
+            bounded_q=args.bounded_q,
+            q_bound_scale=args.q_bound_scale,
+            trunk_lr_scale=args.trunk_lr_scale,
+            # lora_adapter/lora_rank are the only ones of this whole group that
+            # actually change the network's PARAMETER SET (adds lora_down/lora_up) --
+            # this global_model's state_dict becomes the round-0 broadcast state every
+            # worker's load_state_dict(strict=True) must match key-for-key, so omitting
+            # this specific pair (as this call site did before) crashes every worker on
+            # round 1 with "Missing key(s): lora_down.weight, lora_up.weight" the moment
+            # --lora_adapter is used. The others above were always harmless gaps here
+            # (they don't add/remove parameters) but are threaded through now too, on
+            # the same "don't let a flag silently not reach where it needs to" principle
+            # this project has been burned by twice before (see test_flag_wiring.py).
+            lora_adapter=args.lora_adapter,
+            lora_rank=args.lora_rank,
         )
 
         start_round = 1
@@ -962,6 +986,8 @@ def main(args):
             bounded_q=args.bounded_q,
             q_bound_scale=args.q_bound_scale,
             trunk_lr_scale=args.trunk_lr_scale,
+            lora_adapter=args.lora_adapter,
+            lora_rank=args.lora_rank,
         )
         history = server.run(
             rounds=args.rounds,
@@ -1270,6 +1296,18 @@ if __name__ == "__main__":
                               "before it consolidates (sec 51/52's 'reachable but not retained' "
                               "pattern). 1.0 (default) is an exact no-op -- single optimizer param "
                               "group, byte-identical to before this flag existed.")
+    parser.add_argument("--lora_adapter", action="store_true",
+                         help="Add a small low-rank residual correction (down-project to "
+                              "--lora_rank, up-project back, zero-initialized so this starts as an "
+                              "exact identity) on top of the combined own+neighbor features, before "
+                              "the Q-head. Unlike --trunk_lr_scale (which RESTRICTS the trunk's own "
+                              "learning and came back a real negative result -- starves an "
+                              "early-training, still-random trunk of the updates it needs), this "
+                              "ADDS pure extra capacity without touching the trunk's own learning "
+                              "rate at all. Default off is an exact no-op.")
+    parser.add_argument("--lora_rank", type=int, default=8,
+                         help="Bottleneck width of the --lora_adapter residual correction. Ignored "
+                              "unless --lora_adapter.")
     parser.add_argument("--eval_every",            type=int,   default=1)
     parser.add_argument("--eval_episodes",         type=int,   default=5)
     parser.add_argument("--log_loss_every_steps",  type=int,   default=50,
