@@ -396,14 +396,34 @@ retention bottleneck directly, pre-registered before results were known:
   2 of 3 seeds worse than a matched no-q_entropy baseline on both measures, no positive trend to
   extend to 6 seeds. **Closed as a negative result at 3 seeds.** Unlike CQL/TC-FedAvg/anchor-revert
   (promising-then-null), this one never showed promise to begin with.
+- **Proper MAML meta-learning aggregation** (`federated/maml.py` + `diagnostics/maml_fedavg.py`,
+  genuine second-order meta-gradient via `torch.func.functional_call` + `create_graph=True`, NOT a
+  repeat of item 24's already-null first-order `--fedavg_blend` proxy — verified distinct via a unit
+  test checking the two gradients aren't numerically identical). **Single-seed pilot (seed 3) came back cleanly negative: monotonic decline every round** (random-init -8585.72 →
+  R1 -8676.93 → R2 -9544.67 → R3 -10150.91) **converging into a fully stable confident lock-in — R3,
+  R4, and R5 are byte-identical (std=0.00), the policy stopped changing at all.** **Closed as a
+  negative result at n=1 seed**, matching QR-DQN's treatment — no positive trend anywhere to justify
+  replicating on seeds 7/11 at several hours each. A real, unrelated correctness bug was also found
+  and fixed in this script during a `/simplify` pass (its per-city gradient weighting used a constant
+  instead of real sample counts, contradicting its own "FedAvg-style weighting" comment) — fixed, and
+  confirmed not to change the qualitative verdict.
 - **True ensemble of independently-trained seeds** (majority-vote across genuinely independent final
-  checkpoints, distinct from item 21's same-run temporally-adjacent-checkpoint SWA) and **proper MAML
-  meta-learning aggregation** (gradients through the fine-tuning process itself, a more principled
-  version of item 24's already-null `--fedavg_blend` proxy) — status as of this write-up: see the
-  live RESUME HERE section of `CLAUDE.md` / §91 for whichever of these has since completed, this
-  summary file lags real-time slightly during the unsupervised stretch.
+  checkpoints, distinct from item 21's same-run temporally-adjacent-checkpoint SWA) — still running as
+  of this write-up (a 30-episode eval across 6 checkpoints + SWA-average + majority-vote at this
+  roster's ~7min/episode true-holdout pace; genuinely slow, not stuck — confirmed repeatedly via
+  `/proc` CPU-time deltas). See the live RESUME HERE section of `CLAUDE.md` / §91 for its result once
+  it lands.
 
-Running tally after 2 of 4: zero of the four new candidates confirmed so far, consistent with this
+Running tally after 3 of 4: zero of the four new candidates confirmed so far, consistent with this
 project's dominant pattern (most levers are null; the rare real ones — item 22, sequential training —
 are modest, not transformative). No result yet from this stretch should be read as evidence the
 overall generalization gap is close to solved.
+
+**Separately, the same night's Progressive Curriculum FedAvg (PCFT, §87/§91-adjacent, not one of the
+four pre-registered candidates) re-verification produced this session's most promising 3-seed screen
+after the four candidates above — |diff|/SE 2.40-3.03 across three measures, unanimous across all 3
+seeds, vs. the standard `fedavg` baseline.** Flagged with the same caution CQL's reversal demands
+(CQL was equally clean at 3 seeds and evaporated at 6) plus a budget/mechanism confound specific to
+PCFT (it embeds the already-confirmed focus/fine-tune mechanism, so this may not isolate curriculum
+ordering as the active ingredient) — a 6-seed extension is queued, not yet confirmed. See
+`divergence_investigation.md` §87 for the full trajectory and caveats.

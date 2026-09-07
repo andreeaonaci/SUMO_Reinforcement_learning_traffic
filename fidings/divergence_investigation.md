@@ -5953,8 +5953,16 @@ confirm, and each additional seed costs several more hours at this roster's eval
 5 finish for a complete record, then closing item 4 (proper MAML) as a negative/null result at the
 implementation and single-seed-pilot level, same treatment as QR-DQN (item 3).
 
-Round 5 result pending -- will close item 4 once it lands, but the verdict is
-already effectively decided by rounds 3-4's stable lock-in.
+**Round 5 confirms: -10150.91, std=0.00 -- identical to rounds 3 and 4, three rounds running.**
+Final trajectory across all 5 rounds: random-init -8585.72 -> R1 -8676.93 -> R2 -9544.67 -> R3
+-10150.91 (std=0.00) -> R4 -10150.91 (std=0.00) -> R5 -10150.91 (std=0.00). Monotonic decline into a
+fully stable confident lock-in that then never moves again -- the meta-gradient step didn't just
+occasionally land badly, it converged the policy to a fixed degenerate point and kept reproducing
+the identical update from there for two additional rounds. **Item 4 (proper MAML) CLOSED as a
+negative result at n=1 seed**, matching QR-DQN's treatment (item 3) -- no positive trend anywhere in
+this seed's trajectory to justify the multi-hour cost of replicating on seeds 7/11. Unlike QR-DQN
+(never showed promise at all), MAML actively made things worse than random init from round 1 onward
+and then locked -- if anything a cleaner negative signal, not requiring more seeds to interpret.
 
 **Interim PCFT re-verification data point, read with real caution: seed 3's post-focus-on-city_1
 number is striking (-2108.94), but seeds 7/11 show nothing like it at the same pipeline stage.**
