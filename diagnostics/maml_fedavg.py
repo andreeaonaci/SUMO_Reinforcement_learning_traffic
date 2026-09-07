@@ -39,6 +39,7 @@ from experiments.federated_training import (
     make_holdout_evaluator,
     maybe_pad_action_dim_to_true_holdout,
 )
+from federated.aggregation import weighted_average
 from federated.maml import maml_client_grad
 from federated.utils import set_seed
 
@@ -126,8 +127,16 @@ def main():
     min_transitions = args.batch_size * (args.inner_steps + 1)
 
     for round_idx in range(1, args.rounds + 1):
-        grads_accum = None
-        total_weight = 0
+        # network/agent.q_target are only mutated by this round's meta_optimizer.step() /
+        # target sync below, both of which happen AFTER this loop -- so every city in the
+        # loop would otherwise see (and needlessly re-clone) the identical parameter dict.
+        # maml_client_grad() already makes its own per-city autograd-leaf clone from these,
+        # so no clone is needed here at all.
+        global_state = network.state_dict()
+        target_state = agent.q_target.state_dict()
+
+        client_grads = []
+        client_weights = []
         query_losses = []
 
         for name, cfg in city_configs:
@@ -145,29 +154,27 @@ def main():
 
             support_batches = [buf.sample(args.batch_size) for _ in range(args.inner_steps)]
             query_batch = buf.sample(args.batch_size)
-            global_state = {k: v.detach().clone() for k, v in network.state_dict().items()}
-            target_state = {k: v.detach().clone() for k, v in agent.q_target.state_dict().items()}
 
             grad_dict, q_loss = maml_client_grad(
                 network, global_state, target_state, support_batches, query_batch,
                 inner_lr=args.inner_lr, gamma=agent.gamma, device=device,
             )
             query_losses.append(q_loss)
-            weight = args.batch_size  # sample-count weighting, same convention as plain FedAvg
-            if grads_accum is None:
-                grads_accum = {k: g.clone() * weight for k, g in grad_dict.items()}
-            else:
-                for k, g in grad_dict.items():
-                    grads_accum[k] += g * weight
-            total_weight += weight
+            client_grads.append(grad_dict)
+            # Sample-count weighting, same convention as plain FedAvg (federated/aggregation.py
+            # weights each client by its actual produced transition count) -- NOT args.batch_size,
+            # which is identical for every city every round and would silently degenerate this
+            # into an unweighted average regardless of how much real data each city contributed.
+            client_weights.append(float(len(buf)))
 
-        if grads_accum is None or total_weight == 0:
+        if not client_grads:
             logger.info("Round %d: no city had enough data for a meta-update yet, skipping.", round_idx)
             continue
 
+        avg_grad = weighted_average(client_grads, client_weights)
         meta_optimizer.zero_grad()
         for name, p in network.named_parameters():
-            p.grad = (grads_accum[name] / total_weight).clone()
+            p.grad = avg_grad[name].clone()
         torch.nn.utils.clip_grad_norm_(network.parameters(), 10.0)
         meta_optimizer.step()
 

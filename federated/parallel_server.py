@@ -455,12 +455,15 @@ class ParallelFederatedServer:
         # aggregation's per-action row indexing (head_key_names below) doesn't
         # apply to that shape at all. Plain full-state FedAvg is used instead,
         # same fallback as ppo/batchnorm above.
-        self.head_fix = bool(head_fix) and algo not in ("ppo", "qrdqn") and not use_batchnorm
+        # Whether this run's Q-head shape is even eligible for masked-head aggregation's
+        # per-action row indexing at all (see the three cases documented above) -- computed
+        # once and reused for both self.head_fix and the head_key_names() call below, rather
+        # than repeating the same "algo not in (...) and not use_batchnorm" condition twice.
+        supports_masked_head = algo not in ("ppo", "qrdqn") and not use_batchnorm
+        self.head_fix = bool(head_fix) and supports_masked_head
         self.neighbor_attention = bool(neighbor_attention)
         self.fedavg_blend = float(max(0.0, min(1.0, fedavg_blend)))
-        self._head_weight_key, self._head_bias_key = head_key_names(
-            dueling and algo not in ("ppo", "qrdqn") and not use_batchnorm
-        )
+        self._head_weight_key, self._head_bias_key = head_key_names(dueling and supports_masked_head)
         self.server_momentum = float(server_momentum)
         self._momentum_buffer: Optional[Dict[str, torch.Tensor]] = None
         self.pseudo_grad_clip = float(pseudo_grad_clip)

@@ -61,7 +61,6 @@ def _q_loss_functional(network, params: Dict[str, "torch.Tensor"], batch, target
     own, neighbors, neighbor_mask, hop_dist, action_mask = _collate(obs, device)
     n_own, n_neighbors, n_neighbor_mask, n_hop_dist, n_action_mask = _collate(next_obs, device)
 
-    B = len(actions)
     actions_t = torch.tensor(actions, dtype=torch.int64, device=device)
     rewards_t = torch.tensor(rewards, dtype=torch.float32, device=device)
     dones_t = torch.tensor(dones, dtype=torch.float32, device=device)

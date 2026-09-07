@@ -5943,6 +5943,19 @@ meta-gradient step could easily be a worse update than the ordinary first-order 
 training already uses, compounding round over round exactly as observed. Final verdict pending
 rounds 4/5, but already trending toward closing this as a negative result without further seeds.
 
+**Round 4 confirms full, stable lock-in: -10150.91, std=0.00 -- byte-identical to round 3's
+number.** Not just "the same failure mode recurring," the exact same reward value twice in a row --
+the policy stopped changing in any way that matters to the holdout eval between rounds 3 and 4.
+Combined with the strictly monotonic decline through rounds 0-3, this is now about as clean a
+negative result as this document produces. Per this session's standing discipline (extend to more
+seeds only on a promising trend), **NOT launching seeds 7/11** -- there is nothing promising to
+confirm, and each additional seed costs several more hours at this roster's eval pace. Letting round
+5 finish for a complete record, then closing item 4 (proper MAML) as a negative/null result at the
+implementation and single-seed-pilot level, same treatment as QR-DQN (item 3).
+
+Round 5 result pending -- will close item 4 once it lands, but the verdict is
+already effectively decided by rounds 3-4's stable lock-in.
+
 **Interim PCFT re-verification data point, read with real caution: seed 3's post-focus-on-city_1
 number is striking (-2108.94), but seeds 7/11 show nothing like it at the same pipeline stage.**
 After the focus phase on `city_1` (the last, biggest city to be phased in) but BEFORE the final
