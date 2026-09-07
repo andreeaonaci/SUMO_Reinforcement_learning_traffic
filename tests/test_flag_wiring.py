@@ -485,3 +485,106 @@ def test_evaluator_restores_rng_state_exactly():
         "(any single-process diagnostic script) would otherwise have its "
         "next training call draw from a training-seed-independent stream."
     )
+
+
+# ---------------------------------------------------------------------------
+# 5. federated/maml.py -- proper (second-order) MAML meta-gradient, item 4 of
+#    the four sec-91 candidates. Must be genuinely second-order (differ from
+#    the naive Reptile-style "final minus initial params" delta already
+#    tested and closed null as item 24/`--fedavg_blend`, sec 83) or this
+#    would silently just be re-testing something already known not to work.
+# ---------------------------------------------------------------------------
+
+def _fake_obs_batch(n, own_dim=6, neighbor_dim=3, k_max=2, action_dim=3):
+    import numpy as np
+
+    def make_one():
+        return {
+            "own": np.random.randn(own_dim).astype("float32"),
+            "neighbors": np.random.randn(k_max, neighbor_dim).astype("float32"),
+            "neighbor_mask": np.ones(k_max, dtype="float32"),
+            "hop_dist": np.zeros(k_max, dtype="int64"),
+            "action_mask": np.ones(action_dim, dtype="float32"),
+        }
+
+    obs = [make_one() for _ in range(n)]
+    next_obs = [make_one() for _ in range(n)]
+    actions = [int(a) for a in torch.randint(0, action_dim, (n,))]
+    rewards = [float(r) for r in torch.randn(n)]
+    dones = [0.0] * n
+    ns = [1] * n
+    return obs, actions, rewards, next_obs, dones, ns
+
+
+def test_maml_inner_adapt_reduces_support_loss():
+    """The differentiable inner loop must actually be doing gradient descent
+    -- support loss after k steps should be lower than before, or the
+    "adaptation" isn't adaptation."""
+    from agents.networks import NeighborAttentionQNetwork
+    from federated.maml import _q_loss_functional, inner_adapt
+
+    torch.manual_seed(0)
+    net = NeighborAttentionQNetwork(own_dim=6, neighbor_dim=3, k_max=2, action_dim=3)
+    theta0 = {k: v.detach().clone() for k, v in net.named_parameters()}
+    target_theta = {k: v.detach().clone() for k, v in net.named_parameters()}
+
+    batch = _fake_obs_batch(32)
+    theta = {k: v.clone().requires_grad_(True) for k, v in theta0.items()}
+    loss_before = _q_loss_functional(net, theta, batch, target_theta, gamma=0.99, device="cpu")
+
+    adapted = inner_adapt(net, theta, target_theta, [batch, batch, batch], inner_lr=0.05, gamma=0.99, device="cpu")
+    loss_after = _q_loss_functional(net, adapted, batch, target_theta, gamma=0.99, device="cpu")
+
+    assert loss_after.item() < loss_before.item(), (
+        "3 differentiable SGD steps on the SAME batch should strictly reduce that "
+        "batch's own loss -- if not, the functional forward pass or the manual "
+        "parameter update in inner_adapt() is wired wrong."
+    )
+
+
+def test_maml_meta_gradient_differs_from_reptile_delta():
+    """The real (second-order) MAML meta-gradient must differ from the naive
+    Reptile-style "adapted params minus original params" delta direction --
+    otherwise this implementation would have silently collapsed into
+    re-testing item 24 (`--fedavg_blend`, already closed null, sec 83)
+    instead of the genuinely different mechanism sec 91 asked for."""
+    from agents.networks import NeighborAttentionQNetwork
+    from federated.maml import maml_client_grad, inner_adapt
+
+    torch.manual_seed(1)
+    net = NeighborAttentionQNetwork(own_dim=6, neighbor_dim=3, k_max=2, action_dim=3)
+    global_state = {k: v.detach().clone() for k, v in net.state_dict().items()}
+    target_state = {k: v.detach().clone() for k, v in net.state_dict().items()}
+
+    support_batches = [_fake_obs_batch(16) for _ in range(3)]
+    query_batch = _fake_obs_batch(16)
+
+    grad_dict, query_loss = maml_client_grad(
+        net, global_state, target_state, support_batches, query_batch,
+        inner_lr=0.05, gamma=0.99, device="cpu",
+    )
+    assert all(torch.isfinite(g).all() for g in grad_dict.values()), "MAML meta-gradient must be finite."
+    assert any(g.abs().sum().item() > 0 for g in grad_dict.values()), (
+        "MAML meta-gradient must be non-zero -- a zero gradient everywhere would mean "
+        "autograd.grad() silently failed to connect query_loss back to the original leaves."
+    )
+
+    # Reptile-style proxy: detach the inner loop entirely (no create_graph),
+    # then just take (adapted - original) as the "pseudo-gradient" direction
+    # -- this is what item 24's --fedavg_blend effectively does.
+    theta_for_reptile = {k: v.clone().requires_grad_(True) for k, v in global_state.items()}
+    adapted_detached = inner_adapt(net, theta_for_reptile, target_state, support_batches,
+                                    inner_lr=0.05, gamma=0.99, device="cpu")
+    reptile_delta = {
+        k: (theta_for_reptile[k].detach() - adapted_detached[k].detach()) for k in theta_for_reptile
+    }
+
+    maml_flat = torch.cat([g.flatten() for g in grad_dict.values()])
+    reptile_flat = torch.cat([reptile_delta[k].flatten() for k in grad_dict.keys()])
+    cos_sim = torch.nn.functional.cosine_similarity(maml_flat.unsqueeze(0), reptile_flat.unsqueeze(0)).item()
+
+    assert cos_sim < 0.999, (
+        f"MAML meta-gradient must NOT be numerically identical (cos_sim={cos_sim:.6f}) to the "
+        "first-order Reptile-style delta -- if it collapses to that, create_graph=True isn't "
+        "actually keeping the inner loop differentiable and this is silently just Reptile again."
+    )

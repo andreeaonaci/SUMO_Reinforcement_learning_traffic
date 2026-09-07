@@ -5881,6 +5881,23 @@ experiment (a QR-DQN budget curve), not a re-run of this one. Run dirs: QR-DQN
 aggregation), the highest-complexity candidate, per the pre-registered order and the user's standing
 autonomous-work grant.**
 
+**Item 4 (proper MAML) implemented, 2026-09-07: `federated/maml.py` +
+`diagnostics/maml_fedavg.py`.** Genuinely second-order, NOT a repeat of item 24's Reptile-style
+`--fedavg_blend` (already closed null, §83): uses `torch.func.functional_call` to run each city's
+k inner adaptation steps as a hand-rolled, fully differentiable SGD loop (`create_graph=True`), then
+backprops a query-batch loss through that whole chain back to the ORIGINAL (pre-adaptation) global
+parameters -- that gradient, sample-count-weighted across cities, IS the meta-gradient, applied as
+one Adam step on the shared network. This replaces FedAvg's "average client state dicts" step
+entirely rather than reweighting it. Verified two ways before spending any real training compute:
+(1) two new unit tests in `tests/test_flag_wiring.py` (`test_maml_inner_adapt_reduces_support_loss`,
+`test_maml_meta_gradient_differs_from_reptile_delta`) using a tiny synthetic network and fabricated
+batches, both passing -- the second specifically checks the real MAML gradient is NOT numerically
+identical (cosine similarity) to the naive first-order Reptile delta, guarding against silently
+re-testing item 24 under a new name if `create_graph=True` were somehow not actually keeping the
+inner loop differentiable; (2) a real-SUMO smoke test (`environments_c1_4_6`, 2 rounds, 1 collect
+episode/round, seed 3) launched to confirm the driver script runs end to end without crashing.
+Full test suite (20/20) still green. Smoke-test and pilot results to follow.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
