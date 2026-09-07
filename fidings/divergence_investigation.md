@@ -5909,6 +5909,22 @@ still running the §87 PCFT re-verification (3 processes) and the item-1 indepen
 more concurrent processes on top of that would slow every already-hours-deep job further for no
 good reason; queued to launch once one of those frees capacity.
 
+**Update: PCFT re-verification checked and is NOT close to done (still mid-flight, not stalled)** --
+all 3 seeds have finished their first focus+3-fedavg-round phase (city_4 warm-up -> focus on city_6
+-> 3 FedAvg rounds across [city_4, city_6]) and just started the SECOND phase (focus on city_1, the
+roster's biggest city at 16 intersections, followed by another 3 FedAvg rounds across all three
+cities) -- a whole additional multi-round phase remains, likely another 1-2+ hours given city_1's
+size. The independent-ensemble eval's log is still just its startup warnings after ~10 hours of
+climbing CPU time (not stuck -- CPU time keeps growing -- just fully stdout-buffered until the
+process exits or a buffer threshold is hit); at this roster's observed ~7 min/eval-episode pace,
+evaluating 6 checkpoints + SWA-average + majority-vote-ensemble at 30 episodes each (~240
+episode-evals total) plausibly needs most of a day. Neither is freeing capacity soon. Since load
+had eased somewhat (15.5-17 vs. the earlier 21) and RAM headroom is ample (17GB free), launched ONE
+MAML pilot seed now (seed 3, `results/pilot_maml_logs/maml_s3.log`) rather than all 3 at once, to
+get a real comparable data point without doubling contention on top of two already many-hours-deep
+jobs -- seeds 7/11 queued for whenever more capacity frees (either job finishing, or seed 3
+finishing and freeing its own slot).
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
