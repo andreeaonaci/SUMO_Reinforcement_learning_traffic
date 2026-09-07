@@ -5925,6 +5925,24 @@ get a real comparable data point without doubling contention on top of two alrea
 jobs -- seeds 7/11 queued for whenever more capacity frees (either job finishing, or seed 3
 finishing and freeing its own slot).
 
+**MAML pilot seed 3, 3 of 5 rounds in: a clean, unambiguous negative trend, ending in a full
+confident lock-in.** Round 0 (random init): -8585.72. Round 1: -8676.93. Round 2: -9544.67. Round 3:
+**-10150.91, std=0.00** -- the exact byte-identical-across-episodes confident-lock-in signature
+characterized in §32-34, now reached by round 3 of a brand-new mechanism. Every single round has
+been WORSE than the one before it, including worse than random init from round 1 onward -- not a
+noisy or mixed signal, a monotonic decline. **Deliberately NOT launching seeds 7/11 to chase this
+further before letting seed 3 finish its remaining 2 rounds**, unlike CQL's case (which had a
+genuinely promising, unanimous 3-seed screen worth extending) -- this is closer to QR-DQN's
+"never showed promise to begin with" pattern, except visible even more clearly at a single seed,
+given each additional seed costs several hours of wall-clock at this roster's eval pace. A
+plausible mechanistic read, not yet verified further: differentiating through several inner SGD
+steps (`create_graph=True`) means the meta-gradient's scale/direction depends on second-order
+curvature information that a plain single-step DQN update never has to reason about -- if that
+curvature estimate is noisy this early in training (few samples, still-random features), the
+meta-gradient step could easily be a worse update than the ordinary first-order one FedAvg's local
+training already uses, compounding round over round exactly as observed. Final verdict pending
+rounds 4/5, but already trending toward closing this as a negative result without further seeds.
+
 **Interim PCFT re-verification data point, read with real caution: seed 3's post-focus-on-city_1
 number is striking (-2108.94), but seeds 7/11 show nothing like it at the same pipeline stage.**
 After the focus phase on `city_1` (the last, biggest city to be phased in) but BEFORE the final
@@ -5953,6 +5971,15 @@ rounds remain in this final phase before the run's actual endpoint -- not callin
 but the interim outlier is already fading as predicted, reinforcing rather than overturning this
 document's standing read that a good-looking checkpoint reached mid-training here is not a reliable
 signal of what the FINAL model will look like.
+
+**Update, round 2/3 of the final phase: seed 3's relapse continues (-4793.17 -> -6207.33), now most
+of the way back to this run's typical range.** Seed 7 ticked up slightly (-9729.73 -> -8169.70,
+still bad); seed 11 relapsed hard (-7391.74 -> -9912.18, essentially back to floor). One round left
+(3/3) plus the final forgetting check before this run is done. Trajectory so far across all three
+seeds: whatever caused seed 3's brief -2108.94 spike did not survive being pooled back into
+multi-city FedAvg, consistent with every other "good checkpoint isn't retained" finding in this
+document (§28, §51/§52, §69/§70). Nothing in this run looks headed toward a "revolutionary" verdict
+-- final numbers to follow once round 3/3 and the forgetting check land.
 
 ## Open questions / next steps
 
