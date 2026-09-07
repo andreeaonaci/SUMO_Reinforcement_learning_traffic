@@ -408,22 +408,44 @@ retention bottleneck directly, pre-registered before results were known:
   instead of real sample counts, contradicting its own "FedAvg-style weighting" comment) — fixed, and
   confirmed not to change the qualitative verdict.
 - **True ensemble of independently-trained seeds** (majority-vote across genuinely independent final
-  checkpoints, distinct from item 21's same-run temporally-adjacent-checkpoint SWA) — still running as
-  of this write-up (a 30-episode eval across 6 checkpoints + SWA-average + majority-vote at this
-  roster's ~7min/episode true-holdout pace; genuinely slow, not stuck — confirmed repeatedly via
-  `/proc` CPU-time deltas). See the live RESUME HERE section of `CLAUDE.md` / §91 for its result once
-  it lands.
+  checkpoints, distinct from item 21's same-run temporally-adjacent-checkpoint SWA) — finished after
+  ~13 hours, partially usable. The individual-checkpoint and SWA-weight-average evals succeeded:
+  SWA of the 6 independent checkpoints scored -9068.94, beating every individual checkpoint's mean
+  (best individual: -9240.70) — a small but real-looking effect from combining independently-trained
+  models. **The majority-vote ensemble itself crashed on all 30 episodes** — a real bug
+  (`EnsemblePolicy.act()` in `diagnostics/swa_reeval.py` was missing the `ts_id` parameter
+  `HoldoutEvaluator` always passes) that cascaded into a second crash (the evaluator's
+  all-episodes-failed fallback dict was missing `std_reward` and other keys). Both bugs found and
+  fixed; the majority-vote result itself still needs a re-run under the fix.
 
-Running tally after 3 of 4: zero of the four new candidates confirmed so far, consistent with this
-project's dominant pattern (most levers are null; the rare real ones — item 22, sequential training —
-are modest, not transformative). No result yet from this stretch should be read as evidence the
-overall generalization gap is close to solved.
+Running tally after all 4: **zero of the four pre-registered §91 candidates confirmed** —
+CQL and QR-DQN closed not-confirmed/negative, MAML closed negative, and the ensemble's actual
+majority-vote result never computed due to the bug above (only its SWA-average side-result is
+usable). Consistent with this project's dominant pattern: most levers are null; the rare real ones
+are modest, not transformative.
 
-**Separately, the same night's Progressive Curriculum FedAvg (PCFT, §87/§91-adjacent, not one of the
-four pre-registered candidates) re-verification produced this session's most promising 3-seed screen
-after the four candidates above — |diff|/SE 2.40-3.03 across three measures, unanimous across all 3
-seeds, vs. the standard `fedavg` baseline.** Flagged with the same caution CQL's reversal demands
-(CQL was equally clean at 3 seeds and evaporated at 6) plus a budget/mechanism confound specific to
-PCFT (it embeds the already-confirmed focus/fine-tune mechanism, so this may not isolate curriculum
-ordering as the active ingredient) — a 6-seed extension is queued, not yet confirmed. See
-`divergence_investigation.md` §87 for the full trajectory and caveats.
+**Separately, the same night's Progressive Curriculum FedAvg (PCFT, §87, not one of the four
+pre-registered candidates) is now CONFIRMED at full 6-seed rigor — |diff|/SE 2.42 (final round),
+3.42 (best-ever round), 2.70 (mean), all three STRONGER than the initial 3-seed screen (2.40/3.03/
+2.39), the opposite of CQL's and TC-FedAvg's fade.** 5 of 6 seeds positive on every measure. **This
+makes PCFT the third confirmed training-time/curriculum result of the whole investigation** (with
+item 22 and sequential training), and by two of three measures the strongest of the three. The
+budget/fine-tuning-embedding confound (PCFT's curriculum includes per-city focus/fine-tune steps
+already known to help, so this may not isolate curriculum ORDERING as the active ingredient) and the
+continued enormous within-run volatility are both still open, unresolved caveats — not retracted by
+the confirmation. See `divergence_investigation.md` §87 for full seed-by-seed numbers.
+
+**Two more architecture-level ideas, proposed and tested live with the user (not pre-registered,
+not part of §91) immediately after: `--bounded_q` and `--trunk_lr_scale`, both targeting the
+confident-lock-in RETENTION mechanism directly (as opposed to representation capacity, which three
+prior attempts — the base architecture, TC-FedAvg, and §71's wider roster — already failed to fix).**
+`--bounded_q` (caps the Q-head's cross-action spread via a hard tanh ceiling, architecturally rather
+than as a loss-level preference like `--cql_weight`/`--q_entropy_weight`) came back a **clean null**
+at 3 seeds (|diff|/SE 0.22/0.07) — one seed showed a promising lock-in-free trend through round 4
+that then relapsed at the final round, netting out flat. `--trunk_lr_scale` (differential learning
+rate: the representation-building trunk learns slower than the Q-head, so a round's gradients can't
+fully overwrite it before consolidating) came back a **real negative result**, unanimous across all
+3 seeds (|diff|/SE 2.15/1.99, all three seeds worse, one by -13%) — likely a starvation effect, since
+the trunk still needs to adapt quickly early in training when it has no good representation yet to
+protect. Both closed after one 3-seed pilot each, per direct user instruction to move on to the next
+idea rather than tune either flag further. See `divergence_investigation.md` §92.

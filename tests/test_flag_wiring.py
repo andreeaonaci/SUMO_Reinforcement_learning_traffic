@@ -588,3 +588,143 @@ def test_maml_meta_gradient_differs_from_reptile_delta():
         "first-order Reptile-style delta -- if it collapses to that, create_graph=True isn't "
         "actually keeping the inner loop differentiable and this is silently just Reptile again."
     )
+
+
+# ---------------------------------------------------------------------------
+# 6. bounded_q -- architectural Q-gap ceiling, per direct user request 2026-09-07.
+#    Must actually cap the SPREAD even under adversarial preactivations (not
+#    just typical ones), and must leave absolute Q magnitude untouched --
+#    otherwise this is silently just another loss-level nudge, not the hard
+#    capacity constraint it's supposed to be.
+# ---------------------------------------------------------------------------
+
+def test_bounded_q_caps_gap_under_adversarial_weights():
+    """Force huge advantage-head preactivations (as if training had pushed the
+    network toward exactly the kind of overconfident split that produces a
+    std=0.00 confident lock-in) and confirm the resulting Q-gap still can't
+    exceed ~2*q_bound_scale, however large the underlying logits get."""
+    from agents.networks import NeighborAttentionQNetwork
+
+    torch.manual_seed(0)
+    scale = 5.0
+    net = NeighborAttentionQNetwork(
+        own_dim=6, neighbor_dim=3, k_max=2, action_dim=4, dueling=True,
+        bounded_q=True, q_bound_scale=scale,
+    )
+    # Blow up the advantage head's weights/bias by 1000x -- simulates whatever
+    # extreme preactivation a confidently-locked round would produce.
+    with torch.no_grad():
+        net.advantage_head.weight.mul_(1000.0)
+        net.advantage_head.bias.copy_(torch.tensor([1e6, -1e6, 0.0, 5e5]))
+
+    own = torch.randn(8, 6)
+    neighbors = torch.randn(8, 2, 3)
+    neighbor_mask = torch.ones(8, 2)
+    q = net(own, neighbors, neighbor_mask)
+
+    gaps = q.max(dim=-1).values - q.min(dim=-1).values
+    assert torch.all(gaps < 2.0 * scale + 1e-3), (
+        f"bounded_q must cap the Q-gap to ~2*q_bound_scale ({2*scale}) even under adversarial "
+        f"preactivations -- got max gap {gaps.max().item():.4f}. If this fails, the tanh squash "
+        "isn't actually applied to the final output, or is applied before some later "
+        "unbounded operation."
+    )
+
+
+def test_bounded_q_preserves_mean_q_magnitude():
+    """The bound must only squeeze the SPREAD across actions, not the
+    absolute Q magnitude (the mean term) -- otherwise this would also
+    distort ordinary value estimates, not just cap overconfidence."""
+    from agents.networks import NeighborAttentionQNetwork
+
+    torch.manual_seed(1)
+    net_plain = NeighborAttentionQNetwork(own_dim=6, neighbor_dim=3, k_max=2, action_dim=4)
+    net_bounded = NeighborAttentionQNetwork(own_dim=6, neighbor_dim=3, k_max=2, action_dim=4,
+                                             bounded_q=True, q_bound_scale=5.0)
+    net_bounded.load_state_dict(net_plain.state_dict())
+
+    own = torch.randn(4, 6)
+    neighbors = torch.randn(4, 2, 3)
+    neighbor_mask = torch.ones(4, 2)
+
+    q_plain = net_plain(own, neighbors, neighbor_mask)
+    q_bounded = net_bounded(own, neighbors, neighbor_mask)
+
+    assert torch.allclose(q_plain.mean(dim=-1), q_bounded.mean(dim=-1), atol=1e-5), (
+        "bounded_q must leave the per-state mean Q value unchanged -- only the spread around "
+        "that mean should be squashed."
+    )
+
+
+def test_bounded_q_default_is_exact_noop():
+    """bounded_q=False (the default) must reproduce the exact same output as
+    before this flag existed -- no accidental behavior change for every
+    existing run that doesn't pass it."""
+    from agents.networks import NeighborAttentionQNetwork
+
+    torch.manual_seed(2)
+    net_a = NeighborAttentionQNetwork(own_dim=6, neighbor_dim=3, k_max=2, action_dim=4, dueling=True)
+    torch.manual_seed(2)
+    net_b = NeighborAttentionQNetwork(own_dim=6, neighbor_dim=3, k_max=2, action_dim=4, dueling=True,
+                                       bounded_q=False)
+
+    own = torch.randn(4, 6)
+    neighbors = torch.randn(4, 2, 3)
+    neighbor_mask = torch.ones(4, 2)
+
+    assert torch.equal(net_a(own, neighbors, neighbor_mask), net_b(own, neighbors, neighbor_mask))
+
+
+# ---------------------------------------------------------------------------
+# 7. trunk_lr_scale -- slow trunk / fast head split, per direct user request
+#    2026-09-07 (tried after --bounded_q's 3-seed pilot came back a clean null).
+# ---------------------------------------------------------------------------
+
+def test_trunk_lr_scale_moves_trunk_less_than_head():
+    """Under a real optimizer step on a real (small) loss, the trunk's
+    parameters should move proportionally less than the head's -- the whole
+    point of the split. Confirms the two param groups actually route to the
+    right underlying tensors, not just that two groups exist."""
+    from agents.dqn import DQNAgent
+
+    agent = DQNAgent(own_dim=6, neighbor_dim=3, k_max=2, action_dim=4, trunk_lr_scale=0.1, lr=1e-2)
+    net = agent.q
+
+    trunk_before = {n: p.detach().clone() for n, p in net.named_parameters()
+                     if not n.startswith(("head.", "value_head.", "advantage_head."))}
+    head_before = {n: p.detach().clone() for n, p in net.named_parameters()
+                    if n.startswith(("head.", "value_head.", "advantage_head."))}
+
+    own = torch.randn(8, 6)
+    neighbors = torch.randn(8, 2, 3)
+    neighbor_mask = torch.ones(8, 2)
+    q = net(own, neighbors, neighbor_mask)
+    loss = q.pow(2).mean()
+    agent.optimizer.zero_grad()
+    loss.backward()
+    agent.optimizer.step()
+
+    trunk_delta = sum((p - trunk_before[n]).abs().sum().item() for n, p in net.named_parameters()
+                       if n in trunk_before)
+    head_delta = sum((p - head_before[n]).abs().sum().item() for n, p in net.named_parameters()
+                      if n in head_before)
+
+    assert trunk_delta > 0 and head_delta > 0, "both groups must still receive real gradient updates."
+    assert trunk_delta < head_delta, (
+        f"trunk_lr_scale=0.1 should move the trunk (delta={trunk_delta:.4f}) less than the head "
+        f"(delta={head_delta:.4f}) after one optimizer step -- if not, the param-group split isn't "
+        "actually routing to the right tensors."
+    )
+
+
+def test_trunk_lr_scale_default_is_exact_noop():
+    """trunk_lr_scale=1.0 (the default) must build the SAME single-group
+    optimizer as before this flag existed -- no accidental behavior change
+    for every existing run that doesn't pass it."""
+    from agents.dqn import DQNAgent
+
+    agent = DQNAgent(own_dim=6, neighbor_dim=3, k_max=2, action_dim=4)
+    assert len(agent.optimizer.param_groups) == 1, (
+        "trunk_lr_scale=1.0 (default) must produce a single optimizer param group, "
+        "byte-identical to the optimizer construction before this flag existed."
+    )

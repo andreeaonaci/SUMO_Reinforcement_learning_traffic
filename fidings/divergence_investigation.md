@@ -6041,6 +6041,104 @@ being trusted, no exceptions after tonight's CQL lesson): launching seeds 17/21/
 closing it out either -- correctly bucketed as "promising, unconfirmed," identical treatment to
 every other 3-seed screen tonight regardless of how the numbers look at this stage.
 
+**6-seed result: CONFIRMED -- unlike CQL and TC-FedAvg, this one held up and got STRONGER, not
+weaker, going from 3 to 6 seeds.** Seeds 17/21/25 final holdout numbers: -9158.86, -5693.49,
+-9332.96 respectively (vs. their own baselines -10225.42/-9018.52/-8997.15 best-ever). Full 6-seed
+comparison:
+
+| measure | 3-seed \|diff\|/SE | 6-seed \|diff\|/SE |
+|---|---:|---:|
+| PCFT final round vs. baseline best-ever round | 2.40 | **2.42** |
+| PCFT best-ever round vs. baseline best-ever round | 3.03 | **3.42** |
+| PCFT mean vs. baseline mean | 2.39 | **2.70** |
+
+All three measures still clear the bar; 5 of 6 seeds positive on every single measure (per-seed %:
+seed3 +61.1/+77.5/+24.9, seed7 +22.9/+57.2/+14.7, seed11 +14.3/+17.9/+2.8, seed17 +10.4/+13.1/+7.5,
+seed21 +36.9/+36.9/+9.3, seed25 -3.7/+24.5/+3.4 -- final/best/mean % respectively). The lone
+exception (seed25's final-round measure, -3.7%) is mild and doesn't undermine the other two measures
+for that same seed. **This makes PCFT the third confirmed training-time/curriculum result of the
+whole investigation, alongside item 22 (reward shaping, ~2.5) and sequential training (1.9-4.2) --
+and by two of three measures (best-ever, mean) it is now the STRONGEST of the three.** The budget/
+fine-tuning-confound caveat above still stands unresolved (an ablation isolating curriculum ordering
+from the embedded per-city focus/fine-tune steps has not been run) and the enormous within-run
+volatility caveat still stands too -- neither is retracted by this confirmation, both remain open
+threads for anyone building on this result. No process errors across any of the 6 seeds. Raw logs:
+`results/pilot_pcft_logs/pcft_reverify_s{3,7,11,17,21,25}.log`.
+
+## 92. Bounded Q-head and slow-trunk/fast-head learning-rate split: two architecture-level ideas
+    targeting the confident-lock-in RETENTION mechanism directly, per direct user request
+
+**2026-09-07.** Following a user-led discussion of why fine-tuning (§66-70) works so much better
+than every training/aggregation-time lever tried (it sidesteps the zero-shot generalization
+requirement entirely by using real target-city data) and why architecture-level attempts at
+compositional topology features (the base network's own_obs/neighbor_obs/mask scheme, TC-FedAvg's
+FiLM conditioning, §71's wider training roster) have all failed to produce a network that RETAINS
+whatever it learns (§51/§52's "reachable but not retained" pattern) -- two new architecture changes
+were proposed, implemented, and dummy-trained specifically targeting retention rather than
+representation capacity, in a live back-and-forth with the user rather than an unsupervised
+overnight stretch.
+
+**1. `--bounded_q`/`--q_bound_scale`** (`agents/networks.py`): caps the Q-head's cross-action
+SPREAD (the exact top1-top2 gap the confident-lock-in mechanism, §32-34, is measured by) via a
+`tanh` squash relative to that state's own mean Q -- a hard architectural ceiling, unlike
+`--q_entropy_weight`/`--cql_weight` (both loss-level preferences that leave the network fully able
+to represent an arbitrarily large gap and only discourage it on average, which a single
+confidently-locked round can still evade). Absolute Q magnitude is untouched, only the spread.
+Verified via 3 unit tests (`tests/test_flag_wiring.py`): caps the gap even under deliberately
+adversarial preactivations (weights x1000), preserves the mean-Q term exactly, and is a byte-exact
+no-op at the default. A 1-round smoke test ran clean through the real `--parallel` pipeline before
+any real compute was spent.
+
+**Real 3-seed pilot result (`q_bound_scale=5.0`, matching the standard `environments_c1_4_6`
+protocol exactly -- no `--dueling`, `--q_entropy_weight 0.05`, seeds 3/7/11): a clean null.**
+
+| measure | \|diff\|/SE | per-seed % (3/7/11) |
+|---|---:|---|
+| best-ever round vs. baseline best | 0.22 | -1.0% / +2.1% / -2.5% |
+| mean vs. baseline mean | 0.07 | +1.1% / +0.6% / -2.0% |
+
+Both measures are indistinguishable from noise -- not better, not worse. Notably, seeds 7 and 11
+showed a clean, monotonically improving trend with no lock-in signature through round 4, but seed 11
+relapsed hard on the final round (-9230.65 -> -9845.92), undoing that trend and landing the whole
+pilot at a flat null rather than anything resembling a win. **Closed as a null result at 3 seeds** --
+no promising direction to justify 6-seed escalation, same treatment as QR-DQN.
+
+**2. `--trunk_lr_scale`** (`agents/dqn.py`): splits the optimizer into two parameter groups --
+the "trunk" (own/neighbor encoders, attention, hop embedding -- everything upstream of the Q-head
+that builds the shared representation) gets a slower learning rate than the head, so a
+representation built one round isn't fully overwritten by the next city's gradients before it can
+consolidate. Deliberately implemented as a differential-LR split rather than a full LoRA-style
+adapter module -- cheaper to build and test first; a real adapter would be the natural next step if
+this showed promise. Verified via 2 unit tests (trunk moves measurably less than the head under a
+real optimizer step; `trunk_lr_scale=1.0` produces the exact same single-param-group optimizer as
+before this flag existed) plus a clean 1-round smoke test.
+
+**Real 3-seed pilot result (`trunk_lr_scale=0.1`, i.e. the trunk learns 10x slower than the head,
+same protocol as above): a real NEGATIVE result, unanimous across all 3 seeds.**
+
+| measure | \|diff\|/SE | per-seed % (3/7/11) |
+|---|---:|---|
+| best-ever round vs. baseline best | **2.15** | -0.3% / -5.2% / **-13.3%** |
+| mean vs. baseline mean | **1.99** | -0.5% / -3.4% / **-8.3%** |
+
+Both measures are already brushing this project's significance bar -- in the WRONG direction, with
+every single seed worse than baseline, no exceptions. Seed 11 in particular never trained
+meaningfully at all: locked in the -10200 to -10315 range for all 5 rounds with no improvement from
+round 1 onward. **Plausible mechanistic read:** at 10x slowdown, the trunk (still random-init at the
+start of training) can't adapt fast enough to build even a basic usable representation before the
+head is already trying to read values off it -- a starvation effect, not the intended "protect an
+already-good representation" effect, since there's no good representation yet this early for the
+mechanism to protect. **Closed as a negative result at 3 seeds** -- no positive trend to chase, and
+the direction is clean and unanimous enough that this doesn't need 6-seed confirmation to interpret,
+same treatment as QR-DQN and proper MAML.
+
+**Both ideas closed within one live-conversation session (implement -> unit-test -> smoke-test ->
+3-seed pilot -> decision), continuing this project's now well-established base rate: most new
+levers, including carefully-motivated architecture-level ones aimed squarely at the diagnosed
+mechanism, come back null or negative. Per direct user instruction, moving on to the next idea
+rather than tuning `q_bound_scale`/`trunk_lr_scale` further without a specific reason to expect a
+qualitatively different result from a different value.**
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit

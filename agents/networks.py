@@ -131,12 +131,21 @@ class NeighborAttentionQNetwork(nn.Module):
         topology_conditioned: bool = False,
         distributional: bool = False,
         n_quantiles: int = 21,
+        bounded_q: bool = False,
+        q_bound_scale: float = 5.0,
     ):
         super().__init__()
         if dueling and actor_critic:
             raise ValueError("dueling and actor_critic are mutually exclusive head types.")
         if distributional and (dueling or actor_critic):
             raise ValueError("distributional is mutually exclusive with dueling/actor_critic.")
+        if bounded_q and distributional:
+            raise ValueError(
+                "bounded_q is mutually exclusive with distributional -- bounding a point-Q "
+                "spread doesn't apply to a quantile distribution, which already resists "
+                "collapsing to an overconfident point estimate by construction (see "
+                "distributional's own docstring above)."
+            )
         self.k_max = k_max
         self.d_model = d_model
         self.n_hops = n_hops
@@ -156,6 +165,22 @@ class NeighborAttentionQNetwork(nn.Module):
         # shape and the head structure completely unchanged.
         self.distributional = distributional
         self.n_quantiles = n_quantiles
+        # Bounded Q-head ("architecture-level retention" proposal, per direct user
+        # request 2026-09-07): every previous confident-lock-in fix (q_entropy_weight,
+        # CQL, anchor-revert) worked at the LOSS level -- discouraging an overconfident
+        # Q-gap on average, while leaving the network fully capable of representing an
+        # arbitrarily large one. Averages hide the outlier lock-in; a std=0.00 round
+        # only needs the network to find that extreme ONCE and get stuck there. This
+        # instead removes the capacity structurally: cap how far any action's Q-value
+        # can deviate from that state's own mean Q via a tanh squash, so the top1-top2
+        # gap has a hard ceiling (~2*q_bound_scale) no amount of training can exceed --
+        # a capacity constraint, not a training-signal preference. Absolute Q magnitude
+        # (the mean term) is left completely unconstrained; only the SPREAD across
+        # actions for a given state is bounded, since that spread is what the
+        # confident-lock-in mechanism (fidings sec 32-34) actually measures.
+        # bounded_q=False (default) leaves _q_from_features's output byte-identical.
+        self.bounded_q = bounded_q
+        self.q_bound_scale = q_bound_scale
         # "Upgraded DQN" (fidings/divergence_investigation.md, 2026-09-05):
         # BatchNorm1d + relu6/leaky_relu in place of the original plain-ReLU
         # design, tested against the overnight algorithm-swap campaign's
@@ -343,16 +368,27 @@ class NeighborAttentionQNetwork(nn.Module):
         combined dueling-style (Q = V + A - mean(A)) if ``dueling``, or the
         per-quantile mean if ``distributional`` -- every caller of this
         method (action selection, ``_mask_q``, the evaluator) sees ordinary
-        (B, action_dim) values regardless of which head type is active."""
+        (B, action_dim) values regardless of which head type is active.
+        If ``bounded_q``, the plain/dueling result is additionally squashed
+        (see __init__'s comment) so its cross-action SPREAD can't exceed a
+        hard ceiling -- absolute Q magnitude is untouched."""
         feat = self.head(combined)
         if self.dueling:
             value = self.value_head(feat)
             advantage = self.advantage_head(feat)
-            return value + (advantage - advantage.mean(dim=-1, keepdim=True))
-        if self.distributional:
+            raw_q = value + (advantage - advantage.mean(dim=-1, keepdim=True))
+        elif self.distributional:
             quantiles = feat.view(feat.shape[0], self.action_dim, self.n_quantiles)
             return quantiles.mean(dim=-1)
-        return feat
+        else:
+            raw_q = feat
+
+        if self.bounded_q:
+            mean_q = raw_q.mean(dim=-1, keepdim=True)
+            centered = raw_q - mean_q
+            bounded_centered = self.q_bound_scale * torch.tanh(centered / self.q_bound_scale)
+            return mean_q + bounded_centered
+        return raw_q
 
     def _combined_features(
         self,

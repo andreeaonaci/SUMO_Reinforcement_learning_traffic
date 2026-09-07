@@ -100,7 +100,8 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
                 anchor_revert: bool = False, anchor_warmup_calls: int = 100,
                 anchor_check_every: int = 50, anchor_qgap_growth_threshold: float = 3.0,
                 anchor_pullback_beta: float = 0.5, cql_weight: float = 0.0,
-                n_quantiles: int = 21):
+                n_quantiles: int = 21, bounded_q: bool = False, q_bound_scale: float = 5.0,
+                trunk_lr_scale: float = 1.0):
     """Single place that constructs the local/global agent -- DQNAgent
     (default, unchanged), PPOAgent (--algo ppo, agents/ppo.py), or
     MunchausenDQNAgent (--algo munchausen, agents/munchausen_dqn.py; see
@@ -206,6 +207,9 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
         anchor_qgap_growth_threshold=anchor_qgap_growth_threshold,
         anchor_pullback_beta=anchor_pullback_beta,
         cql_weight=cql_weight,
+        bounded_q=bounded_q,
+        q_bound_scale=q_bound_scale,
+        trunk_lr_scale=trunk_lr_scale,
     )
 
 
@@ -955,6 +959,9 @@ def main(args):
             anchor_pullback_beta=args.anchor_pullback_beta,
             cql_weight=args.cql_weight,
             n_quantiles=args.n_quantiles,
+            bounded_q=args.bounded_q,
+            q_bound_scale=args.q_bound_scale,
+            trunk_lr_scale=args.trunk_lr_scale,
         )
         history = server.run(
             rounds=args.rounds,
@@ -1241,6 +1248,28 @@ if __name__ == "__main__":
                               "head's final layer is action_dim*n_quantiles wide, not action_dim -- "
                               "plain full-state FedAvg is used instead, same fallback as ppo). "
                               "Ignored for every other --algo.")
+    parser.add_argument("--bounded_q", action="store_true",
+                         help="Cap the Q-head's cross-action SPREAD (the top1-top2 gap the "
+                              "confident-lock-in pathology, sec 32-34, is measured by) via a tanh "
+                              "squash relative to that state's own mean Q -- a hard architectural "
+                              "ceiling, not a loss-level preference like --q_entropy_weight or "
+                              "--cql_weight (both of which leave the network fully able to "
+                              "represent an arbitrarily large gap and only discourage it on "
+                              "average, which a single confidently-locked round can still evade). "
+                              "Absolute Q magnitude is untouched, only the spread across actions "
+                              "for a given state. Default off is an exact no-op.")
+    parser.add_argument("--q_bound_scale", type=float, default=5.0,
+                         help="Half-width of the Q-gap ceiling under --bounded_q (max possible "
+                              "top1-top2 gap is roughly 2x this value). Ignored unless --bounded_q.")
+    parser.add_argument("--trunk_lr_scale", type=float, default=1.0,
+                         help="Learning-rate multiplier for the trunk (own/neighbor encoders + "
+                              "attention -- the representation-building layers upstream of the "
+                              "Q-head) relative to the head's own --lr. <1.0 makes the trunk change "
+                              "more slowly round to round than the head, so a representation built "
+                              "one round isn't fully overwritten by the next city's gradients "
+                              "before it consolidates (sec 51/52's 'reachable but not retained' "
+                              "pattern). 1.0 (default) is an exact no-op -- single optimizer param "
+                              "group, byte-identical to before this flag existed.")
     parser.add_argument("--eval_every",            type=int,   default=1)
     parser.add_argument("--eval_episodes",         type=int,   default=5)
     parser.add_argument("--log_loss_every_steps",  type=int,   default=50,

@@ -89,6 +89,21 @@ def _collate(obs_list, device):
     return own, neighbors, neighbor_mask, hop_dist, action_mask
 
 
+_HEAD_PARAM_PREFIXES = ("head.", "value_head.", "advantage_head.", "policy_head.", "ac_value_head.")
+
+
+def _split_trunk_head_params(module: "nn.Module"):
+    """Split a NeighborAttentionQNetwork's parameters into "trunk" (own/
+    neighbor encoders, attention, hop embedding -- everything upstream of
+    the Q-head that builds the shared REPRESENTATION) and "head" (the
+    task-specific Q-value readout) -- see DQNAgent's ``trunk_lr_scale``
+    for why this split exists."""
+    trunk, head = [], []
+    for name, p in module.named_parameters():
+        (head if name.startswith(_HEAD_PARAM_PREFIXES) else trunk).append(p)
+    return trunk, head
+
+
 def _mask_q(q: "torch.Tensor", action_mask: "torch.Tensor") -> "torch.Tensor":
     """Set Q-values of invalid actions to -inf so argmax / target
     computation never picks or bootstraps off an action that doesn't
@@ -148,6 +163,9 @@ class DQNAgent:
         cql_weight: float = 0.0,
         distributional: bool = False,
         n_quantiles: int = 21,
+        bounded_q: bool = False,
+        q_bound_scale: float = 5.0,
+        trunk_lr_scale: float = 1.0,
     ):
         self.own_dim = own_dim
         self.neighbor_dim = neighbor_dim
@@ -173,6 +191,8 @@ class DQNAgent:
             topology_conditioned=topology_conditioned,
             distributional=distributional,
             n_quantiles=n_quantiles,
+            bounded_q=bounded_q,
+            q_bound_scale=q_bound_scale,
         )
         self.q = NeighborAttentionQNetwork(**net_kwargs).to(self.device)
         self.q_target = NeighborAttentionQNetwork(**net_kwargs).to(self.device)
@@ -201,7 +221,32 @@ class DQNAgent:
         # AdamW applies weight_decay as a separate, decoupled term
         # (param -= lr*weight_decay*param), which behaves like the mild
         # regularizer weight_decay=1e-5 was actually meant to be.
-        self.optimizer = optim.AdamW(self.q.parameters(), lr=lr, weight_decay=1e-5, eps=1e-6)
+        # Slow trunk / fast head split ("architecture-level retention" proposal,
+        # per direct user request 2026-09-07, tried after --bounded_q came back a
+        # clean null): every prior fix left the WHOLE network -- representation
+        # and Q-head alike -- exposed to the same noisy per-round gradient signal,
+        # which is why a good representation built one round can be partially
+        # overwritten by the next city's gradients before it consolidates (fidings
+        # sec 51/52's "reachable but not retained" pattern). trunk_lr_scale<1.0
+        # gives the own/neighbor encoders + attention (the REPRESENTATION-building
+        # layers, see _split_trunk_head_params) a proportionally slower learning
+        # rate than the Q-head, so the trunk changes gradually round over round
+        # instead of being fully rewritten by whichever city trained last, while
+        # the head stays free to adapt quickly to each round's data.
+        # trunk_lr_scale=1.0 (default) is an EXACT no-op: single param group,
+        # byte-identical optimizer to before this flag existed.
+        self.trunk_lr_scale = trunk_lr_scale
+        if trunk_lr_scale != 1.0:
+            trunk_params, head_params = _split_trunk_head_params(self.q)
+            self.optimizer = optim.AdamW(
+                [
+                    {"params": head_params, "lr": lr},
+                    {"params": trunk_params, "lr": lr * trunk_lr_scale},
+                ],
+                weight_decay=1e-5, eps=1e-6,
+            )
+        else:
+            self.optimizer = optim.AdamW(self.q.parameters(), lr=lr, weight_decay=1e-5, eps=1e-6)
         self.lr_decay = lr_decay   # multiplicative decay applied once per federated round
         self.min_lr = min_lr
         self.replay = ReplayBuffer(buffer_size)
