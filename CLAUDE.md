@@ -196,7 +196,103 @@ which had gone stale):
   implemented and tested* FedProx proximal term, `DQNAgent.mu` — see next bullet — which is real
   and unaffected by this deletion.
 
-## RESUME HERE (as of 2026-08-29 — check this is still current before trusting it)
+## RESUME HERE (as of 2026-09-07 — check this is still current before trusting it)
+
+**SUPERSEDES the 2026-08-29 update below for anything about current experimental status** (that
+update's strategic/publishability verdict, further down, is still valid background — just stale on
+specifics). Everything from 2026-09-05 through 2026-09-07 (a multi-day session) is summarized here;
+full detail is in `fidings/divergence_investigation.md` §78-92 and the compressed
+`fidings/project_knowledge_summary.md`. Read this block first if picking this project back up cold.
+
+**The item 20-25 queue (genuinely-different-paradigm levers, user-requested) is fully closed.**
+Six items plus two ad-hoc additions (TC-FedAvg, item 24's protocol re-test) — exactly ONE confirmed
+real: **item 22, potential-based reward shaping using `max_pressure`'s own signal** (|diff|/SE ~2.5,
+6 seeds, both measures). Everything else: item 20 (replay-buffer reset) null, item 21 (SWA/ensemble
+of same-run checkpoints) real-but-not-deployable, item 23 (recurrent/GRUCell) inconclusive, item 24
+(`--fedavg_blend`, already existed) confirmed null, item 25 (evolution strategies) inconclusive/
+underpowered, TC-FedAvg (bespoke topology-conditioned FiLM) promising at 3 seeds then null at 6.
+
+**CRITICAL BUG found and fixed, §88: `HoldoutEvaluator`'s internal RNG-reset was leaking into
+subsequent TRAINING** in any single-process script that interleaves `agent.train()` and
+`evaluator.evaluate()` calls in one process (`sequential_training.py`, `progressive_curriculum_
+fedavg.py`, `evolution_strategies.py` — NOT the real `--parallel` pipeline, which trains in isolated
+subprocesses eval never touches). Fixed by making `evaluate()`/`evaluate_controller()` save/restore
+the full Python/NumPy/PyTorch global RNG state around themselves. This required re-verifying
+**sequential (non-federated) curriculum training**, which is now **CONFIRMED real at 6-seed rigor**
+but at smaller magnitude than first (buggy) measurement: |diff|/SE 1.92-2.26 (final), 3.87-4.22
+(best-checkpoint) — the second confirmed positive result of the session. A separate "3x training
+budget" escalation claim did NOT survive re-verification (complete reversal) and should not be cited.
+
+**Self-Anchoring Training** (`--anchor_revert`, a bespoke Q-gap-triggered partial weight-reversion
+mechanism, built for this project's own diagnosed retention bottleneck): inconclusive at 6-seed
+rigor (|diff|/SE 1.53/0.90) even after fixing an under-sensitive default threshold.
+
+**Four pre-registered "significantly improve" candidates (§91), all now resolved, zero confirmed:**
+- **CQL** (`--cql_weight`): unanimous, clean 3-seed screen (2.35/2.80) that **reversed hard at 6
+  seeds** (1.05/1.14, one seed flipped -14%) — the clearest demonstration this session that even a
+  perfectly clean 3-seed result isn't sufficient evidence.
+- **QR-DQN** (`--algo qrdqn`, distributional RL): closed **negative** at 3 seeds (1.69/1.13, wrong
+  direction) — never showed promise, no 6-seed escalation warranted.
+- **Proper MAML** (`federated/maml.py`, genuine second-order meta-gradient via
+  `torch.func.functional_call`+`create_graph=True`, NOT a repeat of item 24's first-order proxy):
+  closed **negative** at n=1 seed — monotonic decline into a fully stable `std=0.00` confident
+  lock-in (rounds 3/4/5 byte-identical). A later `/simplify` pass found and fixed a real bug in this
+  same script (fake "sample-count weighting" that was actually a constant) — didn't change the
+  verdict.
+- **Independent-seed ensemble** (`diagnostics/swa_reeval.py`): took ~13 hours, partially usable.
+  SWA weight-average of 6 independent checkpoints scored **-9068.94**, beating every individual
+  checkpoint's own mean — a small, real-looking effect. The actual **majority-vote ensemble crashed
+  on every episode** (a real bug: `EnsemblePolicy.act()` was missing the `ts_id` param
+  `HoldoutEvaluator` always passes, which cascaded into a second crash via an incomplete
+  all-episodes-failed fallback dict). **Both bugs fixed; the majority-vote result itself still needs
+  a re-run** — not yet done.
+
+**Progressive Curriculum FedAvg (PCFT) — user-proposed (order training cities simplest-to-complex,
+warm up solo, then focus-fine-tune + FedAvg-pool each new city), now CONFIRMED at full 6-seed
+rigor, and unlike CQL/TC-FedAvg it got STRONGER, not weaker, from 3 to 6 seeds:**
+
+| measure | 3-seed \|diff\|/SE | 6-seed \|diff\|/SE |
+|---|---:|---:|
+| final round vs. baseline best-ever round | 2.40 | **2.42** |
+| best-ever round vs. baseline best-ever round | 3.03 | **3.42** |
+| mean vs. baseline mean | 2.39 | **2.70** |
+
+5 of 6 seeds positive on every measure. **This is the THIRD confirmed positive result of the whole
+investigation** (with item 22 and sequential training), and by two of three measures the strongest.
+Two caveats NOT retracted by the confirmation: (1) **budget/mechanism confound** — PCFT's curriculum
+embeds the already-confirmed per-city focus/fine-tune mechanism at every step, so this may be
+re-confirming fine-tuning helps rather than proving curriculum ORDERING specifically is the active
+ingredient; no ablation isolating the two has been run; (2) within-run volatility remains enormous
+(one seed swung >4x across its last three rounds). Full numbers: §87.
+
+**Three architecture-level ideas targeting the confident-lock-in RETENTION mechanism directly
+(as opposed to representation capacity, already shown resistant via the base architecture,
+TC-FedAvg, and §71's wider training roster) — all proposed, implemented, tested, and closed within
+one live conversation with the user, all null or negative:**
+- **`--bounded_q`/`--q_bound_scale`**: hard `tanh` ceiling on the Q-head's cross-action spread
+  (architectural, not a loss-level preference like `--q_entropy_weight`/`--cql_weight`). 3-seed:
+  clean null (0.22/0.07).
+- **`--trunk_lr_scale`**: differential optimizer LR, trunk (representation layers) slower than the
+  Q-head. 3-seed: real **negative** result, unanimous (2.15/1.99) — likely a starvation effect,
+  since the trunk is still random-init early on and needs full-speed learning, not protection.
+- **`--lora_adapter`/`--lora_rank`**: zero-initialized low-rank residual ADDED on top of a fully-
+  normally-trained trunk (pure extra capacity, not a reallocation — the direct fix for
+  `trunk_lr_scale`'s starvation diagnosis). 3-seed: clean null (0.38/0.28). Its first smoke test
+  caught a real pre-existing wiring bug (the `--parallel` path's `global_model` template was missing
+  several flags including this one, only breaking now because `lora_adapter` is the first of them
+  to actually change the network's parameter set) — fixed.
+
+**Net picture as of now:** the confident-lock-in/retention mechanism has resisted every lever aimed
+at it directly this session — loss-level (q_entropy_weight, CQL, distributional RL), post-hoc
+(self-anchoring), and architectural (bounded spread, slow trunk, added low-rank capacity) — while
+fine-tuning on real target-city data (§66-70) remains the only reliably-working mitigation, and it
+works precisely by sidestepping the zero-shot generalization requirement rather than fixing it. Two
+things confirmed as real, replicated, modest wins despite that (item 22, sequential training), plus
+now PCFT as a third, currently the strongest of the three but with its own mechanism only partly
+disentangled. **Open, not yet acted on:** re-run the ensemble majority-vote fix; consider an
+ablation isolating PCFT's curriculum-ordering effect from its embedded fine-tune steps; whatever
+architecture/training idea the user proposes next — none of `bounded_q`/`trunk_lr_scale`/
+`lora_adapter` are being tuned further per direct instruction to move on rather than sweep values.
 
 **STRATEGIC CONTEXT from the 2026-08-27/29 session (paper-worthiness discussion + the
 clustered-federation decision rule) — read this first, it's not captured anywhere else and won't

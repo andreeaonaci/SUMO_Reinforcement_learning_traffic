@@ -5964,6 +5964,33 @@ this seed's trajectory to justify the multi-hour cost of replicating on seeds 7/
 (never showed promise at all), MAML actively made things worse than random init from round 1 onward
 and then locked -- if anything a cleaner negative signal, not requiring more seeds to interpret.
 
+**A `/simplify` cleanup pass over items 2-4's implementation code (CQL/QR-DQN/MAML + the RNG-fix
+evaluator changes) found and fixed a real correctness bug in the exact MAML training loop above,**
+independent of and not affecting the negative verdict already reached. `diagnostics/maml_fedavg.py`
+weighted each city's meta-gradient contribution by `args.batch_size` -- a constant, identical for
+every city every round -- despite a code comment explicitly claiming "sample-count weighting, same
+convention as plain FedAvg." Real FedAvg (`federated/aggregation.py`) weights each client by its
+actual produced data volume, which genuinely varies here (`city_1`, 16 intersections, produces far
+more transitions per episode than `city_4`'s 3). This silently degenerated into an unweighted
+average across contributing cities regardless of how much real data each one contributed. **Fixed**:
+now weights by `len(buf)`, each city's real accumulated transition count, and the hand-rolled
+gradient accumulation was replaced with a direct call to `federated/aggregation.py::weighted_average`
+(already generic over any list of same-shaped tensor dicts, not state-dict-specific) instead of a
+parallel reimplementation. Two smaller fixes from the same pass: a redundant per-city clone of
+`global_state`/`target_state` (identical across every city within a round, since neither changes
+until the round's single `meta_optimizer.step()` at the end) was hoisted to once per round; and a
+repeated `algo not in ("ppo", "qrdqn") and not use_batchnorm` boolean condition, spelled out twice in
+`federated/parallel_server.py` (once for `self.head_fix`, once for the `head_key_names()` call), was
+deduplicated into one local variable. All four fixes verified via the full test suite (23/23 at the
+time) plus a real-SUMO smoke re-run of `maml_fedavg.py` confirming clean end-to-end behavior after
+the change. Deliberately NOT touched in the same pass (flagged, not fixed): `agents/qrdqn.py`'s
+`optimize()` and `federated/maml.py`'s `_q_loss_functional()` both duplicate significant chunks of
+`agents/dqn.py::DQNAgent.optimize()`'s shared plumbing (batch collation, FedProx term, grad-clip/
+target-sync) -- real, valid simplification targets, but deliberately deferred rather than refactored
+mid-session, since that would mean editing the exact shared core training method every other live
+and historical experiment in this codebase depends on, for a maintainability-only payoff with no
+correctness upside. Commits: `b98cf7f` (the fix), `a458b0d` and earlier (the code this was found in).
+
 **Interim PCFT re-verification data point, read with real caution: seed 3's post-focus-on-city_1
 number is striking (-2108.94), but seeds 7/11 show nothing like it at the same pipeline stage.**
 After the focus phase on `city_1` (the last, biggest city to be phased in) but BEFORE the final
@@ -6064,6 +6091,28 @@ from the embedded per-city focus/fine-tune steps has not been run) and the enorm
 volatility caveat still stands too -- neither is retracted by this confirmation, both remain open
 threads for anyone building on this result. No process errors across any of the 6 seeds. Raw logs:
 `results/pilot_pcft_logs/pcft_reverify_s{3,7,11,17,21,25}.log`.
+
+**§91 item 1 (true ensemble of independently-trained seeds) result: finished after ~13 hours,
+partially usable, and exposed a real bug.** `diagnostics/swa_reeval.py` evaluated the 6 independent
+seeds' final `run_2026_09_06-*` checkpoints (the same seeds used throughout tonight's §91 baseline
+comparisons) three ways against the true holdout, 30 episodes each: individual checkpoints
+(-9532.00, -9256.11, -9676.57, -10247.97, -10089.56, -9240.70 -- mean of means -9673.82, best
+individual -9240.70), SWA weight-average of all 6 (**-9068.94**, beating every individual
+checkpoint's own mean -- a small but real-looking effect from combining independently-trained
+models via weight averaging, distinct from item 21's same-run temporally-adjacent-checkpoint SWA),
+and majority-vote ensemble (**crashed on all 30 episodes**). Root cause: `HoldoutEvaluator` always
+calls every policy's `.act(obs, explore=False, ts_id=ts_id)` (needed by recurrent agents to track
+per-intersection hidden state), but `EnsemblePolicy.act()` in `swa_reeval.py` never accepted
+`ts_id` at all -- a straightforward, if long-undiscovered, signature mismatch. This cascaded into a
+second, independent bug: `federated/evaluator.py::HoldoutEvaluator.evaluate()`'s all-episodes-failed
+fallback return dict was missing `std_reward` and several other keys the normal result dict always
+has, so `swa_reeval.py`'s own `print(f"...{result['std_reward']:.2f}")` crashed with a confusing
+`KeyError` instead of surfacing the real (already-logged) per-episode failure clearly. **Both fixed**
+(`EnsemblePolicy.act()` now accepts and forwards `ts_id`; the fallback dict now carries the same key
+shape as the normal one, just zeroed/empty) and verified via the existing test suite (no new
+dedicated test added -- the fix is a straightforward signature/shape correction, not new behavior
+needing its own coverage). **The majority-vote result itself still needs a re-run under the fix** --
+not yet done as of this writeup. Commit: `c73644c`.
 
 ## 92. Bounded Q-head and slow-trunk/fast-head learning-rate split: two architecture-level ideas
     targeting the confident-lock-in RETENTION mechanism directly, per direct user request
