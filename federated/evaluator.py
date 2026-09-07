@@ -309,11 +309,26 @@ class HoldoutEvaluator:
                 logger.warning("Evaluation episode %d for policy '%s' failed: %s", ep, policy_name, e)
 
         if not ep_rewards:
+            # Every episode raised (logged above) -- return the SAME key shape as
+            # the normal result below (std_reward, per_episode_reward, etc. included
+            # as empty/zero, not omitted) so a caller that doesn't special-case
+            # episodes==0 gets a clean zero-value result instead of a KeyError
+            # several calls downstream. Confirmed as a real gap: swa_reeval.py's
+            # ensemble mode hit exactly this when EnsemblePolicy.act() itself was
+            # broken (missing ts_id support) -- every episode failed, and the
+            # caller's own std_reward lookup crashed on this dict instead of
+            # surfacing the real (already-logged) per-episode error clearly.
             return {
                 "policy": policy_name,
                 "mean_reward": 0.0,
+                "std_reward": 0.0,
+                "per_episode_reward": [],
                 "mean_waiting_time": 0.0,
-                "mean_stopped": 0,
+                "std_waiting_time": 0.0,
+                "per_episode_waiting_time": [],
+                "mean_stopped": 0.0,
+                "std_stopped": 0.0,
+                "per_episode_stopped": [],
                 "mean_arrived": 0,
                 "mean_queue_length": 0.0,
                 "episodes": 0,

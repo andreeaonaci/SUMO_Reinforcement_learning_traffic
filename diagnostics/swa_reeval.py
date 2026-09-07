@@ -68,8 +68,8 @@ class EnsemblePolicy:
     def __init__(self, agents):
         self.agents = agents
 
-    def act(self, obs, explore: bool = False):
-        votes = [a.act(obs, explore=False) for a in self.agents]
+    def act(self, obs, explore: bool = False, ts_id=None):
+        votes = [a.act(obs, explore=False, ts_id=ts_id) for a in self.agents]
         tally = Counter(votes)
         top_count = max(tally.values())
         tied = [a for a, c in tally.items() if c == top_count]
