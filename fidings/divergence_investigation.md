@@ -5994,6 +5994,45 @@ multi-city FedAvg, consistent with every other "good checkpoint isn't retained" 
 document (§28, §51/§52, §69/§70). Nothing in this run looks headed toward a "revolutionary" verdict
 -- final numbers to follow once round 3/3 and the forgetting check land.
 
+**CORRECTION, final round 3/3: the predicted continued relapse did NOT happen -- all three seeds
+recovered and PCFT's final number beats the standard fedavg baseline's best-EVER round, unanimously,
+clearing this project's significance bar.** Final holdout numbers (round 3/3, all 3 cities pooled):
+seed 3 -3649.15 (up from round 2's -6207.33), seed 7 -7050.03 (up from -8169.70), seed 11 -7720.92
+(up from -9912.18) -- every seed improved in its last round rather than continuing to slide, the
+opposite of what the round-1/round-2 trend predicted. Compared against the standard
+`environments_c1_4_6` `fedavg` baseline's own 6-seed data (`baseline_best`/`baseline_mean` from this
+session's CQL/QR-DQN/MAML comparisons):
+
+| measure | \|diff\|/SE | direction |
+|---|---:|---|
+| PCFT final round vs. baseline best-ever round | **2.40** | PCFT better, all 3 seeds (+14% to +61%) |
+| PCFT best-ever round (across its whole curriculum) vs. baseline best-ever round | **3.03** | PCFT better, all 3 seeds (+18% to +78%) |
+| PCFT mean (across its whole curriculum) vs. baseline mean | **2.39** | PCFT better, all 3 seeds (+3% to +25%) |
+
+**All three measures clear this project's |diff|/SE >= 2 bar, unanimously, no seed disagreeing on
+direction.** This is a real, first-time-this-session result for PCFT as a mechanism.
+
+**Read with EXACTLY the caution this document has now learned to apply to a clean 3-seed screen --
+CQL (§91) was JUST as unanimous and clean at 3 seeds (2.35/2.80) and evaporated to 1.05/1.14 at 6.**
+Two additional reasons for caution specific to PCFT: (1) **budget confound** -- PCFT's total
+training volume (10 warm-up + 2x(5 focus + 3x2 fedavg-round local episodes) = ~32 city-episode-
+equivalents spread across an uneven curriculum) is not a clean apples-to-apples match against the
+baseline's uniform 5-round x 2-local-episode design, and PCFT explicitly embeds §66-70's
+already-confirmed focus/fine-tune mechanism at every new-city step -- so this result may be
+re-confirming that fine-tuning helps (already known) rather than proving anything new about
+curriculum ORDERING specifically; (2) **within-run volatility remains enormous** -- seed 3 alone
+swung from -9827.82 to -2108.94 to -3649.15 across its last three logged evals, a >4x range, the
+same "reachable, not retained, and not stably reproducible round-to-round" instability this document
+has characterized throughout (§32-34/§51-57) -- the specific "final" number is where this particular
+round BUDGET happened to land, not evidence the run has settled anywhere durable.
+
+**Per this session's own standing discipline (a promising 3-seed screen is extended to 6 before
+being trusted, no exceptions after tonight's CQL lesson): launching seeds 17/21/25 once the current
+3 seeds' processes actually exit** (all three are finishing their final forgetting-check phase now),
+**before this can be called anything more than a lead.** Not declaring this "revolutionary" and not
+closing it out either -- correctly bucketed as "promising, unconfirmed," identical treatment to
+every other 3-seed screen tonight regardless of how the numbers look at this stage.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
