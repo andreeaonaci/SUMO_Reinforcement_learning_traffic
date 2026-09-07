@@ -5842,6 +5842,14 @@ closed as not confirmed at the tested weight (0.1).** Not pursuing further weigh
 specific reason to expect a different value to behave qualitatively differently, matching this
 project's standing discipline against endless post-hoc hyperparameter search.
 
+**Item 3 (QR-DQN) pilot launched, seeds 3/7/11.** Note: QR-DQN does not support
+`--q_entropy_weight` (deliberately out of scope, see `agents/qrdqn.py`'s docstring -- a
+distributional analogue of that regularizer is a separate design question), so comparing it against
+tonight's standard `q_entropy_weight=0.05` baseline data would confound "distributional RL" with
+"no q-entropy regularization." Launched a MATCHED plain-`--algo dqn` baseline (same 3 seeds, same
+protocol, `q_entropy_weight` at its CLI default of 0.0) alongside it for a clean, single-variable
+comparison. Results to follow for both.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
