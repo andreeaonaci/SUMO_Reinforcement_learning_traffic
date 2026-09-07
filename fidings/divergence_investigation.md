@@ -5925,6 +5925,25 @@ get a real comparable data point without doubling contention on top of two alrea
 jobs -- seeds 7/11 queued for whenever more capacity frees (either job finishing, or seed 3
 finishing and freeing its own slot).
 
+**Interim PCFT re-verification data point, read with real caution: seed 3's post-focus-on-city_1
+number is striking (-2108.94), but seeds 7/11 show nothing like it at the same pipeline stage.**
+After the focus phase on `city_1` (the last, biggest city to be phased in) but BEFORE the final
+3-round FedAvg pool across all three cities: seed 3 reaches mean_reward=-2108.94 (std 168.92) --
+roughly 4-5x better than anything else in this entire re-verification run so far (every other
+number recorded, this seed and both others, is in the -6400 to -9930 range). Seeds 7 and 11 at the
+exact same pipeline stage: -9551.04 and -9932.87 respectively -- ordinary, unremarkable numbers,
+no sign of anything similar. **This is the same "one outlier seed, others unremarkable" shape this
+document has flagged as a red flag many times before (§11->§12, §30->§31, §46->§47, and structurally
+identical to §51/§52's single "escape round" checkpoint)** -- not, on its own, evidence of anything
+about PCFT as a mechanism. Two reasons for extra caution here specifically: (1) this is BEFORE the
+final FedAvg phase, not the run's actual endpoint -- §51/§52 showed good checkpoints found by
+ordinary gradient steps are frequently NOT retained through subsequent training, so seed 3 sliding
+back toward the -9000s over the next 3 FedAvg rounds would be unsurprising, not a contradiction;
+(2) even if it holds, n=1-of-3 is not a basis for any claim, "revolutionary" or otherwise. Recording
+this now, before the final numbers are in, specifically so this document's own final verdict can be
+checked against this interim read rather than only against hindsight. Full 3-seed final comparison
+still pending -- the run has not yet finished.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
