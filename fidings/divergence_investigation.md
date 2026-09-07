@@ -5898,6 +5898,17 @@ inner loop differentiable; (2) a real-SUMO smoke test (`environments_c1_4_6`, 2 
 episode/round, seed 3) launched to confirm the driver script runs end to end without crashing.
 Full test suite (20/20) still green. Smoke-test and pilot results to follow.
 
+**Smoke test result: clean, exit 0, no crash.** 2 rounds, `environments_c1_4_6`, seed 3, 1 collect
+episode/round, 2 inner steps: all 3 cities contributed a meta-gradient both rounds
+(`cities_updated=3`), query loss finite and moving (0.4967 -> 0.5276), holdout reward moved
+round-to-round (-8536.70 random-init -> -8647.76 -> -8443.35, single eval episode so not
+informative about direction yet, just confirms the mechanism runs end to end without erroring).
+**Real pilot launch deliberately held**, not because of any implementation concern -- the machine is
+still running the §87 PCFT re-verification (3 processes) and the item-1 independent-ensemble eval
+(1 process) from earlier tonight, load average steady around 21 on this 12-core box. Launching 3
+more concurrent processes on top of that would slow every already-hours-deep job further for no
+good reason; queued to launch once one of those frees capacity.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
