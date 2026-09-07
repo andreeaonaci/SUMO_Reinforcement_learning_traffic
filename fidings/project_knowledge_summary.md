@@ -449,3 +449,26 @@ fully overwrite it before consolidating) came back a **real negative result**, u
 the trunk still needs to adapt quickly early in training when it has no good representation yet to
 protect. Both closed after one 3-seed pilot each, per direct user instruction to move on to the next
 idea rather than tune either flag further. See `divergence_investigation.md` §92.
+
+**A third architecture-level idea, `--lora_adapter`, was tried immediately after and also came back
+null.** Rather than restricting the trunk's learning (which starved it), this ADDS a small
+zero-initialized low-rank residual correction on top of the fully-normally-trained trunk — pure
+extra capacity, not a reallocation. 3-seed pilot: |diff|/SE 0.38 (best-ever round) / 0.28 (mean),
+indistinguishable from noise. One seed hit a genuine standout round (-8269.51) that didn't hold,
+same "reachable, not retained" pattern as everywhere else. **Along the way, the first real-SUMO
+smoke test caught a genuine pre-existing wiring bug** (not just confirmed the new mechanism): the
+`--parallel` path's `global_model` template was missing several flags entirely (`cql_weight`,
+`anchor_revert`, `bounded_q`, `trunk_lr_scale`, and now `lora_adapter`) — harmless for all the
+others since none change the network's parameter set, but `lora_adapter` does (adds `lora_down`/
+`lora_up`), so its state_dict was missing those keys and crashed every worker's strict
+`load_state_dict` on round 1. Fixed by threading the full flag set through that call site, not just
+the two new ones — the exact "flag silently doesn't reach where it needs to" bug class this
+project's `tests/test_flag_wiring.py` exists to catch.
+
+**Final tally, all three architecture-level retention ideas tried this session: `--bounded_q` null
+(0.22/0.07), `--trunk_lr_scale` negative (2.15/1.99), `--lora_adapter` null (0.38/0.28).** None held
+up. Combined with the loss-level attempts (q_entropy_weight, CQL, distributional RL) and the
+post-hoc attempt (self-anchoring) tried earlier this session, the confident-lock-in/retention
+mechanism has now resisted every lever aimed at it directly, at every level of the stack tried so
+far — only fine-tuning on real target-city data (§66-70), which sidesteps the zero-shot requirement
+rather than fixing it, reliably helps. See `divergence_investigation.md` §92 for full numbers.

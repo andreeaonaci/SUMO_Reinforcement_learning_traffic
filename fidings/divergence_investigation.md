@@ -6139,6 +6139,68 @@ mechanism, come back null or negative. Per direct user instruction, moving on to
 rather than tuning `q_bound_scale`/`trunk_lr_scale` further without a specific reason to expect a
 qualitatively different result from a different value.**
 
+**3. `--lora_adapter`/`--lora_rank`** (`agents/networks.py`), tried immediately after per direct
+user request: rather than restricting the trunk's own learning (`--trunk_lr_scale`'s approach, which
+just came back negative -- plausibly because a still-random trunk early in training gets starved of
+the updates it needs), this ADDS a small zero-initialized low-rank residual correction (down-project
+to `--lora_rank`, up-project back) onto the combined own+neighbor features, right before the Q-head
+-- pure extra capacity, with the trunk's own learning rate completely untouched. Zero-init on the
+up-projection makes this an exact identity at construction (matching `topology_conditioned`'s own
+zero-init-adapter convention), so it can't destabilize early training the way an arbitrarily
+initialized residual branch could.
+
+Verified via 2 unit tests before spending real compute: `lora_adapter=True` at construction is
+numerically identical to `lora_adapter=False` (confirms the zero-init is actually zero and actually
+applied); after 2 optimizer steps, both `lora_down` and `lora_up` have real, nonzero gradients. The
+second test caught a genuine, expected subtlety along the way, not a bug: on the very FIRST
+optimizer step, `lora_down` receives EXACTLY zero gradient (verified directly), because the chain
+rule for `d(output)/d(lora_down)` is multiplied by `lora_up`'s all-zero weight matrix at that point
+-- only `lora_up` gets a real gradient on step 1 (its output participates directly in the loss);
+once `lora_up` moves off zero, `lora_down` starts receiving real gradient too, from step 2 onward.
+This is the standard, textbook LoRA cold-start behavior, not an implementation defect -- the test
+was corrected to check after 2 steps rather than asserting both move after a single step.
+
+**The first real-SUMO `--parallel` smoke test caught an actual pre-existing wiring bug, not just
+confirmed the mechanism.** `experiments/federated_training.py`'s `--parallel` branch builds a
+`global_model` template (used only to construct the round-0 broadcast state) via a `_make_agent(...)`
+call that was missing several newer flags entirely -- `cql_weight`, `anchor_revert`/its sub-flags,
+`bounded_q`/`q_bound_scale`, `trunk_lr_scale`, and now `lora_adapter`/`lora_rank`. This had been a
+silent, harmless gap for every one of those flags EXCEPT this one, because none of the others change
+the network's actual PARAMETER SET -- `lora_adapter` is the first of them to add new learnable
+tensors (`lora_down.weight`, `lora_up.weight`), so building that template without it produces a
+state_dict missing those two keys, and every worker's `load_state_dict(strict=True)` on round 1
+crashed with `Missing key(s): lora_down.weight, lora_up.weight`. Fixed by threading the full flag
+set through that one call site (not just the two `lora_*` flags -- since this is exactly the
+"flag/attribute silently doesn't reach where it needs to" bug class `tests/test_flag_wiring.py`
+exists to catch, per its own docstring, the other flags were threaded through too while already
+there, removing the latent gap for good rather than patching only today's symptom). Re-ran the
+smoke test clean after the fix; full suite 27/27 passing throughout.
+
+**Real 3-seed pilot result (`lora_rank=8`, same standard `environments_c1_4_6` protocol: no
+`--dueling`, `--q_entropy_weight 0.05`, seeds 3/7/11): another clean null, same category as
+`--bounded_q`.**
+
+| measure | \|diff\|/SE | per-seed % (3/7/11) |
+|---|---:|---|
+| best-ever round vs. baseline best | 0.38 | -0.0% / -3.1% / **+8.2%** |
+| mean vs. baseline mean | 0.28 | +1.1% / -1.6% / +1.5% |
+
+Seed 11 hit a genuine standout round-3 number (-8269.51, the single best round of this pilot) but
+didn't hold it -- relapsed back to ~-9300 by round 5, the same "reachable, not retained" shape as
+everywhere else in this document. No seed shows a consistently better or worse trajectory than
+baseline across the run; the aggregate nets out flat in both directions. **Closed as a null result
+at 3 seeds** -- no promising trend to justify 6-seed escalation, third architecture-level idea
+closed the same session it was proposed.
+
+**Running tally, all three architecture-level retention ideas tried this session:** `--bounded_q`
+(null, 0.22/0.07), `--trunk_lr_scale` (negative, 2.15/1.99), `--lora_adapter` (null, 0.38/0.28).
+None moved the needle in either direction strongly enough to warrant further investment. Consistent
+with this entire document's dominant finding: the confident-lock-in/retention mechanism has proven
+resistant to every lever tried against it directly -- loss-level (`--q_entropy_weight`, `--cql_weight`,
+distributional RL), post-hoc (self-anchoring), and now architectural (bounded spread, slow trunk,
+added low-rank capacity) -- while the one thing that reliably helps (fine-tuning on real target-city
+data, §66-70) works by sidestepping the zero-shot requirement entirely rather than fixing it.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
