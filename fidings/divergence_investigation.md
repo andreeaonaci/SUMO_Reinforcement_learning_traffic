@@ -6612,6 +6612,52 @@ still wins there, the relational head genuinely transfers; if the arms converge,
 "the dead-rows defect was most of the cross-topology gap" -- which would itself be a major and
 publishable correction to five months of this document.
 
+## 97. The congestion caveat on §96 is CLOSED: phase-relational still beats `max_pressure` at 3x
+    demand, and widens its margin on waiting time
+
+**2026-09-08.** §96's holdout was not saturated -- `max_pressure` and phase-relational both cleared
+~99% of 1473 vehicles, so the reported margin was ~2.7s of waiting on a network with spare
+capacity. Signal control matters under congestion, so the result had to be retested there.
+
+**Two mis-specified attempts first, both caught by rule-based probes before any training compute
+was spent. Recorded because the failure mode is instructive:**
+- `grid4x4_dense.rou.xml` was assumed heavy from its name. It is a `randomTrips` file, 60 flows at
+  `period=60` over `begin=0 end=1200` -> 1200 vehicles in the first third of an episode, i.e.
+  LIGHTER than the 1473-vehicle baseline. Both rule-based controllers scored exactly 0.00s waiting:
+  a ceiling effect where nothing can be distinguished.
+- `3x3grid routes14000` (7000 veh / 9 signals) is 8.5x the baseline's per-signal load;
+  `max_pressure` itself gridlocked at -11273 / 2334s. A floor effect.
+
+**Lesson, now encoded in `diagnostics/scale_demand.py`: calibrate scenario difficulty by the
+BASELINE CONTROLLER'S OWN waiting time, not by vehicles-per-signal.** Per-signal count does not
+normalise congestion across networks of different capacity -- it sent this experiment from gridlock
+to free-flow in one step.
+
+**Scenario actually used:** `grid4x4_x3.rou.xml`, built by scaling `grid4x4_1` 3x with
+headway-spread duplication, so topology, trip pattern and burst structure are preserved
+(peak 300s density 0.99 -> 2.96 veh/s, i.e. genuinely 3x denser rather than smoothed).
+
+| controller | reward | waiting | trips / 4419 |
+|---|---:|---:|---:|
+| indexed head (3 seeds) | **-18700.44** | gridlock | -- |
+| `fixed_time` | -170.51 | 8.20s | 4113 (93%) |
+| `max_pressure` | -0.640 | 0.76s | 4370 (99%) |
+| **phase-relational (3 seeds)** | **-0.295** | **0.17s** | **4364 (99%)** |
+
+**3/3 seeds beat `max_pressure`** (-0.280, -0.270, -0.336, all above -0.640): 2.2x on reward, 4.5x
+on waiting, at matched throughput. vs. the indexed head: |diff|/SE = 48.97 / 102.54 / 61.31
+(best/final/mean), 3/3 seeds, drop-1 floor 32.9.
+
+**The scenario is doing real work**, which is what makes this informative rather than a repeat of
+§96: `fixed_time` degrades 62x (-2.73 -> -170.51) and loses 7% of its trips, and `max_pressure`
+itself doubles its waiting. Neither is coasting. The indexed head meanwhile deepens from -9297 to
+-18700, as expected when a gridlocked controller meets 3x the traffic.
+
+**Status: 3-seed SCREEN, not confirmed.** Worth escalating to 6 given this is now a headline
+experiment. **Closes the second of §96's three caveats** (the first, holdout leakage, was closed by
+verification at the time). The third -- whether this is a transferable representation or a repaired
+defect -- is what the dead-rows control tests.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
