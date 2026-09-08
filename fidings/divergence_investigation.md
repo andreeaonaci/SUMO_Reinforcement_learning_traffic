@@ -6701,6 +6701,80 @@ PCFT's confirmed-but-modest §87 result is the first candidate.
 (§97, 3 seeds), 3x3Grid2lanes 4-phase (§98, 3 seeds). **Still 3 seeds on §97/§98 -- both are
 screens and should be escalated to 6.**
 
+## 99. THIS PROJECT HAS NEVER RUN RESCO'S SCENARIO CONFIGURATION -- three mismatches found, all
+    fixed, and §59's published-number comparison is retracted
+
+**2026-09-08.** Building a literature comparison required checking, for the first time, whether
+this project's `cologne3`/`ingolstadt7` configs match the RESCO setup whose numbers §58/§59 quoted.
+They do not, in three separate ways. All three were found by reading RESCO's own
+`.sumocfg` files (already vendored in `sumo_rl/nets/RESCO/`) and their repo's `config/config.yaml`
+(github.com/Pi-Star-Lab/RESCO).
+
+| | RESCO | this project (before today) |
+|---|---|---|
+| cologne3 route | `cologne3.rou.xml` | `cologne3.rou_shifted.xml` |
+| cologne3 window | 25200-28800 (07:00-08:00) | 23500-27100 (06:31-07:31) |
+| ingolstadt7 route | `ingolstadt7.rou.xml` | `ingolstadt7.rou_shifted.xml` |
+| ingolstadt7 window | 57600-61200 (16:00-17:00) | from 0.0 |
+| **yellow_length** | **3** | **2** (sumo_rl's default; no config overrode it) |
+| step_length | 5 | 5 (`delta_time`) -- matches |
+
+**The demand mismatch.** `cologne3.rou.xml`'s 4494 vehicles depart over 23512-28798 (1.47h).
+RESCO evaluates the LAST hour of that span; this project was evaluating the FIRST. Different
+traffic period, not a compression. `ingolstadt7` demand spans exactly RESCO's window, so that
+scenario was purely a route-file/window difference.
+
+**The signal-timing mismatch, and it is the one that matters.** With a 5s action interval, a 2s
+yellow leaves **3s of green per step**; RESCO's 3s yellow leaves **2s**. This project has therefore
+always run with **50% more usable green per phase change than the benchmark it was compared to**,
+for every controller, in every experiment in this document.
+
+**Confirmed by measurement.** `max_pressure` on RESCO's exact cologne3 scenario:
+
+| yellow_time | Avg. Delay | Avg. Trip Time |
+|---|---:|---:|
+| 2 (this project's default) | 19.3 | 57.1 |
+| **3 (RESCO's value)** | **22.4** | **60.1** |
+| *RESCO IPPO* | *22.13* | *57.45* |
+| *RESCO IDQN* | *23.99* | *59.0* |
+
+At yellow=2, `max_pressure` beat all four of RESCO's RL methods -- which contradicts RESCO's own
+finding that MPLight beats `max_pressure` by 11-19%, and was the signal that something was wrong.
+At yellow=3 it lands between IPPO and IDQN, exactly where a competent rule-based controller
+belongs. Ingolstadt moves the same way (delay 23.6 -> 26.6 against IDQN's 31.19).
+
+### What this retracts, and what it does not
+
+**RETRACTED: §59's "~4.4x behind RESCO's published IDQN" claim.** It compared this project's
+shifted, more-congested 06:31-07:31 window at yellow=2 against RESCO's 07:00-08:00 window at
+yellow=3. The two numbers were never comparable and the conclusion drawn from them -- that adequate
+budget nearly closes the in-distribution gap, quantified against IDQN -- is not supported by that
+evidence. The budget effect itself (§60/§61, measured internally at fixed configuration) is
+unaffected.
+
+**NOT AFFECTED: every relative result in this document.** §96/§97/§98, the §73-§95 corpus, and all
+aggregation/architecture comparisons hold both arms at the same configuration, so the mismatch
+cancels. Only ABSOLUTE numbers quoted against external work are invalidated.
+
+**Also unaffected: the choice of yellow=2 is not a bug.** It is sumo_rl's documented default. The
+error was quoting external numbers without checking that the benchmark used the same value.
+
+### Actions taken
+
+- `environments_resco/` -- RESCO-exact configs (their route files, windows, yellow=3) for
+  cologne3 and ingolstadt7, validated by `max_pressure` landing in their reported range.
+- `environments_y3/` -- the standard 3-city training roster plus holdout at yellow=3, so future
+  results are comparable to published work by construction. Retraining launched (phase-relational
+  and indexed, 3 seeds each) to establish whether §96's holdout result survives matched timing.
+- `diagnostics/eval_paper_metrics.py --city` -- in-distribution evaluation in the literature's
+  metrics.
+
+**Metric caveat carried forward: only Avg. Delay and Avg. Trip Time reconcile with RESCO.** This
+project's `wait` reads 1.49s on cologne3 against IDQN's 8.5 but 293.6s on ingolstadt7 against 8.71
+-- inconsistent in both directions, so `system_mean_waiting_time` is not RESCO's "Avg. Wait".
+Queue runs ~3x high, suggesting a different normaliser. Do not put wait or queue in a table
+alongside RESCO's.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
