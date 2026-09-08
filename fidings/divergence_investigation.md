@@ -6416,6 +6416,131 @@ question and not a path to competitive performance -- held up exactly: see the S
 above. The prediction that a win here would be more deployable than §79's also held, and for the
 reason given.)*
 
+## 94. `--boot_heads`: bootstrapped multi-head Q-network with vote-based action selection --
+    3-seed screen is POSITIVE on best-round, unanimous, and survives drop-1
+
+**2026-09-08.** The first architecture idea built on a mechanism this project has *measured*
+working rather than one that merely sounds plausible. §93 found a majority VOTE across six
+independently-trained models escaped the confident lock-in every member was in (ensemble
+episode-std 422 vs members' 24-204) and beat a weight-space AVERAGE of those same members by 6.19%.
+`--boot_heads K` makes that structure internal to one network: K action-indexed Q-heads on the
+shared trunk, each training as its own Double-DQN off its own target head, combined by majority
+vote (§93's exact rule) at action-selection time. Cost is K small Linears on one trunk pass, so
+~10% wall-clock measured, not K forward passes.
+
+Implementation notes: deviates from Osband et al. 2016 by not storing persistent per-transition
+bootstrap masks (diversity comes from independent init + per-head targets + a fresh Bernoulli mask
+per update) and MEASURES head diversity rather than assuming it
+(`DQNAgent.last_head_disagreement`, `diagnostics/boot_head_diversity.py`). `boot_heads` replaces
+`head.4.*` with `boot_q.{k}.*`, which would have made `masked_head_weighted_average` silently fall
+through to plain averaging (the §10/§24 bug class) -- `head_key_names` now returns a LIST and every
+head gets the same per-action row treatment; a partial key match raises.
+
+**3-seed screen (seeds 3/7/11, `environments_c1_4_6`, 5 rounds, matched baseline in the SAME batch,
+identical protocol to §92's three architecture ideas):**
+
+| measure | boot5 | base | \|diff\|/SE (pstdev) | sample std | paired | seeds favouring |
+|---|---:|---:|---:|---:|---:|---|
+| best-ever round | **-8468.18** | -9179.99 | **2.16** | 1.76 | 1.90 | **3/3** |
+| final round | -9174.81 | -9456.64 | 0.44 | 0.36 | 0.47 | 1/3 |
+| mean | -9614.79 | -9515.65 | 0.55 | 0.45 | 0.58 | 1/3 |
+
+**Best-round clears this project's >=2 bar, all 3 seeds favour it, and it SURVIVES the drop-1 check
+(2.13-2.43)** -- so it is not the one-outlier-seed pattern that killed CQL (2.35 -> 1.05), TC-FedAvg
+and `n_attn_layers=2`. Caveats that stand: convention-sensitive (1.76 on sample std, below the bar),
+and the effect is confined to the best round reached -- final and mean are flat-to-slightly-worse,
+with only 1/3 seeds favouring it there. Reads as "the vote reaches better peaks but doesn't hold
+them", the same "reachable but not retained" signature as §51/§52. **Verdict: the most promising
+architecture screen in this document since the item-2X series, and the only one of the four
+architecture ideas tried across 2026-09-07/08 not to come back null or negative -- but 3 seeds is a
+SCREEN. Not confirmed. 6-seed escalation is warranted; nothing should be claimed until it runs.**
+
+## 95. TWO METHODOLOGICAL FINDINGS FOUND WHILE TESTING THE ACTION-SEMANTICS HYPOTHESIS -- read
+    before citing any 7-city or `environments_wide` "cross-topology holdout" result
+
+**2026-09-08.** Prompted by the user restating the actual goal (match `max_pressure` **zero-shot on
+an unseen topology**), the observation contract was examined for whether it carries any action
+semantics at all. `diagnostics/action_semantics.py` (new; parses net.xml directly, rebuilding
+sumo_rl's green-phase list exactly so index k is the k the agent acts on) produced two findings
+that are independent of the original hypothesis and more important than it.
+
+### 95a. The 7-city roster's "holdout" shares its ROAD NETWORK with training city_7
+
+`environments/city_7` and `environments/city_5_holdout` point at **the identical net file**
+(`sumo_rl/nets/RESCO/grid4x4/grid4x4.net.xml`), differing only in route file (`grid4x4_dense.rou.xml`
+vs `grid4x4_1.rou.xml`). So on the 7-city roster the "held-out city" is the **same topology** the
+model trained on, under different traffic demand -- a *demand* holdout, not a *topology* holdout.
+Same for `environments_wide` (§71) and `environments_phase0`, both of which include `city_7`.
+
+**`is_true_holdout=True` does NOT catch this.** That flag verifies the evaluator resolved to
+`city_5_holdout` rather than silently falling back to a training city (the §25 trap); it says
+nothing about whether the holdout's topology appears in training under another name. Two different
+failure modes, one guard.
+
+**What this affects:** every 7-city result framed as cross-topology generalization (Phase 1's
+roster-size sweep §20/§23, §24-29, §45, §50) and §71's wide-roster test. **What it does NOT
+affect:** everything on the reduced rosters, which contain no `city_7` -- `environments_c1_4_6` and
+`environments_c1_4` with `--pad_to_true_holdout` are genuinely unseen-topology. That covers §60
+onward, §92, §94 and today's pilot, i.e. essentially all recent work.
+
+**§71 gets MORE interesting, not less.** It compared a 14-city wide roster (which *includes*
+`city_7`, so the holdout topology WAS in training) against the 3-city narrow roster (which does
+not, so genuinely zero-shot) -- and found a clean null, narrow nominally ahead (|diff|/SE 0.60).
+**An arm that had trained on the holdout's own topology failed to beat one that had never seen it.**
+That is a considerably stronger statement of "this pipeline does not transfer" than §71 claimed,
+and it converges with §70's random-init result from a different direction. Both now say the same
+thing: what the model learns is not being carried across, even when the target topology is in the
+training set.
+
+### 95b. On genuinely-unseen-topology rosters, 37.5% of the holdout's action space is scored by
+    NEVER-TRAINED Q-head rows
+
+Green-phase counts: arterial4x4 5, 3x3Grid2lanes 4, 4x4 2, cologne3 3-4, ingolstadt7 2-3,
+**grid4x4 (the holdout) 8 at every one of its 16 signals**. On `environments_c1_4_6` the training
+maximum is 5 (`city_1`), so `--pad_to_true_holdout` widens `action_dim` 5 -> 8 (this is logged) and
+**rows 5, 6 and 7 of the Q-head receive gradient from no training city, ever.**
+`masked_head_weighted_average` then explicitly leaves rows no client touched unchanged, so they
+persist at initialization for the whole run.
+
+Confirmed directly in a pilot baseline checkpoint (`global_round_005.pth`):
+
+| rows | mean\|w\| | \|w\| range |
+|---|---:|---|
+| 0-4 (trained) | 0.06017 | 0.785 - 0.869 |
+| 5-7 (holdout-only) | 0.04416 | 0.557 - 0.598 |
+
+The untrained rows sit visibly at initialization scale. **At evaluation the policy takes an argmax
+over 8 values, 3 of which are produced by random weights** -- and grid4x4 offers all 8 phases at
+every intersection. This is a concrete, quantified, previously-unrecorded contributor to the
+zero-shot gap that is not a learning-dynamics problem at all.
+
+### 95c. The original hypothesis (action indices carry no transferable meaning) -- supported
+
+Characterising each green phase by which movement directions it turns green: **4 of 8 action
+indices have more than one dominant meaning across the intersections that define them.** Index 0 is
+`right` on arterial4x4/grid4x4 but `straight` on cologne3/ingolstadt7; index 1 is `left` on
+arterial4x4/grid4x4 (16 signals each) but `straight`/`right`/`turn` on ingolstadt7/cologne3; index
+3 is `right` on arterial4x4/grid4x4 and `left` on cologne3. Nothing in `own_obs` disambiguates
+this: `TopKEncoder` emits congestion-sorted lane features plus 5 global scalars, and `action_mask`
+marks which indices are VALID while never saying what any of them DOES.
+
+This predicts the project's pattern of negative results: why more training cities did not help
+(§71 -- more conflicting index assignments, not more transferable structure); why every
+capacity/architecture change was null (no capacity recovers information absent from the input); why
+in-distribution training works fine (§59 -- consistent semantics within a city); and most sharply
+**why a random init beat a federated-pretrained one after identical fine-tuning (§70) -- pretrained
+weights carry confidently WRONG index associations that fine-tuning must first unlearn, which is
+worse than starting blank.** It is also exactly why `max_pressure` transfers perfectly: it scores
+each phase from the lanes that phase serves and never uses an action index.
+
+**Implied architecture, not yet built:** replace the fixed-index Q-head with a per-phase scorer --
+`Q(s, a)` computed from features of the lanes phase `a` actually greens, weights shared across all
+phases and all intersections, argmax over whatever phases exist. Topology-agnostic by construction,
+and it dissolves 95b as a side effect (no per-action rows to leave untrained). Feasible with data
+already reachable: `TrafficSignal.green_phases[k].state` plus `getControlledLinks` gives the
+phase -> lanes mapping. Cost: changes the observation contract and the head, so it breaks checkpoint
+compatibility and needs the masked-head aggregation story rethought.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
