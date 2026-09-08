@@ -6250,8 +6250,9 @@ distributional RL), post-hoc (self-anchoring), and now architectural (bounded sp
 added low-rank capacity) -- while the one thing that reliably helps (fine-tuning on real target-city
 data, §66-70) works by sidestepping the zero-shot requirement entirely rather than fixing it.
 
-## 93. §91 item 1's majority-vote ensemble: the re-run under the `ts_id` fix (LAUNCHED, result
-    pending), plus the checkpoint set recovered and independently verified
+## 93. §91 item 1's majority-vote ensemble, re-run under the `ts_id` fix: it BEATS all six
+    individual checkpoints AND the SWA average -- the first eval-time lever here that is both
+    real and deployable (single measurement, needs replication)
 
 **2026-09-08.** §91 item 1 (independent-seed ensembling) finished after ~13 hours with two of its
 three arms usable: individual checkpoints and the SWA weight-average (**-9068.94**, beating every
@@ -6314,20 +6315,106 @@ python diagnostics/swa_reeval.py \
  `--mode both` rather than `ensemble` alone
 costs one extra evaluation and buys an **independent replication of the -9068.94 SWA number**,
 which is currently a single unreplicated measurement carrying the whole "combining independently-
-trained models helps" claim. Expect ~13-16h (the original run's pace, with the ensemble arm slower
-at 6 forward passes per intersection per tick). **Result pending -- do not cite the -8346.20 smoke
-number as the finding.**
+trained models helps" claim. Took **2h28m** (05:33-08:01), not the ~13-16h expected from the
+original's pace -- that run's 13 hours included 30 crash-and-retry episode cycles on the broken
+ensemble arm.
 
-**What this can and cannot settle.** §79 already closed same-run temporally-adjacent SWA/ensembling
-as "real but not deployable" (conditional on volatility, and telling a volatile window from a stable
-one needs the same per-round eval sweep that would let you pick the best round directly).
-Independent-seed combination does not inherit that specific objection -- there is no "which round"
-to choose, you simply train N seeds, which this project does anyway. So a confirmed ensemble win
-here would be more deployable than §79's. What it still cannot do is close the multi-order-of-
-magnitude gap to `fixed_time`/`max_pressure`: the best individual is -9240.70 and SWA reached
--9068.94, both ~2700x worse than `max_pressure`'s -0.34. **This is a "does combining help at all"
-question, not a path to competitive performance** -- worth finishing because it is nearly free, not
-because it changes the project's headline.
+### Result
+
+**The individual and SWA arms reproduced EXACTLY -- to the cent, including their std values.**
+
+| arm | this run | §91 recorded | episode-level std |
+|---|---:|---:|---:|
+| seed 3 | -9532.00 | -9532.00 | 54.93 |
+| seed 7 | -9256.11 | -9256.11 | 131.67 |
+| seed 11 | -9676.57 | -9676.57 | 101.11 |
+| seed 17 | -10247.97 | -10247.97 | 23.79 |
+| seed 21 | -10089.56 | -10089.56 | 204.08 |
+| seed 25 | -9240.70 | -9240.70 | 79.64 |
+| *individual mean* | *-9673.82* | *-9673.82* | |
+| SWA weight-average | **-9068.94** | **-9068.94** | 40.49 |
+| **majority-vote ensemble** | **-8507.91** | *(crashed)* | **422.02** |
+
+Exact reproduction settles two things beyond argument: the six checkpoints are definitively the
+original set (not merely a ~1%-similar one, as the smoke test could only suggest), and **the
+evaluation is fully deterministic given `eval_sumo_seed`** -- so the new ensemble number was
+measured under conditions identical to the numbers it is compared against, with zero eval-protocol
+drift between the two runs. That is a cleaner comparison basis than most in this document.
+
+**The majority-vote ensemble wins on every comparison available:**
+
+| comparison | delta | relative |
+|---|---:|---:|
+| vs. best individual (-9240.70) | +732.79 | **+7.93%** |
+| vs. SWA (-9068.94) | +561.03 | **+6.19%** |
+| vs. individual mean (-9673.82) | +1165.91 | **+12.05%** |
+
+It beats **6 of 6** individual members, not a subset -- so unlike the architecture-search leads of
+§73-77 this cannot be one outlier member carrying a mean.
+
+### Statistics, stated carefully -- the §70 trap applies here too
+
+Computing |diff|/SE from the 30 episodes gives **9.35** vs. the best individual and **7.25** vs.
+SWA. **Do not quote those as if they settled the general question.** As in §70, that statistic
+measures episode-to-episode (SUMO-seed) variance *within fixed policies*; it is the right statistic
+for "on this holdout traffic, is this specific ensemble better than this specific checkpoint" (a
+legitimate deployment question, and the answer is a decisive yes) but the wrong one for "does
+ensembling independently-trained seeds help in general." That claim needs **multiple disjoint
+groups of seeds**, and this is n=1 ensemble built from n=1 group of six. **Verdict: a strong,
+mechanistically coherent single measurement -- NOT confirmed at this project's multi-seed bar.**
+
+### Mechanism: the ensemble is measurably NOT locked, and that is the point
+
+Episode-level std, which this document has used since §33/§49 as a lock-in indicator (lower =
+more locked, byte-identical rewards across different SUMO seeds being the extreme):
+
+- individual members: 23.79 - 204.08 (seed 17's 23.79 is a partial-lock signature)
+- SWA weight-average: **40.49** -- near the locked end, and notably *lower* than most of its own
+  inputs. Averaging weights appears to preserve, even concentrate, the locked behaviour.
+- majority-vote ensemble: **422.02** -- 2.1x higher than any individual member
+
+**The ensemble responds to traffic conditions where its members do not.** This is exactly the
+mechanism §79 hypothesized for it (a minority of confidently-locked members cannot dominate a
+majority vote, with the confirmed lock-in rate ~6-7%, §50) and is the first direct measurement
+supporting it. It also explains why the two combination methods diverge so sharply despite using
+identical inputs: weight-space averaging blends the locked members *in*, vote-space combination
+outvotes them.
+
+### Why this is deployable where §79's version was not
+
+§79 closed same-run, temporally-adjacent checkpoint combination as "real but not deployable": its
+benefit was conditional on the window being volatile, and telling a volatile window from a stable
+one in advance needs the same per-round eval sweep that would let you just pick the best round
+directly. **That objection does not transfer.** Here there is no window and no hindsight selection
+-- you train N seeds independently (which this project does anyway, for exactly the multi-seed
+rigor it insists on) and vote. The cost is real but ordinary: N forward passes per intersection per
+tick at inference, no extra training. It also *reuses compute already spent* -- every multi-seed
+experiment in this document has been throwing away five of its six trained models.
+
+### Scope: this does not change the project's headline
+
+-8507.91 is still **~25,000x worse than `max_pressure`'s -0.34** and ~3,100x worse than
+`fixed_time`'s -2.73. The ensemble improves a catastrophically bad policy by 8-12%; it does not
+approach rule-based control. Its interest is mechanistic (direct evidence that lock-in is what
+caps these checkpoints, and that it can be voted around at eval time) and methodological (a free
+use for already-trained seeds), **not** as a path to competitive performance.
+
+### Next steps this opens
+
+1. **Replicate with a disjoint group of seeds** -- the one thing standing between this and a
+   confirmed result. Cheap: the checkpoints already exist across this document's many 6-seed
+   batches (e.g. the potential-shaping arms, §80).
+2. **Ensemble the fine-tuned checkpoints instead**, combining this with §66-69's confirmed lever --
+   the members there are far better (-1092 to -400 range) and also volatile (§69's seed 7 swung
+   -1.24 -> -1335), which is precisely the condition under which voting helps.
+3. **Vary N** -- is 6 needed, or do 3 members capture most of it? Directly changes the inference cost.
+4. Test whether the ensemble's advantage survives on a *stable* member set, the condition that
+   killed §79's version.
+
+*(The pre-launch expectation recorded here -- that this was a "does combining help at all"
+question and not a path to competitive performance -- held up exactly: see the Scope subsection
+above. The prediction that a win here would be more deployable than §79's also held, and for the
+reason given.)*
 
 ## Open questions / next steps
 

@@ -244,15 +244,20 @@ rigor (|diff|/SE 1.53/0.90) even after fixing an under-sensitive default thresho
   checkpoint's own mean — a small, real-looking effect. The actual **majority-vote ensemble crashed
   on every episode** (a real bug: `EnsemblePolicy.act()` was missing the `ts_id` param
   `HoldoutEvaluator` always passes, which cascaded into a second crash via an incomplete
-  all-episodes-failed fallback dict). **Both bugs fixed; the re-run is RUNNING as of 2026-09-08
-  (§93, `results/ensemble_indep_seeds_rerun_2026_09_08.log`, `--episodes 30 --mode both`, ~13-16h)**
-  — the `ts_id` fix is confirmed working (a 1-episode smoke test completed where every prior attempt
-  raised). The original run's six checkpoints were NOT recoverable from the log (it prints only
-  basenames, and the invoking command was never recorded) so they were re-identified by config and
-  then **verified**: the smoke test's six individual scores reproduce §91's recorded 30-episode
-  numbers in exact order, all within ~1%. `--mode both` also re-measures SWA, currently a single
-  unreplicated number. **Result pending — the smoke test's -8346.20 is n=1 episode and is NOT the
-  finding.**
+  all-episodes-failed fallback dict). **DONE 2026-09-08, §93 — the re-run landed and the
+  majority-vote ensemble WINS: -8507.91, beating all 6 individual members (best -9240.70, +7.93%)
+  AND the SWA average (-9068.94, +6.19%).** The individual and SWA arms **reproduced exactly, to the
+  cent**, which proves both that the right checkpoint set was recovered and that eval is fully
+  deterministic given `eval_sumo_seed` — so this is a zero-drift comparison. **Mechanism measured
+  directly: the ensemble's episode-level std is 422.02 vs. 23.79-204.08 for members and 40.49 for
+  SWA — the ensemble is demonstrably NOT locked while its own inputs partly are.** Weight-averaging
+  blends locked members in; vote-space combination outvotes them. **Unlike §79's same-run version
+  this is deployable** (no hindsight window selection — just train N seeds, which this project
+  already does, and reuse the 5 models every multi-seed batch currently discards). **Caveats that
+  stand: n=1 ensemble from n=1 group of six — NOT confirmed at this project's multi-seed bar (the
+  |diff|/SE of 9.35 is an episode-level statistic, the §70 trap); and -8507.91 is still ~25,000x
+  worse than `max_pressure`.** Next: replicate on a disjoint seed group; ensemble the *fine-tuned*
+  checkpoints (§66-69) where members are far better and volatile.
 
 **Progressive Curriculum FedAvg (PCFT) — user-proposed (order training cities simplest-to-complex,
 warm up solo, then focus-fine-tune + FedAvg-pool each new city), now CONFIRMED at full 6-seed
@@ -296,8 +301,8 @@ fine-tuning on real target-city data (§66-70) remains the only reliably-working
 works precisely by sidestepping the zero-shot generalization requirement rather than fixing it. Two
 things confirmed as real, replicated, modest wins despite that (item 22, sequential training), plus
 now PCFT as a third, currently the strongest of the three but with its own mechanism only partly
-disentangled. **Open, not yet acted on:** ~~re-run the ensemble majority-vote fix~~ **launched
-2026-09-08, see §93 and the bullet above**; consider an
+disentangled. **Open, not yet acted on:** ~~re-run the ensemble majority-vote fix~~ **DONE
+2026-09-08, §93 — a real win, see the bullet above**; consider an
 ablation isolating PCFT's curriculum-ordering effect from its embedded fine-tune steps; whatever
 architecture/training idea the user proposes next — none of `bounded_q`/`trunk_lr_scale`/
 `lora_adapter` are being tuned further per direct instruction to move on rather than sweep values.
