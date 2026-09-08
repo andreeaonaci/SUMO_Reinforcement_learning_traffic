@@ -118,7 +118,14 @@ def main():
     args = ap.parse_args()
 
     ckpt_paths = _resolve_checkpoints(args)
-    print(f"Using {len(ckpt_paths)} checkpoints: {[os.path.basename(p) for p in ckpt_paths]}")
+    # FULL paths, not basenames: every checkpoint here is typically named
+    # global_round_005.pth, so a basename-only log makes the run impossible to
+    # reproduce afterwards -- sec 93 had to re-identify the original set by
+    # config and verify it against recorded per-checkpoint scores.
+    print(f"Using {len(ckpt_paths)} checkpoints:")
+    for p in ckpt_paths:
+        print(f"  {p}")
+    print(f"Command: {' '.join(sys.argv)}")
 
     states = [torch.load(p, map_location="cpu") for p in ckpt_paths]
     arch = infer_arch_from_checkpoint(states[0])
