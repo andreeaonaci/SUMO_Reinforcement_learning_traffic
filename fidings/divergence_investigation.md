@@ -6658,6 +6658,49 @@ experiment. **Closes the second of §96's three caveats** (the first, holdout le
 verification at the time). The third -- whether this is a transferable representation or a repaired
 defect -- is what the dead-rows control tests.
 
+## 98. THE DEAD-ROWS CONTROL RESOLVES TO BRANCH A: the indexed head fails just as badly WITHOUT
+    untrained rows, so the defect was not the cause -- the action representation is
+
+**2026-09-08.** §96's margin conflated two explanations: a representation that transfers, and the
+repair of §95b's untrained-row defect. They separate on a holdout whose phase count does not exceed
+the training maximum, where the indexed head has no untrained rows at all.
+
+**Design.** Same three training cities (city_1 5 phases, city_4 4, city_6 3, max = 5); holdout
+3x3Grid2lanes, 9 signals, **4 phases**. Every action the holdout can take maps to a row that all
+three training cities exercised. Demand calibrated to 3500 vehicles by the §97 method (baseline
+controller's own waiting time), so the scenario sits off both ceiling and floor.
+
+| controller | reward | waiting | trips / 3500 |
+|---|---:|---:|---:|
+| indexed head (3 seeds) | **-9107.61** | 1663.74s | 760 (22%) |
+| `fixed_time` | -8157.96 | 1330.44s | 1662 (47%) |
+| `max_pressure` | -2.225 | 1.20s | 3398 (97%) |
+| **phase-relational (3 seeds)** | **-1.382** | **0.51s** | **3403 (97%)** |
+
+**The indexed head still gridlocks: -9107.61, statistically indistinguishable from the -9296.84 it
+scored WITH dead rows on grid4x4.** Removing the untrained-row defect changed essentially nothing.
+It loses even to `fixed_time`. Phase-relational: 3/3 seeds (-1.43, -1.46, -1.26) beat
+`max_pressure`, 2.4x lower waiting, matched throughput. |diff|/SE = 20.88 / 43.25 / 60.08
+(best/final/mean), 3/3 seeds, drop-1 floor 13.95.
+
+**Interpretation, and it is the central result of this investigation.** Rows 0-3 are the only ones
+the holdout can use, and all three training cities exercise them, so they are fully trained. The
+indexed head therefore fails with a completely trained readout. That eliminates §95b as the cause
+and isolates §95c: **row k is trained on contradictory targets across cities** (index 1 is a
+protected left on arterial4x4/grid4x4 and a through movement on ingolstadt7/cologne3), so a
+well-trained row still encodes no transferable meaning.
+
+**Consequences for how this project's history should be read:** the ~20 interventions of §73-§95
+were all evaluated on a readout that cannot express a transferable policy regardless of how it is
+optimised. Their nulls are floor effects, not evidence that algorithm/capacity/aggregation/
+curriculum do not matter. Re-running that corpus on the phase-relational head is now open, and
+PCFT's confirmed-but-modest §87 result is the first candidate.
+
+**Three holdouts now tested, three topologies, three demand levels, phase-relational beating
+`max_pressure` on every one:** grid4x4 8-phase light (§96, 6 seeds), grid4x4 8-phase 3x demand
+(§97, 3 seeds), 3x3Grid2lanes 4-phase (§98, 3 seeds). **Still 3 seeds on §97/§98 -- both are
+screens and should be escalated to 6.**
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit

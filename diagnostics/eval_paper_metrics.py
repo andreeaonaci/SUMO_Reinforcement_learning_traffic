@@ -49,6 +49,13 @@ from experiments.federated_training import (
 )
 
 
+try:
+    import traci.constants as _tc
+    _TIMELOSS = _tc.VAR_TIMELOSS
+except Exception:
+    _TIMELOSS = None
+
+
 def detect_phase_relational(state: dict) -> bool:
     return any(k.startswith("phase_scorer.") for k in state)
 
@@ -88,6 +95,17 @@ def build_agent(state: dict, k_max: int, env_action_dim: int):
     return agent, arch
 
 
+class _RulePolicy:
+    """Adapts HoldoutEvaluator's rule-based controllers to the act_batch API."""
+
+    def __init__(self, evaluator, name):
+        self.ev = evaluator
+        self.name = name
+
+    def act_batch(self, obs_dict, explore=False):
+        return {ts: self.ev._policy_action(self.name, ts, o, None) for ts, o in obs_dict.items()}
+
+
 def run_episode(env, agent, traci):
     """One greedy episode; returns literature-style metrics."""
     reset = env.reset()
@@ -113,11 +131,27 @@ def run_episode(env, agent, traci):
         present = set(traci.vehicle.getIDList())
         for vid in present - seen:
             depart_t[vid] = t
-        for vid in present:
+            if _TIMELOSS is not None:
+                try:
+                    traci.vehicle.subscribe(vid, [_TIMELOSS])
+                except Exception:
+                    pass
+        # One subscription fetch per step rather than getTimeLoss() per vehicle
+        # per step: the latter is ~1M traci round-trips over an episode with
+        # 1500 vehicles and times out well past any sane budget.
+        if _TIMELOSS is not None:
             try:
-                timeloss[vid] = float(traci.vehicle.getTimeLoss(vid))
+                for vid, res in traci.vehicle.getAllSubscriptionResults().items():
+                    if _TIMELOSS in res:
+                        timeloss[vid] = float(res[_TIMELOSS])
             except Exception:
                 pass
+        else:
+            for vid in present:
+                try:
+                    timeloss[vid] = float(traci.vehicle.getTimeLoss(vid))
+                except Exception:
+                    pass
         for vid in seen - present:
             if vid in depart_t:
                 durations.append(t - depart_t.pop(vid))
@@ -152,6 +186,10 @@ def main():
     ap.add_argument("--pad_to_true_holdout", action="store_true")
     ap.add_argument("--episodes", type=int, default=5)
     ap.add_argument("--eval_sumo_seed", type=int, default=12345)
+    ap.add_argument("--city", default=None,
+                    help="Evaluate IN-DISTRIBUTION on this roster city (e.g. city_4) instead of "
+                         "the held-out city. Used to compare against published benchmark numbers, "
+                         "which are themselves in-distribution.")
     args = ap.parse_args()
 
     import traci
@@ -162,21 +200,46 @@ def main():
 
     print(f"{'checkpoint':<44} {'head':<9} {'trip_s':>8} {'delay_s':>8} {'queue':>7} {'wait_s':>8} {'arrived':>8}")
     agg = {}
+    RULE_BASED = {"max_pressure", "fixed_time", "always_zero", "random", "round_robin"}
     for path in args.checkpoints:
-        state = torch.load(path, map_location="cpu")
-        state = state.get("model", state) if isinstance(state, dict) and "model" in state else state
-        agent, _ = build_agent(state, k_max, action_dim)
-        head = "phase" if detect_phase_relational(state) else "indexed"
+        rule = path if path in RULE_BASED else None
+        if rule is None:
+            state = torch.load(path, map_location="cpu")
+            state = state.get("model", state) if isinstance(state, dict) and "model" in state else state
+            agent, _ = build_agent(state, k_max, action_dim)
+            head = "phase" if detect_phase_relational(state) else "indexed"
+        else:
+            agent, head = None, rule
 
-        evaluator = make_holdout_evaluator(
-            args.base_dir, (own_dim, neighbor_dim, k_max), action_dim,
-            episodes=1, eval_sumo_seed=args.eval_sumo_seed,
-        )
+        if args.city:
+            import yaml
+            from environments.federated_env import build_federated_env, ActionMaskPadder
+            from federated.evaluator import HoldoutEvaluator
+            cfg = yaml.safe_load(open(os.path.join(args.base_dir, args.city, "config.yaml")))
+
+            def _builder(cfg=cfg):
+                return ActionMaskPadder(build_federated_env(cfg), action_dim)
+
+            evaluator = HoldoutEvaluator(env_builder=_builder, episodes=1,
+                                         eval_seed_base=args.eval_sumo_seed,
+                                         eval_city_name=args.city)
+        else:
+            evaluator = make_holdout_evaluator(
+                args.base_dir, (own_dim, neighbor_dim, k_max), action_dim,
+                episodes=1, eval_sumo_seed=args.eval_sumo_seed,
+            )
         if evaluator is None:
-            raise RuntimeError("Could not construct holdout evaluator.")
+            raise RuntimeError("Could not construct evaluator.")
+        env = evaluator._get_env()
+        if rule == "fixed_time" and hasattr(env, "fixed_ts"):
+            env.fixed_ts = True
+        # Reuse the evaluator's own controller implementations rather than
+        # reimplementing max_pressure -- a second implementation would be a
+        # second thing to get subtly wrong, and the whole point is comparability.
+        policy = agent if rule is None else _RulePolicy(evaluator, rule)
         eps = []
         for _ in range(args.episodes):
-            eps.append(run_episode(evaluator._get_env(), agent, traci))
+            eps.append(run_episode(env, policy, traci))
         evaluator.close()
 
         m = {k: statistics.fmean([e[k] for e in eps if not np.isnan(e[k])] or [float("nan")])
