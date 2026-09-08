@@ -6541,6 +6541,77 @@ already reachable: `TrafficSignal.green_phases[k].state` plus `getControlledLink
 phase -> lanes mapping. Cost: changes the observation contract and the head, so it breaks checkpoint
 compatibility and needs the masked-head aggregation story rethought.
 
+## 96. `--phase_relational` BEATS `max_pressure` ZERO-SHOT ON THE UNSEEN HOLDOUT -- the first result
+    in this document to reach the project's actual goal. 3 seeds, unanimous. NOT yet confirmed.
+
+**2026-09-08.** Built directly from §95's diagnosis rather than from the literature. Replaces the
+action-INDEXED Q-head with a per-phase scorer: `Q(s,a) = g([h_s, phi_a])`, one shared function
+applied to every candidate phase, where `phi_a` describes what phase `a` does (its own pressure,
+queue, wait, occupancy, lane count, whether it is current, movement composition). Implementation:
+`environments/federated_env.py::PhaseFeatureExtractor` (+`phase_feats` in the observation),
+`agents/networks.py::forward_phase`, `--phase_relational`.
+
+### Result: 3 seeds (3/7/11), `environments_c1_4_6`, 5 rounds, matched baseline in the same batch
+
+| seed | per-round holdout reward | final wait | trips completed |
+|---|---|---:|---:|
+| 3 | -0.188, -0.092, -0.092, -0.114, **-0.092** | 0.11s | 1456.6 |
+| 7 | -0.194, -0.166, -0.100, -0.110, **-0.126** | 0.28s | 1457.8 |
+| 11 | -0.174, -0.160, -0.120, -0.096, **-0.114** | 0.33s | 1456.8 |
+
+**Rule-based controllers, measured TODAY on the same holdout with the same evaluator (not quoted
+from the record):**
+
+| controller | reward | waiting | trips completed |
+|---|---:|---:|---:|
+| `fixed_time` | -2.7300 | 6.97s | 1439.0 |
+| `max_pressure` | -0.3400 | 2.91s | 1462.0 |
+| DQN, indexed head (this batch) | -9141 to -9719 | ~1800s | 265-310 |
+| **DQN, phase-relational** | **-0.096 (best-round mean)** | **0.11-0.33s** | **~1457** |
+
+**All three seeds beat `max_pressure` on reward (~3.5x) and waiting time (~10x) at matched
+throughput (1457 vs 1462, -0.3%), zero-shot on a topology in no training city.** vs. the indexed
+head: |diff|/SE = **100.5** (best), **68.6** (final), **132.6** (mean), 3/3 seeds, drop-1 68-398.
+
+**Final round ~= best round on every seed** -- the policy is STABLE, which no other result in this
+document is (contrast §51/§52's "reachable but not retained", §69's -1.24 -> -1335 relapse).
+
+### Why this happened, and the part that is NOT a fair win
+
+§95b predicted it. On `c1_4_6` the training maximum is 5 phases and the holdout needs 8, so Q-head
+rows 5-7 never receive gradient; the indexed policy argmaxes over 8 values with 3 produced by random
+weights, picks garbage ~37% of the time, and gridlocks (1800s waiting, ~80% of trips unfinished).
+The phase-relational head has no per-action rows, so that failure mode cannot occur.
+
+**Stated plainly: a large part of this margin is repairing a defect, not out-designing a strong
+baseline.** The indexed head this document has compared against for months was crippled on exactly
+this roster. The defensible claim is "phase-relational beats `max_pressure` zero-shot", NOT
+"phase-relational beats a well-tuned DQN".
+
+### Degenerate explanations checked and ruled out
+
+- **Throughput suppression** (block traffic -> no waiting -> good reward): ruled out, it completes
+  ~5x more trips than the indexed head and matches `max_pressure` to 0.3%.
+- **Fixed cycling** (~uniform action use): ruled out, the distribution is selective (~300 each on
+  the two through-phases, turns served in small shares, all 8 used).
+- **Confident lock-in**: Q-gap 0.02, no byte-identical episodes.
+- **Protocol mismatch**: the rule-based numbers above were produced by the same evaluator, same
+  roster, same day -- not carried over from another section.
+- **Holdout leakage**: `is_true_holdout=True` on all three seeds, and `c1_4_6` contains no `city_7`
+  (§95a), so grid4x4's topology is genuinely unseen.
+
+### Status and what must happen before this is a claim
+
+**SCREEN, 3 seeds. Not confirmed.** The effect is categorical rather than the 5% deltas that
+evaporated at 6 seeds (CQL 2.35->1.05, TC-FedAvg, n_attn_layers), and it is unanimous with a
+drop-1 floor of 68 -- but this document's own rule is 5-6 seeds, and it applies to results we like.
+
+**The control that separates the two explanations, not yet run:** evaluate on a holdout whose phase
+count is <= the training maximum, so the indexed baseline has NO untrained rows. If phase-relational
+still wins there, the relational head genuinely transfers; if the arms converge, this result is
+"the dead-rows defect was most of the cross-topology gap" -- which would itself be a major and
+publishable correction to five months of this document.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
