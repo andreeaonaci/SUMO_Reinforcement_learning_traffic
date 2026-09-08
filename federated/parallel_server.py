@@ -119,6 +119,8 @@ def _client_worker(
     trunk_lr_scale: float = 1.0,
     lora_adapter: bool = False,
     lora_rank: int = 8,
+    boot_heads: int = 1,
+    boot_mask_prob: float = 0.5,
 ):
     """Runs inside its own process for the ENTIRE training run.
 
@@ -259,6 +261,8 @@ def _client_worker(
                 trunk_lr_scale=trunk_lr_scale,
                 lora_adapter=lora_adapter,
                 lora_rank=lora_rank,
+                boot_heads=boot_heads,
+                boot_mask_prob=boot_mask_prob,
             )
 
         while True:
@@ -406,6 +410,8 @@ class ParallelFederatedServer:
         trunk_lr_scale: float = 1.0,
         lora_adapter: bool = False,
         lora_rank: int = 8,
+        boot_heads: int = 1,
+        boot_mask_prob: float = 0.5,
     ):
         # item 20 (fidings sec 78): if >0, a round whose eval std_reward
         # falls below this threshold (the same std<50 screen already used
@@ -433,6 +439,8 @@ class ParallelFederatedServer:
         self.bounded_q = bounded_q
         self.q_bound_scale = q_bound_scale
         self.trunk_lr_scale = trunk_lr_scale
+        self.boot_heads = int(boot_heads)
+        self.boot_mask_prob = float(boot_mask_prob)
         self.lora_adapter = lora_adapter
         self.lora_rank = lora_rank
         self.global_model = global_model
@@ -483,7 +491,13 @@ class ParallelFederatedServer:
         self.head_fix = bool(head_fix) and supports_masked_head
         self.neighbor_attention = bool(neighbor_attention)
         self.fedavg_blend = float(max(0.0, min(1.0, fedavg_blend)))
-        self._head_weight_key, self._head_bias_key = head_key_names(dueling and supports_masked_head)
+        # boot_heads > 1 replaces head.4.* with K action-indexed boot_q.{k}.* heads;
+        # head_key_names returns the full list so masked-head aggregation covers
+        # every head instead of silently no-opping on a key that no longer exists.
+        self._head_weight_key, self._head_bias_key = head_key_names(
+            dueling and supports_masked_head,
+            boot_heads=self.boot_heads if supports_masked_head else 1,
+        )
         self.server_momentum = float(server_momentum)
         self._momentum_buffer: Optional[Dict[str, torch.Tensor]] = None
         self.pseudo_grad_clip = float(pseudo_grad_clip)
@@ -552,6 +566,7 @@ class ParallelFederatedServer:
                     self.anchor_pullback_beta, self.cql_weight, self.n_quantiles,
                     self.bounded_q, self.q_bound_scale, self.trunk_lr_scale,
                     self.lora_adapter, self.lora_rank,
+                    self.boot_heads, self.boot_mask_prob,
                 ),
                 daemon=True,
             )

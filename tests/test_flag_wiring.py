@@ -28,6 +28,7 @@ import inspect
 import sys
 import os
 
+import numpy as np
 import pytest
 import torch
 
@@ -791,3 +792,188 @@ def test_lora_adapter_params_actually_train():
 
     assert not torch.equal(down_before, net.lora_down.weight), "lora_down must receive real gradient updates by step 2."
     assert not torch.equal(up_before, net.lora_up.weight), "lora_up must receive real gradient updates."
+
+
+# ---------------------------------------------------------------------------
+# Bootstrapped multi-head Q-network (--boot_heads, fidings sec 94)
+#
+# Built directly on sec 93's measured result: a majority VOTE across
+# independently-trained models escaped a confident lock-in that every
+# individual member was in, while a weight-space AVERAGE of the same models
+# did not. These tests pin the three things that would silently break that:
+# the no-op default, the vote itself, and masked-head aggregation reaching
+# every head (boot_heads replaces head.4.* with boot_q.{k}.*, and a stale key
+# would make aggregation silently fall through to plain averaging).
+# ---------------------------------------------------------------------------
+def test_boot_heads_default_is_exact_structural_noop():
+    from agents.networks import NeighborAttentionQNetwork
+
+    base = dict(own_dim=10, neighbor_dim=5, k_max=3, action_dim=4)
+    plain = NeighborAttentionQNetwork(**base)
+    explicit_one = NeighborAttentionQNetwork(**base, boot_heads=1)
+
+    assert set(plain.state_dict()) == set(explicit_one.state_dict())
+    assert not any(k.startswith("boot_q.") for k in plain.state_dict())
+    assert "head.4.weight" in plain.state_dict()
+
+
+def test_boot_heads_replaces_the_plain_head_with_k_action_indexed_heads():
+    from agents.networks import NeighborAttentionQNetwork
+
+    net = NeighborAttentionQNetwork(own_dim=10, neighbor_dim=5, k_max=3,
+                                    action_dim=4, boot_heads=5)
+    keys = set(net.state_dict())
+    assert "head.4.weight" not in keys, (
+        "boot_heads replaces the plain final Linear; leaving head.4.* behind would "
+        "make masked-head aggregation target a head nothing trains."
+    )
+    for k in range(5):
+        assert net.state_dict()[f"boot_q.{k}.weight"].shape[0] == 4, (
+            "every boot head must stay exactly one-row-per-action, or masked-head "
+            "aggregation's per-action row indexing silently corrupts it."
+        )
+
+
+def test_boot_heads_forward_shapes_and_mean_consistency():
+    from agents.networks import NeighborAttentionQNetwork
+
+    net = NeighborAttentionQNetwork(own_dim=10, neighbor_dim=5, k_max=3,
+                                    action_dim=4, boot_heads=5)
+    own, nbr, msk = torch.randn(7, 10), torch.randn(7, 3, 5), torch.ones(7, 3)
+    per_head = net.forward_boot(own, nbr, msk)
+    assert per_head.shape == (7, 5, 4)
+    # forward() must still hand every existing caller ordinary (B, action_dim).
+    assert torch.allclose(per_head.mean(dim=1), net(own, nbr, msk), atol=1e-6)
+
+
+def test_boot_heads_action_selection_is_a_majority_vote():
+    """The vote, not the mean, must decide -- that distinction IS the experiment.
+
+    Heads are overwritten so 3 of 5 vote for action 1 while the remaining 2 hold
+    an enormous Q on action 2. Mean-Q (and therefore any averaging scheme) picks
+    action 2; a majority vote picks action 1. sec 93 found the vote beat the
+    weight-space average of the same members, so this asserts the vote wins.
+    """
+    from agents.dqn import DQNAgent
+
+    agent = DQNAgent(own_dim=6, neighbor_dim=3, k_max=2, action_dim=4, boot_heads=5)
+    with torch.no_grad():
+        for i, head in enumerate(agent.q.boot_q):
+            head.weight.zero_()
+            head.bias.zero_()
+            head.bias[1 if i < 3 else 2] = 1.0 if i < 3 else 1000.0
+
+    obs = {
+        "own": np.zeros(6, dtype=np.float32),
+        "neighbors": np.zeros((2, 3), dtype=np.float32),
+        "neighbor_mask": np.ones(2, dtype=np.float32),
+        "hop_dist": np.ones(2, dtype=np.float32),
+        "action_mask": np.array([1, 1, 1, 1], dtype=np.float32),
+    }
+    assert agent.act(obs, explore=False) == 1, "majority vote must beat the outvoted extreme Q"
+    # And the mean really would have chosen differently -- otherwise this test
+    # would pass for the wrong reason.
+    assert int(np.argmax(agent.q_values(obs))) == 2
+
+
+def test_boot_heads_vote_respects_action_mask():
+    from agents.dqn import DQNAgent
+
+    agent = DQNAgent(own_dim=6, neighbor_dim=3, k_max=2, action_dim=4, boot_heads=5)
+    with torch.no_grad():
+        for head in agent.q.boot_q:
+            head.weight.zero_()
+            head.bias.zero_()
+            head.bias[3] = 500.0          # every head wants the masked-out action
+    obs = {
+        "own": np.zeros(6, dtype=np.float32),
+        "neighbors": np.zeros((2, 3), dtype=np.float32),
+        "neighbor_mask": np.ones(2, dtype=np.float32),
+        "hop_dist": np.ones(2, dtype=np.float32),
+        "action_mask": np.array([1, 1, 1, 0], dtype=np.float32),
+    }
+    assert agent.act(obs, explore=False) != 3
+
+
+def test_masked_head_aggregation_covers_every_boot_head():
+    """A stale single head key here is the sec 10/sec 24 silent-no-op bug class."""
+    from federated.aggregation import head_key_names, masked_head_weighted_average
+
+    K, A, D = 3, 4, 6
+    wks, bks = head_key_names(dueling=False, boot_heads=K)
+    assert wks == [f"boot_q.{k}.weight" for k in range(K)]
+
+    def client(val):
+        d = {f"boot_q.{k}.weight": torch.full((A, D), float(val)) for k in range(K)}
+        d.update({f"boot_q.{k}.bias": torch.full((A,), float(val)) for k in range(K)})
+        return d
+
+    prev = client(0.0)
+    counts = [{a: 10 for a in range(A)}, {a: 10 for a in range(A)}]
+    out = masked_head_weighted_average(
+        [client(1.0), client(3.0)], [0.5, 0.5], counts,
+        head_weight_key=wks, head_bias_key=bks, previous_global_state=prev,
+    )
+    for k in range(K):
+        assert torch.allclose(out[f"boot_q.{k}.weight"], torch.full((A, D), 2.0)), (
+            f"boot head {k} was not row-aggregated -- masked-head aggregation "
+            "silently skipped it."
+        )
+
+
+def test_masked_head_aggregation_raises_on_partial_head_match():
+    from federated.aggregation import masked_head_weighted_average
+
+    wks = ["boot_q.0.weight", "boot_q.1.weight"]
+    bks = ["boot_q.0.bias", "boot_q.1.bias"]
+    partial = {"boot_q.0.weight": torch.ones(4, 6), "boot_q.0.bias": torch.ones(4)}
+    with pytest.raises(ValueError, match="masked-head aggregation"):
+        masked_head_weighted_average(
+            [partial, partial], [0.5, 0.5], [{0: 1}, {0: 1}],
+            head_weight_key=wks, head_bias_key=bks,
+        )
+
+
+def test_boot_heads_rejects_incompatible_head_types():
+    from agents.networks import NeighborAttentionQNetwork
+
+    base = dict(own_dim=6, neighbor_dim=3, k_max=2, action_dim=4, boot_heads=3)
+    for bad in ({"dueling": True}, {"distributional": True}, {"actor_critic": True}):
+        with pytest.raises(ValueError):
+            NeighborAttentionQNetwork(**base, **bad)
+
+
+def test_boot_heads_stay_diverse_after_real_training():
+    """Head collapse is THE way this idea fails -- assert it doesn't, on real steps.
+
+    If every head learns the same function the vote is decorative and the whole
+    experiment is a no-op wearing a flag. optimize() records the measured
+    disagreement rate for exactly this reason.
+    """
+    from agents.dqn import DQNAgent
+
+    torch.manual_seed(0)
+    np.random.seed(0)
+    agent = DQNAgent(own_dim=8, neighbor_dim=4, k_max=2, action_dim=4,
+                     batch_size=16, boot_heads=5)
+
+    def obs(seed):
+        r = np.random.RandomState(seed)
+        return {
+            "own": r.randn(8).astype(np.float32),
+            "neighbors": r.randn(2, 4).astype(np.float32),
+            "neighbor_mask": np.ones(2, dtype=np.float32),
+            "hop_dist": np.ones(2, dtype=np.float32),
+            "action_mask": np.ones(4, dtype=np.float32),
+        }
+
+    for i in range(200):
+        agent.replay.add(obs(i), i % 4, float(np.random.randn()), obs(i + 500), 0.0, 1)
+    for _ in range(50):
+        agent.optimize()
+
+    assert agent.last_head_disagreement is not None, "disagreement must be instrumented"
+    assert agent.last_head_disagreement > 0.01, (
+        f"heads collapsed to one function (disagreement="
+        f"{agent.last_head_disagreement}); the vote would be decorative."
+    )

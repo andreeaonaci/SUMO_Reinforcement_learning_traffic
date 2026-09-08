@@ -101,7 +101,8 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
                 anchor_check_every: int = 50, anchor_qgap_growth_threshold: float = 3.0,
                 anchor_pullback_beta: float = 0.5, cql_weight: float = 0.0,
                 n_quantiles: int = 21, bounded_q: bool = False, q_bound_scale: float = 5.0,
-                trunk_lr_scale: float = 1.0, lora_adapter: bool = False, lora_rank: int = 8):
+                trunk_lr_scale: float = 1.0, lora_adapter: bool = False, lora_rank: int = 8,
+                boot_heads: int = 1, boot_mask_prob: float = 0.5):
     """Single place that constructs the local/global agent -- DQNAgent
     (default, unchanged), PPOAgent (--algo ppo, agents/ppo.py), or
     MunchausenDQNAgent (--algo munchausen, agents/munchausen_dqn.py; see
@@ -212,6 +213,8 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
         trunk_lr_scale=trunk_lr_scale,
         lora_adapter=lora_adapter,
         lora_rank=lora_rank,
+        boot_heads=boot_heads,
+        boot_mask_prob=boot_mask_prob,
     )
 
 
@@ -882,6 +885,8 @@ def main(args):
             # this project has been burned by twice before (see test_flag_wiring.py).
             lora_adapter=args.lora_adapter,
             lora_rank=args.lora_rank,
+            boot_heads=args.boot_heads,
+            boot_mask_prob=args.boot_mask_prob,
         )
 
         start_round = 1
@@ -988,6 +993,8 @@ def main(args):
             trunk_lr_scale=args.trunk_lr_scale,
             lora_adapter=args.lora_adapter,
             lora_rank=args.lora_rank,
+            boot_heads=args.boot_heads,
+            boot_mask_prob=args.boot_mask_prob,
         )
         history = server.run(
             rounds=args.rounds,
@@ -1308,6 +1315,18 @@ if __name__ == "__main__":
     parser.add_argument("--lora_rank", type=int, default=8,
                          help="Bottleneck width of the --lora_adapter residual correction. Ignored "
                               "unless --lora_adapter.")
+    parser.add_argument("--boot_heads", type=int, default=1,
+                         help="Bootstrapped multi-head Q-network (fidings sec 94): K independent "
+                              "action-indexed Q-heads on the shared trunk, combined by MAJORITY "
+                              "VOTE at action-selection time -- the same rule sec 93 measured "
+                              "beating both every individual member and their weight-space "
+                              "average. Each head trains as its own Double-DQN off its own target "
+                              "head. 1 (default) = the original single head, an exact no-op. "
+                              "Typical pilot value: 5.")
+    parser.add_argument("--boot_mask_prob", type=float, default=0.5,
+                         help="Probability a given (sample, head) pair contributes to the loss "
+                              "under --boot_heads: fresh Bernoulli mask per update, decorrelating "
+                              "the heads' gradients. Ignored unless --boot_heads > 1.")
     parser.add_argument("--eval_every",            type=int,   default=1)
     parser.add_argument("--eval_episodes",         type=int,   default=5)
     parser.add_argument("--log_loss_every_steps",  type=int,   default=50,
@@ -1542,5 +1561,18 @@ if __name__ == "__main__":
             "have new evidence this combination helps in some other setting, "
             "update sec 18 and remove/relax this check rather than silently "
             "bypassing it."
+        )
+    if args.boot_heads > 1 and not args.parallel:
+        # The sequential path's agent builders never received this flag (the same
+        # standing gap that affects --lora_adapter, --cql_weight, --bounded_q and
+        # the anchor_* family). Rather than let it be silently inert -- the exact
+        # failure mode that invalidated the sec 10 and sec 24 ablations -- refuse
+        # the combination outright.
+        parser.error(
+            "--boot_heads > 1 is only wired through the --parallel path (which is "
+            "what every real run in this project uses). Without --parallel it would "
+            "silently train a plain single-head network while the log claimed "
+            "otherwise. Add --parallel, or thread boot_heads through "
+            "_make_agent's sequential call site and FederatedServer first."
         )
     main(args)

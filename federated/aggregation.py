@@ -141,14 +141,61 @@ def masked_head_weighted_average(
     # 1. Ordinary uniform-per-client aggregation for every parameter.
     agg = weighted_average(state_dicts, base_weights)
 
-    if head_weight_key not in state_dicts[0] or head_bias_key not in state_dicts[0]:
+    # One (weight, bias) pair normally; several under the bootstrapped
+    # multi-head architecture (boot_q.0..K-1), where EVERY head is separately
+    # action-indexed and so every head needs the same per-action row treatment.
+    # A str stays a str for the single-head case, so behavior there is unchanged.
+    weight_keys = [head_weight_key] if isinstance(head_weight_key, str) else list(head_weight_key)
+    bias_keys = [head_bias_key] if isinstance(head_bias_key, str) else list(head_bias_key)
+    if len(weight_keys) != len(bias_keys):
+        raise ValueError(
+            f"head weight/bias key counts differ ({len(weight_keys)} vs {len(bias_keys)})."
+        )
+
+    present = [
+        (wk, bk) for wk, bk in zip(weight_keys, bias_keys)
+        if wk in state_dicts[0] and bk in state_dicts[0]
+    ]
+    if not present:
         return agg  # architecture doesn't match -- nothing special to do
+    if len(present) != len(weight_keys):
+        # A partial match means the configured keys and the actual architecture
+        # disagree -- the silent-no-op failure mode head_key_names' docstring
+        # warns about. Fail loudly instead of half-aggregating the heads.
+        raise ValueError(
+            f"masked-head aggregation got {len(weight_keys)} head key pair(s) but only "
+            f"{len(present)} exist in the state dict: "
+            f"missing {[wk for wk, _ in zip(weight_keys, bias_keys) if wk not in state_dicts[0]]}"
+        )
 
     # If nobody reported action_counts, we have no per-row signal --
     # keep the ordinary uniform result for the head too.
     if all(c is None for c in action_counts):
         return agg
 
+    for head_weight_key, head_bias_key in present:
+        agg = _masked_average_one_head(
+            agg, state_dicts, base_weights, action_counts,
+            head_weight_key, head_bias_key, previous_global_state,
+        )
+    return agg
+
+
+def _masked_average_one_head(
+    agg: Dict[str, torch.Tensor],
+    state_dicts: List[Dict[str, torch.Tensor]],
+    base_weights: List[float],
+    action_counts: List[Optional[Dict[int, int]]],
+    head_weight_key: str,
+    head_bias_key: str,
+    previous_global_state: Optional[Dict[str, torch.Tensor]],
+) -> Dict[str, torch.Tensor]:
+    """Per-action row aggregation for ONE action-indexed head.
+
+    Factored out of ``masked_head_weighted_average`` so the bootstrapped
+    multi-head architecture can apply the identical treatment to each of its K
+    heads. The body is unchanged from the single-head version.
+    """
     action_dim = state_dicts[0][head_weight_key].shape[0]
     prev_head_w = state_dicts[0][head_weight_key]  # placeholder shape/dtype reference
     new_head_w = torch.zeros_like(prev_head_w)
@@ -201,15 +248,29 @@ def _state_delta(
     return {k: a[k].float() - b[k].float() for k in a}
 
 
-def head_key_names(dueling: bool) -> Tuple[str, str]:
-    """State-dict key names for the action-indexed Q-head that
+def head_key_names(dueling: bool, boot_heads: int = 1):
+    """State-dict key names for the action-indexed Q-head(s) that
     ``masked_head_weighted_average`` should target: ``"advantage_head.*"``
     under the dueling architecture (``agents/networks.py`` splits the final
     layer into ``value_head``/``advantage_head``), ``"head.4.*"`` for the
     plain single-Linear head otherwise. Getting this wrong makes
     masked-head aggregation silently no-op (falls through to plain
     averaging) because the configured key doesn't exist in the state dict.
+
+    With ``boot_heads > 1`` (the bootstrapped multi-head architecture, fidings
+    sec 94) the plain head is replaced by K separate ``boot_q.{k}`` Linears,
+    each one still exactly one-row-per-action, so this returns LISTS of K keys
+    and every head gets the same per-action row treatment. Returning the plain
+    ``head.4.*`` names in that case would silently disable masked-head
+    aggregation entirely, since those keys no longer exist.
     """
+    if boot_heads > 1:
+        if dueling:
+            raise ValueError("boot_heads > 1 is mutually exclusive with dueling.")
+        return (
+            [f"boot_q.{k}.weight" for k in range(boot_heads)],
+            [f"boot_q.{k}.bias" for k in range(boot_heads)],
+        )
     if dueling:
         return "advantage_head.weight", "advantage_head.bias"
     return "head.4.weight", "head.4.bias"

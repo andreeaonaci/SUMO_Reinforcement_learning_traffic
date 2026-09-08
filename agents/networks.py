@@ -135,10 +135,21 @@ class NeighborAttentionQNetwork(nn.Module):
         q_bound_scale: float = 5.0,
         lora_adapter: bool = False,
         lora_rank: int = 8,
+        boot_heads: int = 1,
     ):
         super().__init__()
         if dueling and actor_critic:
             raise ValueError("dueling and actor_critic are mutually exclusive head types.")
+        if boot_heads < 1:
+            raise ValueError(f"boot_heads must be >= 1, got {boot_heads}.")
+        if boot_heads > 1 and (dueling or actor_critic or distributional):
+            raise ValueError(
+                "boot_heads > 1 is mutually exclusive with dueling/actor_critic/distributional -- "
+                "each of those replaces the plain action-indexed Q-head with a different head "
+                "structure, and the bootstrapped vote is defined over plain per-action Q-heads. "
+                "Combining them is possible in principle but untested; keep the pilot on the "
+                "one variable."
+            )
         if distributional and (dueling or actor_critic):
             raise ValueError("distributional is mutually exclusive with dueling/actor_critic.")
         if bounded_q and distributional:
@@ -183,6 +194,11 @@ class NeighborAttentionQNetwork(nn.Module):
         # bounded_q=False (default) leaves _q_from_features's output byte-identical.
         self.bounded_q = bounded_q
         self.q_bound_scale = q_bound_scale
+        # Number of independent action-indexed Q-heads on the shared trunk
+        # (fidings sec 94). 1 = the original single head, an exact structural and
+        # behavioral no-op: `self.boot_q` is never created and every code path
+        # below falls through to the pre-existing `self.head` final Linear.
+        self.boot_heads = int(boot_heads)
         # "Upgraded DQN" (fidings/divergence_investigation.md, 2026-09-05):
         # BatchNorm1d + relu6/leaky_relu in place of the original plain-ReLU
         # design, tested against the overnight algorithm-swap campaign's
@@ -290,6 +306,26 @@ class NeighborAttentionQNetwork(nn.Module):
             # caller (action selection, _mask_q, the evaluator) sees ordinary
             # (B, action_dim) mean-Q values via the unchanged forward() path.
             self.head.append(nn.Linear(d_model, action_dim * n_quantiles))
+        elif self.boot_heads > 1:
+            # Bootstrapped multi-head (fidings sec 94), built directly on sec 93's
+            # measured result: a majority VOTE across independently-trained models
+            # escaped the confident lock-in that every individual member was in
+            # (ensemble episode-std 422 vs members' 24-204), while a weight-space
+            # average of the same members did not (std 40.49 -- it blends the locked
+            # members in rather than outvoting them). This makes that structure
+            # internal to one network: K action-indexed heads on the shared trunk,
+            # combined by vote at action-selection time.
+            #
+            # Deliberately K SEPARATE Linear(d_model, action_dim) modules rather than
+            # one fused Linear(d_model, action_dim * K): each stays exactly
+            # one-row-per-action, so masked-head aggregation still applies to every
+            # head (see federated/aggregation.py, which now takes a LIST of head
+            # keys). A fused head would have action_dim*K rows and silently break
+            # that per-action row indexing -- the trap `distributional` avoids only
+            # by being excluded from masked-head aggregation entirely.
+            self.boot_q = nn.ModuleList(
+                [nn.Linear(d_model, action_dim) for _ in range(self.boot_heads)]
+            )
         else:
             self.head.append(nn.Linear(d_model, action_dim))
 
@@ -385,6 +421,25 @@ class NeighborAttentionQNetwork(nn.Module):
             state_dict = remapped
         return super().load_state_dict(state_dict, strict=strict)
 
+    def q_per_head(self, combined: torch.Tensor) -> torch.Tensor:
+        """(B, boot_heads, action_dim) -- every head's own Q-values.
+
+        Only valid when ``boot_heads > 1``. The shared trunk runs ONCE and each
+        head is a single Linear on top, so K heads cost K*d_model*action_dim
+        extra multiply-adds per forward, not K full forward passes -- the
+        practical reason this is worth trying as an architecture rather than
+        just running sec 93's 6-model ensemble in production.
+
+        Used by the training loss (each head gets its own TD target, bootstrapped
+        off its own target-network head -- that self-referential difference is
+        what keeps the heads from converging to one function) and by the voting
+        action selection in DQNAgent.act().
+        """
+        if self.boot_heads <= 1:
+            raise RuntimeError("q_per_head() requires boot_heads > 1.")
+        feat = self.head(combined)
+        return torch.stack([h(feat) for h in self.boot_q], dim=1)
+
     def _q_from_features(self, combined: torch.Tensor) -> torch.Tensor:
         """Shared trunk -> Q-values, either straight through the plain head,
         combined dueling-style (Q = V + A - mean(A)) if ``dueling``, or the
@@ -402,6 +457,13 @@ class NeighborAttentionQNetwork(nn.Module):
         elif self.distributional:
             quantiles = feat.view(feat.shape[0], self.action_dim, self.n_quantiles)
             return quantiles.mean(dim=-1)
+        elif self.boot_heads > 1:
+            # MEAN across heads, so every existing caller (Q-gap diagnostics,
+            # _mask_q, the evaluator's q_values) keeps seeing ordinary
+            # (B, action_dim) values. Action SELECTION does not go through here
+            # when voting is enabled -- DQNAgent.act() calls q_per_head() and
+            # votes, which is the whole point (sec 93: the vote beat the average).
+            raw_q = self.q_per_head(combined).mean(dim=1)
         else:
             raw_q = feat
 
@@ -600,3 +662,17 @@ class NeighborAttentionQNetwork(nn.Module):
         combined = self._combined_features(own_obs, neighbor_obs, neighbor_mask, hop_dist)
         feat = self.head(combined)
         return feat.view(feat.shape[0], self.action_dim, self.n_quantiles)
+
+    def forward_boot(
+        self,
+        own_obs: torch.Tensor,
+        neighbor_obs: torch.Tensor,
+        neighbor_mask: torch.Tensor,
+        hop_dist: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Bootstrapped multi-head entry point: own+neighbor obs -> (B,
+        boot_heads, action_dim). Only valid when ``boot_heads > 1``. Unmasked,
+        matching ``forward_quantiles``/``forward`` -- callers apply
+        ``action_mask`` themselves (this project's standing convention)."""
+        combined = self._combined_features(own_obs, neighbor_obs, neighbor_mask, hop_dist)
+        return self.q_per_head(combined)

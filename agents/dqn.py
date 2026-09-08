@@ -168,6 +168,8 @@ class DQNAgent:
         trunk_lr_scale: float = 1.0,
         lora_adapter: bool = False,
         lora_rank: int = 8,
+        boot_heads: int = 1,
+        boot_mask_prob: float = 0.5,
     ):
         self.own_dim = own_dim
         self.neighbor_dim = neighbor_dim
@@ -197,7 +199,16 @@ class DQNAgent:
             q_bound_scale=q_bound_scale,
             lora_adapter=lora_adapter,
             lora_rank=lora_rank,
+            boot_heads=boot_heads,
         )
+        # Bootstrapped multi-head vote (fidings sec 94). boot_heads=1 is an exact
+        # no-op: the network builds its original single head and every branch
+        # below falls through to the pre-existing single-head path.
+        self.boot_heads = int(boot_heads)
+        self.boot_mask_prob = float(boot_mask_prob)
+        # Set by optimize() when boot_heads > 1; the kill-condition metric for
+        # this experiment (heads that never disagree make the vote decorative).
+        self.last_head_disagreement: Optional[float] = None
         self.q = NeighborAttentionQNetwork(**net_kwargs).to(self.device)
         self.q_target = NeighborAttentionQNetwork(**net_kwargs).to(self.device)
         self.q_target.load_state_dict(self.q.state_dict())
@@ -415,6 +426,32 @@ class DQNAgent:
         self.q.eval()
         with torch.no_grad():
             own, neighbors, neighbor_mask, hop_dist, action_mask = _collate(obs_list, self.device)
+            if self.boot_heads > 1:
+                # Majority vote across heads -- the SAME rule sec 93 measured
+                # working across 6 independently-trained models (and which beat
+                # the weight-space average of those same models by 6.19%):
+                # each head votes with its own masked argmax, ties broken by
+                # summed Q across ALL heads, not by an arbitrary first-vote.
+                q_all = self.q.forward_boot(own, neighbors, neighbor_mask, hop_dist)
+                mask_exp = action_mask.unsqueeze(1).expand_as(q_all)
+                q_all = q_all.masked_fill(mask_exp <= 0, float("-inf"))
+                votes_np = q_all.argmax(dim=2).cpu().numpy()          # (B, K)
+                q_sum_np = q_all.sum(dim=1).cpu().numpy()             # (B, action_dim)
+                actions = []
+                for votes, q_sum in zip(votes_np, q_sum_np):
+                    counts = np.bincount(votes, minlength=self.action_dim)
+                    top = np.flatnonzero(counts == counts.max())
+                    if len(top) == 1:
+                        actions.append(int(top[0]))
+                    else:
+                        # Tie among equally-voted actions -> highest summed Q,
+                        # itself tie-broken uniformly (same anti-index-bias
+                        # reasoning as the single-head path below).
+                        best = q_sum[top].max()
+                        tied = top[np.isclose(q_sum[top], best, atol=1e-4)]
+                        actions.append(int(np.random.choice(tied)))
+                return actions
+
             q = self.q(own, neighbors, neighbor_mask, hop_dist)
             q = _mask_q(q, action_mask)
             q_np = q.cpu().numpy()
@@ -584,28 +621,84 @@ class DQNAgent:
         ns_t = torch.tensor(ns, dtype=torch.float32, device=self.device).unsqueeze(1)
         discount_t = torch.full_like(ns_t, self.gamma).pow(ns_t)
 
-        q_values = self.q(own, neighbors, neighbor_mask, hop_dist)
-        q_taken = q_values.gather(1, actions_t)
+        if self.boot_heads > 1:
+            # Bootstrapped multi-head (fidings sec 94). Each head is trained as its
+            # OWN independent Double-DQN: its target bootstraps off its own target-
+            # network head, not off a shared consensus. That self-referential loop is
+            # the main thing keeping the heads from collapsing onto one function --
+            # the risk that would make the vote a no-op. A fresh Bernoulli mask per
+            # (sample, head) decorrelates their gradients on top of that.
+            #
+            # NOTE this deliberately departs from Osband et al. 2016, which stores a
+            # PERSISTENT bootstrap mask with each transition so every head sees a
+            # fixed resample of the data. That needs a ReplayBuffer schema change;
+            # given this codebase's history of silent wiring bugs, the cheaper
+            # version is tried first and head diversity is MEASURED (see
+            # last_head_disagreement) rather than assumed. If the heads collapse,
+            # persistent masks are the escalation.
+            q_all = self.q.forward_boot(own, neighbors, neighbor_mask, hop_dist)
+            q_taken_all = q_all.gather(2, actions_t.unsqueeze(1).expand(-1, self.boot_heads, -1))
 
-        with torch.no_grad():
-            # Double DQN: select next action with the online net, but only
-            # among actions valid for that next observation's topology.
-            next_q_online = _mask_q(
-                self.q(n_own, n_neighbors, n_neighbor_mask, n_hop_dist), n_action_mask
-            )
-            next_actions = next_q_online.argmax(dim=1, keepdim=True)
-            next_q_target = self.q_target(n_own, n_neighbors, n_neighbor_mask, n_hop_dist).gather(
-                1, next_actions
-            )
-            expected = rewards_t + (1.0 - dones_t) * discount_t * next_q_target
+            with torch.no_grad():
+                next_online_all = self.q.forward_boot(
+                    n_own, n_neighbors, n_neighbor_mask, n_hop_dist
+                )
+                next_target_all = self.q_target.forward_boot(
+                    n_own, n_neighbors, n_neighbor_mask, n_hop_dist
+                )
+                mask_exp = n_action_mask.unsqueeze(1).expand_as(next_online_all)
+                next_online_masked = next_online_all.masked_fill(mask_exp <= 0, -1e9)
+                next_actions_all = next_online_masked.argmax(dim=2, keepdim=True)
+                next_q_target_all = next_target_all.gather(2, next_actions_all)
+                expected_all = (
+                    rewards_t.unsqueeze(1)
+                    + (1.0 - dones_t.unsqueeze(1)) * discount_t.unsqueeze(1) * next_q_target_all
+                )
+                # Diversity instrumentation: fraction of (sample, head-pair) cases
+                # where two heads would pick different greedy actions. ~0 means the
+                # heads have collapsed and the vote is decorative -- the documented
+                # kill condition for this experiment.
+                greedy = next_online_masked.argmax(dim=2)
+                self.last_head_disagreement = float(
+                    (greedy != greedy[:, :1]).float().mean().item()
+                )
 
-        # Huber loss instead of MSE: MSE squares the TD-error, so a single
-        # large-magnitude transition (e.g. a congestion spike) can
-        # dominate the whole gradient step -- that's what was driving
-        # city_2's loss climbing into the double digits. Huber is linear
-        # past `delta`, so outliers contribute a bounded gradient instead
-        # of an exploding one.
-        loss = nn.functional.smooth_l1_loss(q_taken, expected, beta=1.0)
+            per_elem = nn.functional.smooth_l1_loss(
+                q_taken_all, expected_all, beta=1.0, reduction="none"
+            )
+            boot_mask = (
+                torch.rand_like(per_elem) < self.boot_mask_prob
+            ).float()
+            # Guard against a sample whose mask is empty for every head: keep the
+            # denominator honest rather than dividing by zero.
+            denom = boot_mask.sum().clamp_min(1.0)
+            loss = (per_elem * boot_mask).sum() / denom
+            # Downstream code (q_entropy, fedprox) reasons about a (B, action_dim)
+            # Q tensor; give it the across-head mean, matching what forward() returns.
+            q_values = q_all.mean(dim=1)
+        else:
+            q_values = self.q(own, neighbors, neighbor_mask, hop_dist)
+            q_taken = q_values.gather(1, actions_t)
+
+            with torch.no_grad():
+                # Double DQN: select next action with the online net, but only
+                # among actions valid for that next observation's topology.
+                next_q_online = _mask_q(
+                    self.q(n_own, n_neighbors, n_neighbor_mask, n_hop_dist), n_action_mask
+                )
+                next_actions = next_q_online.argmax(dim=1, keepdim=True)
+                next_q_target = self.q_target(n_own, n_neighbors, n_neighbor_mask, n_hop_dist).gather(
+                    1, next_actions
+                )
+                expected = rewards_t + (1.0 - dones_t) * discount_t * next_q_target
+
+            # Huber loss instead of MSE: MSE squares the TD-error, so a single
+            # large-magnitude transition (e.g. a congestion spike) can
+            # dominate the whole gradient step -- that's what was driving
+            # city_2's loss climbing into the double digits. Huber is linear
+            # past `delta`, so outliers contribute a bounded gradient instead
+            # of an exploding one.
+            loss = nn.functional.smooth_l1_loss(q_taken, expected, beta=1.0)
 
         # FedProx proximal term: penalizes this client's weights drifting
         # from the global weights it started the round from. Directly
