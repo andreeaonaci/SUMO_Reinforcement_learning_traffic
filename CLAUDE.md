@@ -244,8 +244,15 @@ rigor (|diff|/SE 1.53/0.90) even after fixing an under-sensitive default thresho
   checkpoint's own mean — a small, real-looking effect. The actual **majority-vote ensemble crashed
   on every episode** (a real bug: `EnsemblePolicy.act()` was missing the `ts_id` param
   `HoldoutEvaluator` always passes, which cascaded into a second crash via an incomplete
-  all-episodes-failed fallback dict). **Both bugs fixed; the majority-vote result itself still needs
-  a re-run** — not yet done.
+  all-episodes-failed fallback dict). **Both bugs fixed; the re-run is RUNNING as of 2026-09-08
+  (§93, `results/ensemble_indep_seeds_rerun_2026_09_08.log`, `--episodes 30 --mode both`, ~13-16h)**
+  — the `ts_id` fix is confirmed working (a 1-episode smoke test completed where every prior attempt
+  raised). The original run's six checkpoints were NOT recoverable from the log (it prints only
+  basenames, and the invoking command was never recorded) so they were re-identified by config and
+  then **verified**: the smoke test's six individual scores reproduce §91's recorded 30-episode
+  numbers in exact order, all within ~1%. `--mode both` also re-measures SWA, currently a single
+  unreplicated number. **Result pending — the smoke test's -8346.20 is n=1 episode and is NOT the
+  finding.**
 
 **Progressive Curriculum FedAvg (PCFT) — user-proposed (order training cities simplest-to-complex,
 warm up solo, then focus-fine-tune + FedAvg-pool each new city), now CONFIRMED at full 6-seed
@@ -289,7 +296,8 @@ fine-tuning on real target-city data (§66-70) remains the only reliably-working
 works precisely by sidestepping the zero-shot generalization requirement rather than fixing it. Two
 things confirmed as real, replicated, modest wins despite that (item 22, sequential training), plus
 now PCFT as a third, currently the strongest of the three but with its own mechanism only partly
-disentangled. **Open, not yet acted on:** re-run the ensemble majority-vote fix; consider an
+disentangled. **Open, not yet acted on:** ~~re-run the ensemble majority-vote fix~~ **launched
+2026-09-08, see §93 and the bullet above**; consider an
 ablation isolating PCFT's curriculum-ordering effect from its embedded fine-tune steps; whatever
 architecture/training idea the user proposes next — none of `bounded_q`/`trunk_lr_scale`/
 `lora_adapter` are being tuned further per direct instruction to move on rather than sweep values.

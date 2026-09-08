@@ -6250,6 +6250,72 @@ distributional RL), post-hoc (self-anchoring), and now architectural (bounded sp
 added low-rank capacity) -- while the one thing that reliably helps (fine-tuning on real target-city
 data, §66-70) works by sidestepping the zero-shot requirement entirely rather than fixing it.
 
+## 93. §91 item 1's majority-vote ensemble: the re-run under the `ts_id` fix (LAUNCHED, result
+    pending), plus the checkpoint set recovered and independently verified
+
+**2026-09-08.** §91 item 1 (independent-seed ensembling) finished after ~13 hours with two of its
+three arms usable: individual checkpoints and the SWA weight-average (**-9068.94**, beating every
+individual's own mean) landed, while the **majority-vote ensemble crashed on all 30 episodes** on a
+signature mismatch (`EnsemblePolicy.act()` never accepted the `ts_id` kwarg `HoldoutEvaluator`
+always passes), cascading into a second bug in the evaluator's all-episodes-failed fallback dict.
+Both were fixed in `c73644c`, but **the majority-vote number itself was never re-measured** -- it
+has sat open since 2026-09-07 as the one cheap, already-paid-for result still missing.
+
+**Problem hit first: the original run's checkpoint set was not recoverable from the record.**
+`results/pilot_ensemble_indep_seeds.log` logs only basenames (`global_round_005.pth` x6, since
+`swa_reeval.py` prints `os.path.basename`), the invoking command was never written down anywhere,
+and 43 different `run_2026_09_06-*` runs on `environments_c1_4_6` carry a `global_round_005.pth`.
+**Process lesson, worth fixing: `swa_reeval.py` should log full checkpoint paths, and any
+diagnostic launched by hand should have its exact command recorded in this document at launch
+time** -- otherwise a re-run cannot be guaranteed to be a re-run.
+
+**How the set was recovered and verified.** Selected the six runs that form a coherent §91 baseline
+(one per seed 3/7/11/17/21/25, all `environments_c1_4_6`, `q_entropy_weight=0.05`,
+`potential_shaping_weight=0.0`, `cql_weight=0.0`, `dueling=False`, `n_step=1`,
+`pad_to_true_holdout=True`, 5 rounds; launch batches `02_01_01` = seeds 3/7/11 and `00_32_33` =
+seeds 17/21/25), then ran a **1-episode smoke test** whose individual-checkpoint arm doubles as an
+identity check against §91's recorded 30-episode numbers:
+
+| seed | §91 recorded (30 ep) | smoke test (1 ep) | delta |
+|---|---:|---:|---:|
+| 3  | -9532.00 | -9467.35 | +0.7% |
+| 7  | -9256.11 | -9359.63 | -1.1% |
+| 11 | -9676.57 | -9754.08 | -0.8% |
+| 17 | -10247.97 | -10271.26 | -0.2% |
+| 21 | -10089.56 | -10156.12 | -0.7% |
+| 25 | -9240.70 | -9315.06 | -0.8% |
+
+Same ordering, every value within ~1%. **This is strong evidence the correct six checkpoints were
+recovered**, so the re-run's numbers are directly comparable to §91's recorded individual and SWA
+values rather than being a separate experiment. (The residual differences are the expected
+1-episode-vs-30-episode sampling gap, not a different model set -- a wrong set would not preserve
+the ordering across six values spanning only ~1000 reward.)
+
+**The `ts_id` fix is confirmed working:** the smoke test's ensemble arm completed normally where
+every previous attempt raised. At 1 episode it scored **-8346.20, better than all six individuals**
+(-9315.06 to -10271.26). **Read that as nothing more than "it runs"** -- n=1 episode, std=0.00 by
+construction, and this document's standing pattern (§33, and §79's own volatile-vs-stable-window
+reversal) is that short screens run optimistic. It is not a result.
+
+**Launched for the real measurement:** `--episodes 30 --mode both` on the six verified checkpoints
+(`results/ensemble_indep_seeds_rerun_2026_09_08.log`). `--mode both` rather than `ensemble` alone
+costs one extra evaluation and buys an **independent replication of the -9068.94 SWA number**,
+which is currently a single unreplicated measurement carrying the whole "combining independently-
+trained models helps" claim. Expect ~13-16h (the original run's pace, with the ensemble arm slower
+at 6 forward passes per intersection per tick). **Result pending -- do not cite the -8346.20 smoke
+number as the finding.**
+
+**What this can and cannot settle.** §79 already closed same-run temporally-adjacent SWA/ensembling
+as "real but not deployable" (conditional on volatility, and telling a volatile window from a stable
+one needs the same per-round eval sweep that would let you pick the best round directly).
+Independent-seed combination does not inherit that specific objection -- there is no "which round"
+to choose, you simply train N seeds, which this project does anyway. So a confirmed ensemble win
+here would be more deployable than §79's. What it still cannot do is close the multi-order-of-
+magnitude gap to `fixed_time`/`max_pressure`: the best individual is -9240.70 and SWA reached
+-9068.94, both ~2700x worse than `max_pressure`'s -0.34. **This is a "does combining help at all"
+question, not a path to competitive performance** -- worth finishing because it is nearly free, not
+because it changes the project's headline.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
