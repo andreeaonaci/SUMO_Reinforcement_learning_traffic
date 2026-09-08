@@ -136,12 +136,19 @@ class NeighborAttentionQNetwork(nn.Module):
         lora_adapter: bool = False,
         lora_rank: int = 8,
         boot_heads: int = 1,
+        phase_relational: bool = False,
+        phase_dim: int = 10,
     ):
         super().__init__()
         if dueling and actor_critic:
             raise ValueError("dueling and actor_critic are mutually exclusive head types.")
         if boot_heads < 1:
             raise ValueError(f"boot_heads must be >= 1, got {boot_heads}.")
+        if phase_relational and (dueling or actor_critic or distributional):
+            raise ValueError(
+                "phase_relational replaces the action-indexed Q-head entirely and is "
+                "mutually exclusive with dueling/actor_critic/distributional."
+            )
         if boot_heads > 1 and (dueling or actor_critic or distributional):
             raise ValueError(
                 "boot_heads > 1 is mutually exclusive with dueling/actor_critic/distributional -- "
@@ -199,6 +206,8 @@ class NeighborAttentionQNetwork(nn.Module):
         # behavioral no-op: `self.boot_q` is never created and every code path
         # below falls through to the pre-existing `self.head` final Linear.
         self.boot_heads = int(boot_heads)
+        self.phase_relational = bool(phase_relational)
+        self.phase_dim = int(phase_dim)
         # "Upgraded DQN" (fidings/divergence_investigation.md, 2026-09-05):
         # BatchNorm1d + relu6/leaky_relu in place of the original plain-ReLU
         # design, tested against the overnight algorithm-swap campaign's
@@ -306,6 +315,30 @@ class NeighborAttentionQNetwork(nn.Module):
             # caller (action selection, _mask_q, the evaluator) sees ordinary
             # (B, action_dim) mean-Q values via the unchanged forward() path.
             self.head.append(nn.Linear(d_model, action_dim * n_quantiles))
+        elif self.phase_relational:
+            # Phase-relational Q-head (fidings sec 96). There is NO per-action row
+            # here at all: one shared scorer maps [state features, phase features]
+            # -> a scalar Q, and is applied to every candidate phase. That single
+            # change removes three separate structural problems this project has
+            # measured:
+            #
+            #   * untrained action rows (sec 95b) -- a 3-phase city trains exactly
+            #     the same parameters an 8-phase holdout uses, so no row can be
+            #     left at initialization the way rows 5-7 were;
+            #   * index semantics (sec 95c) -- there are no indices to carry
+            #     conflicting meanings across cities;
+            #   * max_pressure being outside the hypothesis space -- phase feature
+            #     0 IS that phase's pressure, so this head can express
+            #     "Q(s,a) = pressure(a)" directly and match the baseline as a
+            #     FLOOR rather than having to rediscover it from scratch.
+            #
+            # Width is action_dim-independent, which is what makes one policy over
+            # arbitrary topologies actually representable rather than merely masked.
+            self.phase_scorer = _mlp_block(
+                [d_model + phase_dim, d_model, d_model], activation, use_batchnorm,
+                final_activation=True,
+            )
+            self.phase_scorer.append(nn.Linear(d_model, 1))
         elif self.boot_heads > 1:
             # Bootstrapped multi-head (fidings sec 94), built directly on sec 93's
             # measured result: a majority VOTE across independently-trained models
@@ -420,6 +453,33 @@ class NeighborAttentionQNetwork(nn.Module):
                 remapped[k] = v
             state_dict = remapped
         return super().load_state_dict(state_dict, strict=strict)
+
+    def forward_phase(
+        self,
+        own_obs: torch.Tensor,
+        neighbor_obs: torch.Tensor,
+        neighbor_mask: torch.Tensor,
+        phase_feats: torch.Tensor,
+        hop_dist: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Phase-relational entry point: -> (B, A) Q-values.
+
+        ``phase_feats`` is (B, A, phase_dim) -- what each candidate phase would
+        actually do. The state representation is computed ONCE and broadcast
+        against every phase, so cost is one trunk pass plus A cheap scorer
+        passes, and the parameter count is independent of A.
+
+        Unmasked, matching every other forward here -- callers apply
+        ``action_mask`` themselves (this project's standing convention).
+        """
+        if not self.phase_relational:
+            raise RuntimeError("forward_phase() called on a non-phase-relational network.")
+        combined = self._combined_features(own_obs, neighbor_obs, neighbor_mask, hop_dist)
+        state_feat = self.head(combined)                      # (B, d_model)
+        b, a, _ = phase_feats.shape
+        state_rep = state_feat.unsqueeze(1).expand(b, a, state_feat.shape[-1])
+        pair = torch.cat([state_rep, phase_feats], dim=-1)    # (B, A, d_model+phase_dim)
+        return self.phase_scorer(pair).squeeze(-1)            # (B, A)
 
     def q_per_head(self, combined: torch.Tensor) -> torch.Tensor:
         """(B, boot_heads, action_dim) -- every head's own Q-values.

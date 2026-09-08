@@ -121,6 +121,7 @@ def _client_worker(
     lora_rank: int = 8,
     boot_heads: int = 1,
     boot_mask_prob: float = 0.5,
+    phase_relational: bool = False,
 ):
     """Runs inside its own process for the ENTIRE training run.
 
@@ -263,6 +264,7 @@ def _client_worker(
                 lora_rank=lora_rank,
                 boot_heads=boot_heads,
                 boot_mask_prob=boot_mask_prob,
+                phase_relational=phase_relational,
             )
 
         while True:
@@ -412,6 +414,7 @@ class ParallelFederatedServer:
         lora_rank: int = 8,
         boot_heads: int = 1,
         boot_mask_prob: float = 0.5,
+        phase_relational: bool = False,
     ):
         # item 20 (fidings sec 78): if >0, a round whose eval std_reward
         # falls below this threshold (the same std<50 screen already used
@@ -439,6 +442,7 @@ class ParallelFederatedServer:
         self.bounded_q = bounded_q
         self.q_bound_scale = q_bound_scale
         self.trunk_lr_scale = trunk_lr_scale
+        self.phase_relational = bool(phase_relational)
         self.boot_heads = int(boot_heads)
         self.boot_mask_prob = float(boot_mask_prob)
         self.lora_adapter = lora_adapter
@@ -487,7 +491,12 @@ class ParallelFederatedServer:
         # per-action row indexing at all (see the three cases documented above) -- computed
         # once and reused for both self.head_fix and the head_key_names() call below, rather
         # than repeating the same "algo not in (...) and not use_batchnorm" condition twice.
-        supports_masked_head = algo not in ("ppo", "qrdqn") and not use_batchnorm
+        # phase_relational has no per-action head rows AT ALL (one shared scorer),
+        # so per-action row aggregation is meaningless for it -- excluded
+        # explicitly rather than left to silently no-op on a missing key.
+        supports_masked_head = (
+            algo not in ("ppo", "qrdqn") and not use_batchnorm and not phase_relational
+        )
         self.head_fix = bool(head_fix) and supports_masked_head
         self.neighbor_attention = bool(neighbor_attention)
         self.fedavg_blend = float(max(0.0, min(1.0, fedavg_blend)))
@@ -567,6 +576,7 @@ class ParallelFederatedServer:
                     self.bounded_q, self.q_bound_scale, self.trunk_lr_scale,
                     self.lora_adapter, self.lora_rank,
                     self.boot_heads, self.boot_mask_prob,
+                    self.phase_relational,
                 ),
                 daemon=True,
             )

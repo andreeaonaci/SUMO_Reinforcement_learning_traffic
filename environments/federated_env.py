@@ -474,6 +474,148 @@ class SumoLaneExtractor(LaneExtractor):
         return lanes, current_phase, elapsed_green, yellow_time, pressure, out_density
 
 
+class PhaseFeatureExtractor:
+    """Per-CANDIDATE-PHASE features -- what each action actually DOES.
+
+    The gap this closes (fidings sec 95): every other observation component is
+    action-agnostic. ``own_obs`` is congestion-sorted lane features plus five
+    intersection-level scalars, and ``action_mask`` marks which indices are
+    VALID while never saying what any of them MEANS. So the shared Q-head had to
+    learn "index k -> which movements go green" implicitly, from each city's
+    arbitrary phase ordering -- a mapping that cannot transfer to an unseen
+    intersection, and that measurably conflicts ACROSS training cities (index 1
+    is a left turn on arterial4x4/grid4x4 and a through movement on
+    ingolstadt7/cologne3).
+
+    The consequence worth stating plainly: ``ts.get_pressure()`` is a single
+    intersection-level scalar, so **``max_pressure``'s decision rule was not
+    representable by this network at any capacity** -- it needs per-phase
+    pressure, and nothing in the observation carried it. This class supplies
+    exactly that, which is what lets a phase-relational head express
+    ``max_pressure`` as a floor rather than hope to rediscover it.
+
+    Features per phase (all normalized, all computable at ANY intersection of
+    any topology, seen or unseen):
+
+        0 pressure      queue on the lanes this phase greens minus queue on
+                        their downstream lanes -- max_pressure's own signal,
+                        per phase
+        1 queue         total halting vehicles on the greened lanes
+        2 waiting       total accumulated waiting time on the greened lanes
+        3 occupancy     mean occupancy of the greened lanes
+        4 n_lanes       how many lanes this phase serves
+        5 is_current    1.0 if this phase is the one currently green
+        6 elapsed       time in the current phase, 0 unless is_current
+        7 frac_straight movement composition of the greened links
+        8 frac_left
+        9 frac_right
+    """
+
+    N_FEATURES = 10
+
+    def __init__(self, env, max_queue: float = 50.0, max_wait: float = 300.0,
+                 max_lanes: float = 16.0):
+        self.env = env
+        self.max_queue = max_queue
+        self.max_wait = max_wait
+        self.max_lanes = max_lanes
+        # ts_id -> [(in_lanes, out_lanes, dirs)] per green phase. Static for a
+        # run (the signal programme never changes), so resolved once.
+        self._phase_lanes: Dict[str, List[Tuple[List[str], List[str], List[str]]]] = {}
+
+    def _resolve(self, ts_id: str):
+        if ts_id in self._phase_lanes:
+            return self._phase_lanes[ts_id]
+        ts = self.env.traffic_signals[ts_id]
+        out: List[Tuple[List[str], List[str], List[str]]] = []
+        try:
+            import traci
+            # NOT ts.lanes -- that one is de-duplicated, so it no longer lines
+            # up positionally with the phase state string. getControlledLanes()
+            # returns one entry per link index, which is exactly what state[i]
+            # refers to.
+            raw_lanes = list(traci.trafficlight.getControlledLanes(ts_id))
+            links = list(traci.trafficlight.getControlledLinks(ts_id))
+            for phase in getattr(ts, "green_phases", []):
+                state = phase.state
+                in_l, out_l, dirs = [], [], []
+                for i, ch in enumerate(state):
+                    if ch not in "Gg" or i >= len(raw_lanes):
+                        continue
+                    in_l.append(raw_lanes[i])
+                    if i < len(links) and links[i]:
+                        # (fromLane, toLane, viaLane) -- index 2 is the VIA lane,
+                        # NOT a direction code. Turn direction comes from the Lane
+                        # objects instead (see extract), which already carry
+                        # is_left/is_straight/is_right from _infer_turn_direction.
+                        out_l.append(links[i][0][1])
+                out.append((in_l, out_l, dirs))
+        except Exception:
+            logger.debug("Phase-lane resolution failed for ts=%s", ts_id, exc_info=True)
+        self._phase_lanes[ts_id] = out
+        return out
+
+    def extract(self, ts_id: str, lanes: List[Lane], current_phase: float,
+                elapsed_green: float, n_actions: int) -> np.ndarray:
+        """(n_actions, N_FEATURES); rows past this ts's real phase count stay 0."""
+        feats = np.zeros((n_actions, self.N_FEATURES), dtype=np.float32)
+        phase_lanes = self._resolve(ts_id)
+        by_id = {l.lane_id: l for l in lanes}
+        try:
+            import traci
+        except Exception:
+            traci = None
+
+        for k, (in_l, out_l, dirs) in enumerate(phase_lanes[:n_actions]):
+            if not in_l:
+                continue
+            q = w = occ = 0.0
+            n_str = n_left = n_right = 0
+            for lid in in_l:
+                lane = by_id.get(lid)
+                if lane is not None:
+                    q += lane.queue
+                    w += lane.waiting_time
+                    occ += lane.occupancy
+                    n_str += int(lane.is_straight)
+                    n_left += int(lane.is_left)
+                    n_right += int(lane.is_right)
+                elif traci is not None:
+                    try:
+                        q += float(traci.lane.getLastStepHaltingNumber(lid))
+                        w += float(traci.lane.getWaitingTime(lid))
+                        occ += float(traci.lane.getLastStepOccupancy(lid))
+                    except Exception:
+                        pass
+            out_q = 0.0
+            if traci is not None:
+                for lid in set(out_l):
+                    try:
+                        out_q += float(traci.lane.getLastStepHaltingNumber(lid))
+                    except Exception:
+                        pass
+
+            n = float(len(in_l))
+            # Same /10 clip convention as the intersection-level pressure
+            # feature, so the two are on a comparable scale.
+            feats[k, 0] = float(np.clip((q - out_q) / 10.0, -5.0, 5.0))
+            feats[k, 1] = min(q / self.max_queue, 5.0)
+            feats[k, 2] = min(w / self.max_wait, 5.0)
+            feats[k, 3] = (occ / n) / 100.0
+            feats[k, 4] = n / self.max_lanes
+            is_cur = 1.0 if int(current_phase) == k else 0.0
+            feats[k, 5] = is_cur
+            feats[k, 6] = (elapsed_green / 120.0) * is_cur
+            # Movement composition of the greened lanes. This is the feature that
+            # lets one shared scorer tell "this phase serves through-traffic" from
+            # "this phase serves a protected left" WITHOUT an action index -- i.e.
+            # the part that actually transfers to an unseen intersection.
+            feats[k, 7] = n_str / n
+            feats[k, 8] = n_left / n
+            feats[k, 9] = n_right / n
+        return feats
+
+
 def _infer_turn_direction(traci_module, lane_id: str) -> Tuple[bool, bool, bool]:
     """Best-effort turn-movement classification from traci link direction
     codes. Returns (is_left, is_straight, is_right); defaults to
@@ -749,6 +891,10 @@ class MultiAgentFederatedWrapper(FixedTsForwardingMixin):
         self.neighbor_graph = neighbor_graph
         self.neighbor_summary = neighbor_summary
         self.action_inspector = action_inspector
+        # Per-phase features (fidings sec 95/96). Always computed -- the
+        # observation gains a key; whether the network USES it is the
+        # --phase_relational flag's business, so the env stays one code path.
+        self.phase_features = PhaseFeatureExtractor(env)
         self.k_max = k_max
 
         self.ts_ids: List[str] = list(getattr(env, "ts_ids", []))
@@ -793,6 +939,9 @@ class MultiAgentFederatedWrapper(FixedTsForwardingMixin):
             hop_dist[i] = hop
 
         action_mask = self.action_inspector.action_mask(ts_id)
+        phase_feats = self.phase_features.extract(
+            ts_id, lanes, phase, elapsed, self.action_inspector.max_action_dim
+        )
 
         return {
             "own": own,
@@ -800,6 +949,7 @@ class MultiAgentFederatedWrapper(FixedTsForwardingMixin):
             "neighbor_mask": neighbor_mask,
             "hop_dist": hop_dist,
             "action_mask": action_mask,
+            "phase_feats": phase_feats,
         }
 
     def _build_all_obs(self) -> Dict[str, Dict[str, np.ndarray]]:
@@ -1123,6 +1273,11 @@ class ActionMaskPadder(FixedTsForwardingMixin):
             obs["action_mask"] = np.concatenate(
                 [obs["action_mask"], np.zeros(pad_by, dtype=np.float32)]
             )
+            if "phase_feats" in obs:
+                pf = obs["phase_feats"]
+                obs["phase_feats"] = np.concatenate(
+                    [pf, np.zeros((pad_by, pf.shape[1]), dtype=np.float32)], axis=0
+                )
         return obs_dict
 
     def reset(self, *a, **kw):

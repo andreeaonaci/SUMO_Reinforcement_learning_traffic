@@ -89,6 +89,26 @@ def _collate(obs_list, device):
     return own, neighbors, neighbor_mask, hop_dist, action_mask
 
 
+def _collate_phase_feats(obs_list, device, action_dim: int, phase_dim: int):
+    """(B, action_dim, phase_dim) per-phase features for the phase-relational
+    head. Kept as its own helper rather than a sixth element of ``_collate``
+    so every existing 5-tuple call site stays untouched.
+
+    Observations produced before this feature existed (old checkpoints' replay
+    buffers, the mock envs) simply have no ``phase_feats`` key -- those rows
+    come back zero, which the scorer sees as "no information about this phase"
+    rather than crashing."""
+    batch = np.zeros((len(obs_list), action_dim, phase_dim), dtype=np.float32)
+    for i, o in enumerate(obs_list):
+        pf = o.get("phase_feats")
+        if pf is None:
+            continue
+        n = min(pf.shape[0], action_dim)
+        d = min(pf.shape[1], phase_dim)
+        batch[i, :n, :d] = pf[:n, :d]
+    return torch.tensor(batch, dtype=torch.float32, device=device)
+
+
 _HEAD_PARAM_PREFIXES = ("head.", "value_head.", "advantage_head.", "policy_head.", "ac_value_head.")
 
 
@@ -170,6 +190,8 @@ class DQNAgent:
         lora_rank: int = 8,
         boot_heads: int = 1,
         boot_mask_prob: float = 0.5,
+        phase_relational: bool = False,
+        phase_dim: int = 10,
     ):
         self.own_dim = own_dim
         self.neighbor_dim = neighbor_dim
@@ -200,10 +222,14 @@ class DQNAgent:
             lora_adapter=lora_adapter,
             lora_rank=lora_rank,
             boot_heads=boot_heads,
+            phase_relational=phase_relational,
+            phase_dim=phase_dim,
         )
         # Bootstrapped multi-head vote (fidings sec 94). boot_heads=1 is an exact
         # no-op: the network builds its original single head and every branch
         # below falls through to the pre-existing single-head path.
+        self.phase_relational = bool(phase_relational)
+        self.phase_dim = int(phase_dim)
         self.boot_heads = int(boot_heads)
         self.boot_mask_prob = float(boot_mask_prob)
         # Set by optimize() when boot_heads > 1; the kill-condition metric for
@@ -396,6 +422,18 @@ class DQNAgent:
         """Public read-only view of the current epsilon value."""
         return self._current_epsilon()
 
+    def _q_of(self, net, obs_list, own, neighbors, neighbor_mask, hop_dist):
+        """Q-values from whichever head this agent was built with.
+
+        Phase-relational needs the per-phase features alongside the state, so
+        the raw obs dicts are threaded through; every other head ignores them.
+        One place to branch, so no call site can silently take the wrong path.
+        """
+        if self.phase_relational:
+            pf = _collate_phase_feats(obs_list, self.device, self.action_dim, self.phase_dim)
+            return net.forward_phase(own, neighbors, neighbor_mask, pf, hop_dist)
+        return net(own, neighbors, neighbor_mask, hop_dist)
+
     def _greedy_action(self, obs: Observation) -> int:
         return self._greedy_action_batch([obs])[0]
 
@@ -452,7 +490,7 @@ class DQNAgent:
                         actions.append(int(np.random.choice(tied)))
                 return actions
 
-            q = self.q(own, neighbors, neighbor_mask, hop_dist)
+            q = self._q_of(self.q, obs_list, own, neighbors, neighbor_mask, hop_dist)
             q = _mask_q(q, action_mask)
             q_np = q.cpu().numpy()
 
@@ -510,7 +548,7 @@ class DQNAgent:
         self.q.eval()  # single observation -- see _greedy_action_batch's comment
         with torch.no_grad():
             own, neighbors, neighbor_mask, hop_dist, action_mask = _collate([obs], self.device)
-            q = self.q(own, neighbors, neighbor_mask, hop_dist).squeeze(0).cpu().numpy()
+            q = self._q_of(self.q, [obs], own, neighbors, neighbor_mask, hop_dist).squeeze(0).cpu().numpy()
         mask = obs["action_mask"] > 0.5
         out = np.full_like(q, np.nan)
         out[mask] = q[mask]
@@ -677,19 +715,20 @@ class DQNAgent:
             # Q tensor; give it the across-head mean, matching what forward() returns.
             q_values = q_all.mean(dim=1)
         else:
-            q_values = self.q(own, neighbors, neighbor_mask, hop_dist)
+            q_values = self._q_of(self.q, obs, own, neighbors, neighbor_mask, hop_dist)
             q_taken = q_values.gather(1, actions_t)
 
             with torch.no_grad():
                 # Double DQN: select next action with the online net, but only
                 # among actions valid for that next observation's topology.
                 next_q_online = _mask_q(
-                    self.q(n_own, n_neighbors, n_neighbor_mask, n_hop_dist), n_action_mask
+                    self._q_of(self.q, next_obs, n_own, n_neighbors, n_neighbor_mask, n_hop_dist),
+                    n_action_mask,
                 )
                 next_actions = next_q_online.argmax(dim=1, keepdim=True)
-                next_q_target = self.q_target(n_own, n_neighbors, n_neighbor_mask, n_hop_dist).gather(
-                    1, next_actions
-                )
+                next_q_target = self._q_of(
+                    self.q_target, next_obs, n_own, n_neighbors, n_neighbor_mask, n_hop_dist
+                ).gather(1, next_actions)
                 expected = rewards_t + (1.0 - dones_t) * discount_t * next_q_target
 
             # Huber loss instead of MSE: MSE squares the TD-error, so a single

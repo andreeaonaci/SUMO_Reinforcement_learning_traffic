@@ -102,7 +102,8 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
                 anchor_pullback_beta: float = 0.5, cql_weight: float = 0.0,
                 n_quantiles: int = 21, bounded_q: bool = False, q_bound_scale: float = 5.0,
                 trunk_lr_scale: float = 1.0, lora_adapter: bool = False, lora_rank: int = 8,
-                boot_heads: int = 1, boot_mask_prob: float = 0.5):
+                boot_heads: int = 1, boot_mask_prob: float = 0.5,
+                phase_relational: bool = False):
     """Single place that constructs the local/global agent -- DQNAgent
     (default, unchanged), PPOAgent (--algo ppo, agents/ppo.py), or
     MunchausenDQNAgent (--algo munchausen, agents/munchausen_dqn.py; see
@@ -215,6 +216,7 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
         lora_rank=lora_rank,
         boot_heads=boot_heads,
         boot_mask_prob=boot_mask_prob,
+        phase_relational=phase_relational,
     )
 
 
@@ -887,6 +889,7 @@ def main(args):
             lora_rank=args.lora_rank,
             boot_heads=args.boot_heads,
             boot_mask_prob=args.boot_mask_prob,
+            phase_relational=args.phase_relational,
         )
 
         start_round = 1
@@ -995,6 +998,7 @@ def main(args):
             lora_rank=args.lora_rank,
             boot_heads=args.boot_heads,
             boot_mask_prob=args.boot_mask_prob,
+            phase_relational=args.phase_relational,
         )
         history = server.run(
             rounds=args.rounds,
@@ -1315,6 +1319,15 @@ if __name__ == "__main__":
     parser.add_argument("--lora_rank", type=int, default=8,
                          help="Bottleneck width of the --lora_adapter residual correction. Ignored "
                               "unless --lora_adapter.")
+    parser.add_argument("--phase_relational", action="store_true",
+                         help="Phase-relational Q-head (fidings sec 96): replace the "
+                              "action-INDEXED head with one shared scorer over "
+                              "[state, per-phase features], applied to each candidate "
+                              "phase. Removes untrained action rows (sec 95b), removes "
+                              "index semantics (sec 95c), and puts max_pressure inside "
+                              "the hypothesis space (phase feature 0 IS that phase's "
+                              "pressure). Changes the observation contract -- old "
+                              "checkpoints are not loadable into it.")
     parser.add_argument("--boot_heads", type=int, default=1,
                          help="Bootstrapped multi-head Q-network (fidings sec 94): K independent "
                               "action-indexed Q-heads on the shared trunk, combined by MAJORITY "
@@ -1561,6 +1574,11 @@ if __name__ == "__main__":
             "have new evidence this combination helps in some other setting, "
             "update sec 18 and remove/relax this check rather than silently "
             "bypassing it."
+        )
+    if args.phase_relational and not args.parallel:
+        parser.error(
+            "--phase_relational is only wired through the --parallel path; without it "
+            "the flag would be silently inert. Add --parallel."
         )
     if args.boot_heads > 1 and not args.parallel:
         # The sequential path's agent builders never received this flag (the same
