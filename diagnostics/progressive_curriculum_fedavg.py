@@ -97,6 +97,10 @@ def main():
     ap.add_argument("--q_entropy_weight", type=float, default=0.05,
                      help="Matches the current standard baseline used throughout this project's "
                           "item-2X/sequential-training pilots.")
+    ap.add_argument("--phase_relational", action="store_true",
+                    help="Use the per-phase Q scorer instead of the action-indexed head "
+                         "(fidings sec 96). PCFT changes the training CURRICULUM and this "
+                         "changes the HEAD -- they are orthogonal and compose.")
     ap.add_argument("--seed", type=int, default=3)
     ap.add_argument("--eval_episodes", type=int, default=5)
     ap.add_argument("--log_loss_every_steps", type=int, default=50)
@@ -112,8 +116,17 @@ def main():
     agent_kwargs = dict(
         own_dim=own_dim, neighbor_dim=neighbor_dim, k_max=k_max, action_dim=action_dim,
         q_entropy_weight=args.q_entropy_weight,
+        phase_relational=args.phase_relational,
     )
-    head_weight_key, head_bias_key = head_key_names(dueling=False)
+    # The phase-relational head has NO per-action rows (one shared scorer over
+    # [state, phase features]), so per-action row aggregation has nothing to
+    # index -- pass keys that don't exist and masked-head aggregation silently
+    # degrades to plain averaging, which is the sec 10/sec 24 bug class. Use
+    # sentinel keys so aggregate_round takes the plain path deliberately.
+    if args.phase_relational:
+        head_weight_key = head_bias_key = "__no_indexed_head__"
+    else:
+        head_weight_key, head_bias_key = head_key_names(dueling=False)
 
     logger.info("Ranking cities by intersection count (simplest first)...")
     ranked = sorted(
