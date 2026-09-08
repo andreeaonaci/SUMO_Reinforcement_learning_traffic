@@ -40,11 +40,18 @@ if [ "$LIVE" -gt 0 ]; then
 fi
 
 # ---- orphaned workers ----
-# A spawn_main worker whose parent is init (ppid 1) is an orphan: its
-# federated_training parent died without cleaning up its daemon children.
-# One ps scan produces both the count/GB summary and the PID list.
+# A spawn_main worker whose parent is no longer a live federated_training
+# process is an orphan: its parent died without cleaning up its daemon children.
+#
+# Do NOT test for ppid==1. Reparenting does not always go to PID 1 -- under WSL
+# these land on the session init (observed: PID 465), so a ppid==1 test reports
+# "no orphans" while 18 of them sit on ~10GB. Test against the set of live
+# parents instead, which is correct wherever reparenting points.
+LIVE_PARENTS=$(pgrep -f "experiments\.federated_training" 2>/dev/null | tr '\n' ' ')
 ORPHANS=$(ps -eo pid,ppid,rss,args --no-headers 2>/dev/null \
-    | awk '$2==1 && /spawn_main/ {n++; s+=$3; pids=pids $1 " "} END {printf "%d %.1f %s", n, s/1048576, pids}')
+    | awk -v live=" $LIVE_PARENTS " '
+        /spawn_main/ && index(live, " " $2 " ") == 0 {n++; s+=$3; pids=pids $1 " "}
+        END {printf "%d %.1f %s", n, s/1048576, pids}')
 read -r ORPHAN_N ORPHAN_GB ORPHAN_PIDS <<<"$ORPHANS"
 if [ "${ORPHAN_N:-0}" -gt 0 ]; then
     echo "WARN  $ORPHAN_N orphaned spawn_main worker(s) holding ~${ORPHAN_GB}GB"
