@@ -581,6 +581,50 @@ def make_holdout_evaluator(
 
     is_true_holdout = selected_name == "city_5_holdout"
 
+    # Second, INDEPENDENT check: is the holdout's TOPOLOGY actually unseen?
+    #
+    # `is_true_holdout` above only says the evaluator resolved to the city named
+    # city_5_holdout rather than silently falling back to a training city (the
+    # sec 25 trap). It says nothing about whether some training city points at
+    # the SAME net file under a different name -- and one does: environments/
+    # city_7 and environments/city_5_holdout are both grid4x4.net.xml, differing
+    # only in route file. So every 7-city / environments_wide / environments_
+    # phase0 result framed as "cross-topology generalization" was actually
+    # evaluating a topology that was in its own training set (sec 95a), with
+    # is_true_holdout=True the whole time. Two different failure modes; this
+    # guard covers the second one.
+    try:
+        holdout_net = os.path.basename(str(preferred_cfg.get("net_file", ""))) if preferred_cfg else ""
+        leaked_by = []
+        # Read the roster's config.yaml files directly rather than building envs --
+        # this check must be free, or it won't be left switched on.
+        for entry in sorted(os.listdir(base_dir)) if os.path.isdir(base_dir) else []:
+            if entry == selected_name or entry.endswith("_holdout"):
+                continue
+            cfg_path = os.path.join(base_dir, entry, "config.yaml")
+            if not os.path.exists(cfg_path):
+                continue
+            with open(cfg_path) as f:
+                train_cfg = yaml.safe_load(f) or {}
+            if holdout_net and os.path.basename(str(train_cfg.get("net_file", ""))) == holdout_net:
+                leaked_by.append(entry)
+        if leaked_by:
+            msg = (
+                f"HOLDOUT TOPOLOGY LEAK: evaluation city '{selected_name}' uses net file "
+                f"'{holdout_net}', which is ALSO a training city ({', '.join(leaked_by)}). "
+                "Only the traffic demand differs, so this is a DEMAND holdout, not a "
+                "TOPOLOGY holdout -- do not describe these numbers as cross-topology "
+                "generalization (fidings sec 95a)."
+            )
+            print("\n" + "!" * 78 + "\n!!! " + msg + "\n" + "!" * 78 + "\n", flush=True)
+            logger.warning(msg)
+            is_topology_holdout = False
+        else:
+            is_topology_holdout = True
+    except Exception:
+        logger.debug("Holdout topology-leak check failed", exc_info=True)
+        is_topology_holdout = None
+
     if not is_true_holdout:
         # LOUD, not just a log line easy to scroll past: this run's eval
         # numbers are in-distribution on one of its own training cities, not
@@ -1575,6 +1619,24 @@ if __name__ == "__main__":
             "update sec 18 and remove/relax this check rather than silently "
             "bypassing it."
         )
+    # Every lever below is wired ONLY through the --parallel path (audited with
+    # .claude/skills/lever/audit_flag.py). Without --parallel they parse fine and
+    # silently do nothing -- the exact failure that invalidated the sec 10 and
+    # sec 24 ablations. Refuse the combination instead of running a no-op.
+    _PARALLEL_ONLY = [
+        ("cql_weight", 0.0), ("bounded_q", False), ("q_bound_scale", 5.0),
+        ("trunk_lr_scale", 1.0), ("lora_adapter", False), ("n_quantiles", 21),
+        ("anchor_revert", False),
+    ]
+    if not args.parallel:
+        active = [n for n, default in _PARALLEL_ONLY if getattr(args, n, default) != default]
+        if active:
+            parser.error(
+                "these flags are only wired through the --parallel path and would be "
+                f"silently inert without it: {', '.join('--' + a for a in active)}. "
+                "Add --parallel, or thread them through _make_agent's sequential call "
+                "site and FederatedServer first."
+            )
     if args.phase_relational and not args.parallel:
         parser.error(
             "--phase_relational is only wired through the --parallel path; without it "
