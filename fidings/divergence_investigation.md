@@ -6298,7 +6298,20 @@ construction, and this document's standing pattern (§33, and §79's own volatil
 reversal) is that short screens run optimistic. It is not a result.
 
 **Launched for the real measurement:** `--episodes 30 --mode both` on the six verified checkpoints
-(`results/ensemble_indep_seeds_rerun_2026_09_08.log`). `--mode both` rather than `ensemble` alone
+(`results/ensemble_indep_seeds_rerun_2026_09_08.log`). Exact command, recorded here because the
+original's was not (`swa_reeval.py` now prints full paths + argv itself, commit `7a36106`):
+
+```bash
+python diagnostics/swa_reeval.py \
+  results/run_2026_09_06-02_01_01_410833/global_round_005.pth \  # seed 3
+  results/run_2026_09_06-02_01_01_410836/global_round_005.pth \  # seed 7
+  results/run_2026_09_06-02_01_01_410837/global_round_005.pth \  # seed 11
+  results/run_2026_09_06-00_32_33_392699/global_round_005.pth \  # seed 17
+  results/run_2026_09_06-00_32_33_392695/global_round_005.pth \  # seed 21
+  results/run_2026_09_06-00_32_33_392698/global_round_005.pth \  # seed 25
+  --base_dir environments_c1_4_6 --pad_to_true_holdout --episodes 30 --mode both
+```
+ `--mode both` rather than `ensemble` alone
 costs one extra evaluation and buys an **independent replication of the -9068.94 SWA number**,
 which is currently a single unreplicated measurement carrying the whole "combining independently-
 trained models helps" claim. Expect ~13-16h (the original run's pace, with the ensemble arm slower
