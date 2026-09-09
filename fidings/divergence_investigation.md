@@ -7276,6 +7276,80 @@ head produces on this roster.
 `pcftC` vs `pcftR` shows something -- and per §101's tally (CQL 2.35->1.05, TC-FedAvg,
 `n_attn_layers` twice), a clean 3-seed result here is a screen and nothing more.
 
+### 102 RESULT (3-seed SCREEN): plain FedAvg beats BOTH PCFT arms on every seed, and the
+    curriculum itself is a null
+
+**2026-09-09.** All 9 runs exited 0. Holdout reward, `environments_c1_4_6`, all arms
+`--phase_relational` (`max_pressure` on this holdout = -0.34):
+
+| arm | seed 3 | seed 7 | seed 11 | mean (best) | mean (final) |
+|---|---:|---:|---:|---:|---:|
+| plain FedAvg (budget-matched) | -0.096 | -0.060 | -0.082 | **-0.079** | **-0.096** |
+| PCFT, complexity order | -0.220 | -0.170 | **-4.600** | -1.663 | -2.180 |
+| PCFT, reverse order | -0.370 | -0.170 | -0.200 | -0.247 | -0.437 |
+
+| comparison | isolates | \|diff\|/SE best | \|diff\|/SE final | seeds favouring |
+|---|---|---:|---:|---|
+| complexity vs reverse | **the curriculum** | 1.18 | 1.12 | 1/3 complexity |
+| complexity vs plain FedAvg | PCFT overall | 1.32 | 1.34 | **0/3** |
+| reverse vs plain FedAvg | fine-tune + budget | 3.25 | 1.91 | **0/3** |
+
+**Plain FedAvg beats both PCFT arms on every seed on both measures -- 6/6 head to head.** The
+curriculum itself is a clean null (1.18/1.12, with reverse nominally AHEAD), which is the measure
+that matters most after §101: curriculum-over-clients is already published, so ordering was the
+entire claim PCFT could make.
+
+**Why this matters beyond PCFT.** §87 confirmed PCFT at 6 seeds on the INDEXED head. On the
+phase-relational head it reverses. That is what §102 was designed to test, and it is **direct
+evidence for §101's floor-effect reading of §73-§95** rather than an inference from it: the one
+intervention in that corpus that cleared the bar appears to have been compensating for a broken
+representation, and stops helping once the representation is fixed.
+
+**Caveats, and they are not small:**
+- **3 seeds. SCREEN only.** This document's own tally of clean 3-seed results that died at 6: CQL
+  (2.35 -> 1.05), TC-FedAvg, `n_attn_layers` twice.
+- **One seed carries the complexity arm.** Seed 11's -4.600 against -0.220/-0.170; drop-1 range on
+  complexity-vs-FedAvg is **1.48 .. 5.37**. Remove seed 11 and complexity roughly ties reverse.
+  This is precisely the single-outlier signature that killed the leads above.
+- **PCFT's per-phase mean is NOT comparable** to FedAvg's per-round mean -- it averages over
+  curriculum phases including warm-up on a single city, which scores as low as -1994. Only `best`
+  and `final` are like-for-like and only those are quoted.
+- **Headroom is tight** (floor 0.0, `max_pressure` -0.34, arms at -0.08..-0.25), as pre-registered
+  above. A null here is weaker evidence than a null on the indexed head would have been.
+
+**Escalation launched 2026-09-09 to 6 seeds** (adding 17/21/25 to 3/7/11), all three arms.
+
+### 102b. Resume support, added and functionally verified before the 6-seed batch
+
+Per user request, since the 6-seed batch may be interrupted. **`federated_training.py` already had
+`--resume`; `progressive_curriculum_fedavg.py` had no resume AND no checkpointing of any kind** --
+zero `torch.save`, so a killed PCFT run lost everything including the model. At ~70 min/run that is
+a real exposure.
+
+- **PCFT now checkpoints after every step.** The run is restructured into an explicit step plan
+  (warm-up, then focus + N FedAvg rounds per newly-admitted city -- 9 steps at
+  `--fedavg_rounds 3`), each of which already ended in a holdout eval and is therefore a clean
+  resume boundary. `--run_dir` / `--resume` write and read `pcft_state.pt` (shared weights, step
+  counter, eval history, and the step plan). Resuming into a checkpoint whose plan differs (a
+  different `--city_order`, `--fedavg_rounds` or roster) is **refused**, so a resume cannot
+  silently splice two different experiments together.
+- **Behaviour-preserving:** the restructured loop reproduces the pre-refactor smoke run's holdout
+  rewards exactly (-14.030, -0.070, -4.230, -5.830 for steps 1-4).
+- **Functionally verified, both scripts, by actually killing a run:** PCFT killed at 240s with 4/5
+  steps done, resumed, correctly reported "4/5 steps already done, continuing at step 5",
+  rebuilt the active pool (`city_4`, `city_6`, `city_1`), ran only the remaining step, exit 0.
+  `federated_training` run to 2 rounds then resumed to 4: continued at round 3, wrote checkpoints
+  003/004, continuous eval series `[-0.12, -0.17, -0.20, -0.20]`, exit 0.
+- **`analyse/run_pcft_phase6.sh` is safe to stop and relaunch.** PCFT jobs always pass `--resume`
+  (a no-op with no checkpoint); fedavg jobs record their `run_dir` in a sidecar and are either
+  continued via `--resume` or skipped when already complete.
+
+**Caveat that must travel with any resumed result:** neither implementation restores replay
+buffers, optimizer momentum, or epsilon step counters -- `federated_training`'s docstring says so
+explicitly and PCFT now inherits the same limitation. **A resumed run is not bit-identical to an
+uninterrupted one**, so interrupting arms unevenly introduces a small confound. Prefer letting a
+seed finish, and record which runs were resumed.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit

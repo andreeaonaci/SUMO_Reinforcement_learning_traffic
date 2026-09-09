@@ -56,6 +56,8 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
+import torch
+
 from agents.dqn import DQNAgent
 from environments.federated_env import ActionMaskPadder, build_federated_env
 from experiments.federated_training import (
@@ -109,6 +111,16 @@ def main():
                          "budget and focus phases identical and change only the "
                          "order -- the control that isolates the curriculum "
                          "from the fine-tuning (sec 87 confound, sec 101).")
+    ap.add_argument("--run_dir", default=None,
+                    help="Where to write pcft_state.pt (the resume checkpoint). "
+                         "Defaults to results/pcft_runs/<order>_s<seed>_<head>.")
+    ap.add_argument("--resume", action="store_true",
+                    help="Continue from --run_dir's pcft_state.pt, skipping the "
+                         "steps it records as done. Every step ends in a holdout "
+                         "eval, so those are the resume boundaries. Per-city "
+                         "replay buffers and optimizer state are NOT restored -- "
+                         "same limitation as federated_training's --resume, so a "
+                         "resumed run is not bit-identical to an uninterrupted one.")
     ap.add_argument("--seed", type=int, default=3)
     ap.add_argument("--eval_episodes", type=int, default=5)
     ap.add_argument("--log_loss_every_steps", type=int, default=50)
@@ -201,41 +213,117 @@ def main():
         )
         return result
 
-    eval_holdout("Stage 0 (random init, before any training)", DQNAgent(**agent_kwargs).state_dict())
+    # ---- Explicit step plan, so a run can be checkpointed and resumed ----
+    # Every step below both advances `shared_state` and ends in a holdout eval,
+    # which makes it a clean resume boundary. Steps are numbered from 1.
+    steps = [("warmup", ordered_cities[0][0], 0)]
+    for name, _ in ordered_cities[1:]:
+        steps.append(("focus", name, 0))
+        for r in range(1, args.fedavg_rounds + 1):
+            steps.append(("fedavg", name, r))
 
-    # ---- Phase 0: warm up solo on the simplest city ----
-    first_name, first_cfg = ordered_cities[0]
-    logger.info("=== Warm-up: solo training on %s (simplest, %d episodes) ===", first_name, args.warmup_episodes)
-    active_agents = {first_name: DQNAgent(**agent_kwargs)}
-    active_agents[first_name].train(
-        get_env(first_name, first_cfg), episodes=args.warmup_episodes,
-        log_loss_every_steps=args.log_loss_every_steps,
-    )
-    shared_state = active_agents[first_name].state_dict()
-    eval_holdout(f"After warm-up on {first_name}", shared_state)
+    run_dir = args.run_dir
+    if run_dir is None:
+        run_dir = os.path.join(
+            "results", "pcft_runs",
+            f"{args.city_order}_s{args.seed}"
+            f"{'_phase' if args.phase_relational else '_indexed'}")
+    os.makedirs(run_dir, exist_ok=True)
+    state_path = os.path.join(run_dir, "pcft_state.pt")
+    logger.info("PCFT run dir: %s (%d steps)", run_dir, len(steps))
 
-    # ---- Progressive phase-in of each remaining city ----
-    for name, cfg in ordered_cities[1:]:
-        logger.info("=== Focus: fine-tuning shared weights on %s alone (%d episodes) ===", name, args.focus_episodes)
-        focus_agent = DQNAgent(**agent_kwargs)
-        focus_agent.load_state_dict(shared_state)
-        focus_agent.train(
-            get_env(name, cfg), episodes=args.focus_episodes,
-            log_loss_every_steps=args.log_loss_every_steps,
-        )
-        shared_state = focus_agent.state_dict()
-        eval_holdout(f"After focus on {name}", shared_state)
-        active_agents[name] = focus_agent
+    done_steps, shared_state, history = 0, None, []
+    if args.resume:
+        if not os.path.exists(state_path):
+            logger.warning("--resume: no %s, starting from scratch.", state_path)
+        else:
+            ck = torch.load(state_path, map_location="cpu", weights_only=False)
+            done_steps = int(ck["done_steps"])
+            shared_state = ck["shared_state"]
+            history = ck.get("history", [])
+            if ck.get("plan") != [list(s) for s in steps]:
+                raise ValueError(
+                    "--resume: checkpoint's step plan differs from this run's "
+                    "(different --city_order / --fedavg_rounds / roster?). Refusing "
+                    "to resume into a different experiment.")
+            logger.info(
+                "RESUMING from %s: %d/%d steps already done, continuing at step %d. "
+                "NOTE: per-city replay buffers and optimizer state are NOT restored "
+                "(same limitation as federated_training's --resume) -- a resumed run "
+                "is not bit-identical to an uninterrupted one.",
+                state_path, done_steps, len(steps), done_steps + 1)
 
-        active_names = list(active_agents.keys())
-        logger.info("=== FedAvg: %d rounds across %s ===", args.fedavg_rounds, active_names)
-        for round_num in range(1, args.fedavg_rounds + 1):
+    def save_state(done):
+        torch.save({"done_steps": done, "shared_state": shared_state,
+                    "history": history, "plan": [list(s) for s in steps],
+                    "seed": args.seed, "city_order": args.city_order,
+                    "phase_relational": args.phase_relational}, state_path)
+
+    def record(label, result):
+        history.append({"step": len(history) + 1, "label": label,
+                        "mean_reward": result["mean_reward"],
+                        "std_reward": result["std_reward"]})
+
+    if done_steps == 0:
+        eval_holdout("Stage 0 (random init, before any training)",
+                     DQNAgent(**agent_kwargs).state_dict())
+
+    # Rebuild the active-agent pool. On a fresh run this fills in as cities are
+    # phased in; on a resume it is reconstructed from the step plan, with each
+    # agent loaded from the shared weights (replay/optimizer state is gone --
+    # see the resume note above).
+    active_agents = {}
+
+    def ensure_agent(city_name):
+        if city_name not in active_agents:
+            ag = DQNAgent(**agent_kwargs)
+            if shared_state is not None:
+                ag.load_state_dict(shared_state)
+            active_agents[city_name] = ag
+        return active_agents[city_name]
+
+    if done_steps:
+        for kind, name, _ in steps[:done_steps]:
+            if kind in ("warmup", "focus"):
+                ensure_agent(name)
+        logger.info("Resumed active pool: %s", list(active_agents))
+
+    cfg_of = {n: c for n, c in ordered_cities}
+
+    for idx, (kind, name, round_num) in enumerate(steps, start=1):
+        if idx <= done_steps:
+            continue
+
+        if kind == "warmup":
+            logger.info("=== Warm-up: solo training on %s (simplest, %d episodes) ===",
+                        name, args.warmup_episodes)
+            agent = ensure_agent(name)
+            agent.train(get_env(name, cfg_of[name]), episodes=args.warmup_episodes,
+                        log_loss_every_steps=args.log_loss_every_steps)
+            shared_state = agent.state_dict()
+            res = eval_holdout(f"After warm-up on {name}", shared_state)
+
+        elif kind == "focus":
+            logger.info("=== Focus: fine-tuning shared weights on %s alone (%d episodes) ===",
+                        name, args.focus_episodes)
+            focus_agent = DQNAgent(**agent_kwargs)
+            focus_agent.load_state_dict(shared_state)
+            focus_agent.train(get_env(name, cfg_of[name]), episodes=args.focus_episodes,
+                              log_loss_every_steps=args.log_loss_every_steps)
+            shared_state = focus_agent.state_dict()
+            res = eval_holdout(f"After focus on {name}", shared_state)
+            active_agents[name] = focus_agent
+
+        else:  # fedavg
+            active_names = list(active_agents.keys())
+            if round_num == 1:
+                logger.info("=== FedAvg: %d rounds across %s ===",
+                            args.fedavg_rounds, active_names)
             state_dicts, base_weights, action_counts = [], [], []
             for city_name, city_agent in active_agents.items():
                 city_agent.start_round(shared_state)
-                city_cfg = next(c for n, c in ordered_cities if n == city_name)
                 sd, n_samples, _, ac = city_agent.train(
-                    get_env(city_name, city_cfg), episodes=args.local_episodes,
+                    get_env(city_name, cfg_of[city_name]), episodes=args.local_episodes,
                     log_loss_every_steps=args.log_loss_every_steps,
                 )
                 state_dicts.append(sd)
@@ -246,7 +334,12 @@ def main():
                 use_masked_head=True, head_weight_key=head_weight_key, head_bias_key=head_bias_key,
                 previous_global_state=shared_state,
             )
-            eval_holdout(f"FedAvg round {round_num}/{args.fedavg_rounds} with {active_names}", shared_state)
+            res = eval_holdout(
+                f"FedAvg round {round_num}/{args.fedavg_rounds} with {active_names}",
+                shared_state)
+
+        record(f"{kind}:{name}:{round_num}", res)
+        save_state(idx)
 
     for env in envs.values():
         env.close()
