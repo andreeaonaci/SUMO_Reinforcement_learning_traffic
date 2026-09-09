@@ -7350,6 +7350,77 @@ explicitly and PCFT now inherits the same limitation. **A resumed run is not bit
 uninterrupted one**, so interrupting arms unevenly introduces a small confound. Prefer letting a
 seed finish, and record which runs were resumed.
 
+### 102c. STATE AT SHUTDOWN, 2026-09-09 20:05 -- how to resume the 6-seed batch
+
+Machine shut down by user request mid-batch. **Everything is checkpointed; nothing needs
+re-running from scratch.** All processes stopped with SIGTERM, `spawn_main` workers cleaned up
+(no orphans left holding RAM -- the failure mode noted in the 2026-08-31 entry), no stray SUMO.
+
+**ONE COMMAND TO RESUME EVERYTHING:**
+
+```bash
+SEEDS="17 21 25" bash analyse/run_pcft_phase6.sh
+```
+
+It skips what is complete, resumes what is partial, and starts what has not begun. Seeds 3/7/11
+are pre-registered as complete and will not re-run.
+
+**Exact state (verified after shutdown, not assumed):**
+
+| job | state | resumes from |
+|---|---|---|
+| `pcftC` s3,s7,s11 | complete (pre-checkpoint code) | logs in `results/pcft_phase/` |
+| `pcftR` s3,s7,s11 | complete (pre-checkpoint code) | logs in `results/pcft_phase/` |
+| `fedavg` s3,s7,s11,s17 | complete, 8/8 rounds | `.rundir` markers -> skipped |
+| `pcftC` s17 | **complete, 9/9 steps** | -- |
+| `pcftR` s17 | **complete, 9/9 steps** | -- |
+| `pcftC` s21 | partial, **5/9 steps** | `results/pcft_runs/complexity_s21_phase/pcft_state.pt` |
+| `pcftR` s21 | partial, **4/9 steps** | `results/pcft_runs/reverse_s21_phase/pcft_state.pt` |
+| `fedavg` s21 | partial, **3/8 rounds** | `results/run_2026_09_09-19_28_17_211983` (marker written manually at shutdown -- the driver only writes it on completion, so an in-flight run would otherwise have restarted) |
+| all of seed 25 | not started | -- |
+
+**Runs that will have been resumed rather than run straight through: `pcftC` s21, `pcftR` s21,
+`fedavg` s21.** Per §102b neither resume implementation restores replay buffers, optimizer momentum
+or epsilon counters, so those three are not bit-identical to uninterrupted runs. **This must be
+disclosed when the 6-seed result is written up**, and if the s21 numbers end up looking like
+outliers, that is a candidate explanation to check before treating them as signal.
+
+### Interim reading at 4 complete seeds (3/7/11/17) -- NOT the final result
+
+| arm | s3 | s7 | s11 | s17 | mean best | mean final |
+|---|---:|---:|---:|---:|---:|---:|
+| plain FedAvg | -0.096 | -0.060 | -0.082 | -0.112 | **-0.088** | **-0.115** |
+| PCFT complexity | -0.220 | -0.170 | -4.600 | -6.630 | -2.905 | -3.702 |
+| PCFT reverse | -0.370 | -0.170 | -0.200 | -0.152 | -0.223 | -0.450 |
+
+(best-round values; finals: FedAvg -0.118/-0.080/-0.104/-0.156, complexity
+-0.390/-0.170/-5.980/-8.270, reverse -0.870/-0.170/-0.270/-0.490.)
+
+**The direction from the 3-seed screen is holding and strengthening**: plain FedAvg beats both PCFT
+arms **4/4 seeds** on both measures, and reverse order beats complexity order on 3 of 4. Seed 17's
+complexity run is the second catastrophic one (its per-step trace starts at -6887 and never fully
+recovers, ending at -8.27, while its reverse counterpart runs -2.27 -> -0.49), so seed 11 is no
+longer a lone outlier -- which weakens the "one seed carries it" caveat from the 3-seed screen but
+does not remove the need for the full 6.
+
+**Corrected from the 3-seed screen writeup above:** `fedavg` s11 was read at 7/8 rounds there
+(final -0.090); it completed at 8/8 with final **-0.104** and best -0.082. Best-round is unchanged,
+final-round mean shifts marginally. No conclusion changes.
+
+### What remains, in priority order
+
+1. **Finish the 6-seed batch** (command above). Then `/seedcheck`-style |diff|/SE on
+   `fedavg` vs `pcftC` (the floor-effect test) and `pcftC` vs `pcftR` (the curriculum test), and
+   write the result into §102 replacing the 3-seed screen as the headline.
+2. **The paper's core needs no new compute** (§101 positioning): §95b/§98's control, the §73-§95
+   floor-effect reinterpretation -- which §102 now supports with direct evidence rather than
+   inference -- and the five evaluation artifacts (§25, §95b, §99, §100b, §101b).
+3. **Optional, supporting only:** finish the FRAP/MPLight port (§101). Config extraction,
+   validation and tooling are done and committed; the FRAP module, movement-demand extractor and
+   `--frap_head` plumbing are not written. It would convert §101's "we need no per-intersection
+   configuration" from a capability claim into a parity claim.
+4. **Do NOT chase** a performance comparison against TransferLight (§101).
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit

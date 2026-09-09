@@ -196,7 +196,80 @@ which had gone stale):
   implemented and tested* FedProx proximal term, `DQNAgent.mu` — see next bullet — which is real
   and unaffected by this deletion.
 
-## RESUME HERE (as of 2026-09-09 — check this is still current before trusting it)
+## RESUME HERE (as of 2026-09-09 20:05 — check this is still current before trusting it)
+
+### FIRST: there is a half-finished batch. One command restarts it.
+
+```bash
+SEEDS="17 21 25" bash analyse/run_pcft_phase6.sh
+```
+
+Machine was shut down mid-batch on 2026-09-09. **Everything is checkpointed — nothing needs
+re-running from scratch.** The script skips what is complete, resumes what is partial, starts what
+has not begun. Full state table and caveats: `fidings/divergence_investigation.md` §102c.
+Complete: `fedavg` seeds 3/7/11/17, `pcftC`/`pcftR` seeds 3/7/11/17. Partial: seed 21 (`pcftC` 5/9
+steps, `pcftR` 4/9, `fedavg` 3/8 rounds). Not started: seed 25. Verified at shutdown: no orphan
+`spawn_main` workers, no stray SUMO, RAM released.
+
+### What that batch is testing, and why it matters
+
+**§102 — does PCFT still help once the action readout is fixed?** §87 confirmed PCFT at 6 seeds on
+the INDEXED head. On the phase-relational head it **reverses**: at 4 complete seeds plain FedAvg
+beats both PCFT arms 4/4 on both measures (best-round means: FedAvg **-0.088**, PCFT-complexity
+-2.905, PCFT-reverse -0.223), and the curriculum itself is a null with REVERSE order nominally
+ahead. That is **direct evidence for the floor-effect claim below** rather than an inference — the
+one intervention in the §73-§95 corpus that cleared the bar stops helping once the representation
+is fixed. Not final: 4 of 6 seeds, and seed 21's three runs will be resumed rather than run
+straight through (resume restores weights but not replay buffers/optimizer/epsilon — §102b).
+
+### Everything else from 2026-09-09, in one place
+
+- **§100 / §100b** — phase-relational CONFIRMED at 6 seeds on the fully RESCO-exact roster
+  (|diff|/SE 23.63/30.93/53.82, 6/6 seeds). **But in-distribution it does NOT beat `max_pressure`**:
+  throughput-corrected it ties on Cologne (21.6 vs 22.4 delay) and loses on Ingolstadt (35.6 vs
+  26.6). The raw Cologne mean of 21.2 is a survivorship artifact — `eval_paper_metrics.py` computes
+  delay over ARRIVED vehicles only. **Never quote trip time or delay from that script without
+  `arrived` beside it.**
+- **§101 — prior-art review. Read before writing anything.** The phase-invariant head, per-phase
+  pressure, any-number-of-phases, zero-shot cross-topology transfer, federated TSC and clustered
+  aggregation are ALL anticipated (FRAP'19, MPLight'20, AttendLight'20, MuJAM'22, TransferLight'24,
+  HFRL'25). **What survives: MPLight/FRAP cannot be applied to an unseen intersection until a human
+  authors its `phase_pairs` and `pair_to_act_map`** (RESCO's own docs; cologne3's is three
+  hand-written dicts). Ours derives that automatically. PCFT's skeleton is ICCV 2023's "Client
+  Curriculum". **Positioning decision: write the mechanism + evaluation-artifacts paper, not a
+  performance paper. Do not chase TransferLight.**
+- **§101b — a FOURTH RESCO mismatch.** Our vendored `ingolstadt7` is **missing a green phase** RESCO
+  has (6 phases/3 green vs 7/4) at one of its seven intersections. Internal results unaffected (all
+  controllers share the net); **external Ingolstadt comparisons are affected**, including §100b's
+  Ingolstadt row where we lose. arterial4x4 and grid4x4 are identical to RESCO's; cologne3 and
+  ingolstadt7 also have 5 junctions renamed by a netedit re-save (cosmetic, auto-resolved).
+- **§102b — resume support.** `federated_training` already had `--resume`. **PCFT had none and no
+  checkpointing at all**; it now checkpoints after each of its 9 steps and refuses to resume into a
+  differing step plan. Both verified by actually killing runs. Neither restores replay buffers,
+  optimizer momentum or epsilon counters, so **a resumed run is not bit-identical** — disclose which
+  runs were resumed.
+
+### The claim ledger (what can and cannot be said) — §101, §102
+
+**Can claim:** the action representation is the binding constraint (§98's control: indexed head
+still gridlocks at -9028.88 with every usable row fully trained, vs -9296.84 with dead rows);
+phase-relational beats `max_pressure` zero-shot, 6 seeds x 4 configurations; ~20 prior
+interventions were floor effects (now supported by §102's direct evidence); five evaluation
+artifacts; few-seed screens are unreliable here. **Cannot claim:** better than SOTA (no learned
+baseline run); novel architecture; novel zero-shot transfer; novel federated TSC; PCFT as a
+contribution; in-distribution competitiveness.
+
+### Optional, supporting only
+
+The FRAP/MPLight port (§101) is half-built: config extraction, signal re-identification, action
+alignment and validation are **done and committed** (`configs/resco_frap/phase_pairs.json`
+validates clean on all four cities). The FRAP module, movement-demand extractor and `--frap_head`
+plumbing are **not written**. It would convert "we need no per-intersection configuration" from a
+capability claim into a parity claim.
+
+---
+
+## SUPERSEDED (kept for detail) — RESUME HERE as of 2026-09-09 (earlier same day)
 
 **READ THIS BLOCK ONLY. Everything below it, including the 2026-09-07 block, is superseded on
 framing** — those results are still factually correct as measured, but they were all measured on an

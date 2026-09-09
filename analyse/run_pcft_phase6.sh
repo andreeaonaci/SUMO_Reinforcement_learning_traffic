@@ -65,7 +65,13 @@ run_pcft() {   # order, seed
 }
 
 run_fedavg() {   # seed
-  local seed=$1 tag="fedavg_s$1" marker="$RUNS/fedavg_s${seed}.rundir" resume=""
+  # NB: bash expands every word of a `local` before assigning any of them, so
+  # these must be separate statements -- a single `local a=$1 b=$a` breaks under
+  # `set -u`.
+  local seed=$1
+  local tag="fedavg_s${seed}"
+  local marker="$RUNS/fedavg_s${seed}.rundir"
+  local resume=""
   if [ -f "$marker" ]; then
     local rd; rd=$(cat "$marker")
     local n; n=$(python - "$rd" "$FED_ROUNDS" <<'PY'
