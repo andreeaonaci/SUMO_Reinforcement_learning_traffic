@@ -6658,6 +6658,29 @@ experiment. **Closes the second of §96's three caveats** (the first, holdout le
 verification at the time). The third -- whether this is a transferable representation or a repaired
 defect -- is what the dead-rows control tests.
 
+### §97 UPDATE, 2026-09-09: CONFIRMED at 6 seeds, and it got STRONGER, not weaker
+
+The escalation this section called for was run (seeds 17/21/25 added to 3/7/11, same
+`environments_dense` roster, same 5-round protocol, matched arms in
+`results/congestion_batch.log` + `results/congestion_ext_batch.log`).
+
+| measure | 3-seed \|diff\|/SE | **6-seed \|diff\|/SE** | drop-1 floor (6) |
+|---|---:|---:|---:|
+| best-ever round | 48.97 | **46.31** | 38.62 |
+| final round | 102.54 | **50.59** | 42.27 |
+| mean | 61.31 | **64.80** | 54.38 |
+
+Phase-relational **-0.32** vs. indexed **-17952.96** (best-round means). **6/6 seeds favour
+phase-relational on all three measures**; per-seed best-round -0.27, -0.28, -0.28, -0.32, -0.34,
+-0.40 — every one ahead of `max_pressure`'s -0.640. `is_true_holdout=TRUE` on all 12 runs, and the
+argparse diff between arms is a single entry (`phase_relational: False -> True`), so the comparison
+is unconfounded.
+
+**Verdict: CONFIRMED, 6 seeds.** Unlike CQL (2.35 -> 1.05), TC-FedAvg and `n_attn_layers` — all of
+which looked clean at 3 seeds and evaporated at 6 — this one held. The `final` statistic halved
+(102.54 -> 50.59) simply because three more seeds widened the indexed arm's spread; the *effect
+size* did not move, and the two measures that matter most for this document's convention both rose.
+
 ## 98. THE DEAD-ROWS CONTROL RESOLVES TO BRANCH A: the indexed head fails just as badly WITHOUT
     untrained rows, so the defect was not the cause -- the action representation is
 
@@ -6698,8 +6721,31 @@ PCFT's confirmed-but-modest §87 result is the first candidate.
 
 **Three holdouts now tested, three topologies, three demand levels, phase-relational beating
 `max_pressure` on every one:** grid4x4 8-phase light (§96, 6 seeds), grid4x4 8-phase 3x demand
-(§97, 3 seeds), 3x3Grid2lanes 4-phase (§98, 3 seeds). **Still 3 seeds on §97/§98 -- both are
-screens and should be escalated to 6.**
+(§97, 3 seeds), 3x3Grid2lanes 4-phase (§98, 3 seeds). ~~**Still 3 seeds on §97/§98 -- both are
+screens and should be escalated to 6.**~~ **DONE 2026-09-09: both escalated and both CONFIRMED at
+6 seeds -- see the §97 and §98 UPDATE blocks above. All three holdouts are now 6-seed confirmed.**
+
+### §98 UPDATE, 2026-09-09: CONFIRMED at 6 seeds -- the central result survives escalation
+
+Seeds 17/21/25 added to 3/7/11 on `environments_ctrl_norows`, same 5-round protocol, matched arms
+(`results/deadrows_control_batch.log` + `results/control_ext_batch.log`).
+
+| measure | 3-seed \|diff\|/SE | **6-seed \|diff\|/SE** | drop-1 floor (6) |
+|---|---:|---:|---:|
+| best-ever round | 20.88 | **25.79** | 21.47 |
+| final round | 43.25 | **24.29** | 20.25 |
+| mean | 60.08 | **96.67** | 81.85 |
+
+Phase-relational **-1.41** vs. indexed **-9028.88** (best-round means), 6/6 seeds on every measure.
+Per-seed best-round: -1.26, -1.30, -1.39, -1.43, -1.46, -1.61 — all six ahead of `max_pressure`'s
+-2.225. **The indexed arm's six-seed best-round mean, -9028.88, is still statistically
+indistinguishable from the -9296.84 it scored WITH dead rows on grid4x4** — which is the whole
+point of this control, now at 6-seed rigor rather than 3.
+
+**Verdict: CONFIRMED, 6 seeds.** Branch A stands: the untrained-row defect was not the cause, the
+action representation is. The consequence stated above for §73-§95 — that ~20 interventions were
+evaluated on a readout that cannot express a transferable policy — now rests on a confirmed result
+rather than a screen.
 
 ## 99. THIS PROJECT HAS NEVER RUN RESCO'S SCENARIO CONFIGURATION -- three mismatches found, all
     fixed, and §59's published-number comparison is retracted
@@ -6774,6 +6820,130 @@ project's `wait` reads 1.49s on cologne3 against IDQN's 8.5 but 293.6s on ingols
 -- inconsistent in both directions, so `system_mean_waiting_time` is not RESCO's "Avg. Wait".
 Queue runs ~3x high, suggesting a different normaliser. Do not put wait or queue in a table
 alongside RESCO's.
+
+### §99 UPDATE, 2026-09-09: the `environments_y3` retrain is in -- CONFIRMED at 6 seeds
+
+The retraining this section launched (phase-relational vs. indexed at `yellow_time=3`, the standard
+3-city roster) was extended from 3 seeds to 6 (3/7/11/17/21/25;
+`results/y3_retrain_batch.log` + `results/y3_ext_batch.log`).
+
+| measure | **6-seed \|diff\|/SE** | drop-1 floor |
+|---|---:|---:|
+| best-ever round | **47.23** | 39.37 |
+| final round | **39.34** | 32.77 |
+| mean | **57.49** | 48.47 |
+
+Phase-relational **-0.16** vs. indexed **-9411.88** (best-round means), **6/6 seeds** on every
+measure. Per-seed best-round: -0.12, -0.12, -0.14, -0.18, -0.19, -0.21 — a tighter spread than at
+`yellow_time=2`, not a looser one. `is_true_holdout=TRUE` on all 12 runs; single-entry config diff.
+
+**Verdict: CONFIRMED, 6 seeds. §96's holdout result was not an artifact of a permissive signal
+timing.** Halving the usable green per phase change (3s -> 2s at a 5s action interval) does not
+touch the phase-relational advantage. This matters more than a routine escalation: §99 established
+that this project had *always* run with 50% more green than the benchmark it quoted, so every
+result in this document carried an open question about whether it depended on that slack. For the
+headline result, it does not.
+
+## 100. The RESCO-exact FULL roster (`environments_rescofull`): phase-relational CONFIRMED at
+    6 seeds on the one configuration this project had never actually run
+
+**2026-09-09.** §99's `environments_y3` fixed only *one* of the three mismatches it found — it set
+`yellow_time=3` on the standard roster but left `city_4`/`city_6` on their shifted route files and
+wrong time windows. `environments_rescofull` fixes all three, for all three training cities at once,
+and this is the 6-seed phase-relational vs. indexed comparison on it.
+
+**Why this roster is separate from `environments_y3`.** §99's table lists three independent
+mismatches: route file, evaluation window, and yellow length. `environments_y3` addressed the third.
+Until the first two were also fixed, the Cologne/Ingolstadt *training* data was still a different
+traffic period from the one RESCO publishes numbers for — so no in-distribution comparison against
+published work was possible, regardless of signal timing. That, not the holdout result, was the
+motivation for building this roster.
+
+**Implementation** (`environments_rescofull/`, added in commit `a5ff771`, four `config.yaml` files,
+no code changes):
+
+| city | net | route | window | yellow |
+|---|---|---|---|---|
+| `city_1` | arterial4x4 | `arterial4x4_1.rou.xml` | 0-3600 | 3 |
+| `city_4` | cologne3 | `cologne3.rou.xml` (RESCO's, not `_shifted`) | 25200-28800 (07:00-08:00) | 3 |
+| `city_6` | ingolstadt7 | `ingolstadt7.rou.xml` (RESCO's, not `_shifted`) | 57600-61200 (16:00-17:00) | 3 |
+| `city_5_holdout` | grid4x4 | `grid4x4_1.rou.xml` | 0-3600 | 3 |
+
+arterial4x4 and grid4x4 were already RESCO-exact (verified in §99 against RESCO's repo
+`config/config.yaml`, not merely against the vendored `.sumocfg`); only cologne3 and ingolstadt7
+changed. No new code paths — this reuses the ordinary `--parallel` pipeline, so the result is
+directly comparable to every other roster in this document.
+
+**Verification before compute.** Smoke-tested clean (`results/rescofull_smoke.log`).
+`--pad_to_true_holdout` widened `action_dim` 5 -> 8 as expected, and all 12 runs report
+`is_true_holdout=TRUE` against the real `city_5_holdout` — **not** a §25-style silent fallback onto
+a training city. All 12 runs exited 0.
+
+**Result.** 6 seeds per arm (3/7/11/17/21/25), 5 rounds, `--local_episodes 2`, `lr 3e-4`, matched
+arms in the same batch (`results/rescofull_batch.log`):
+
+| seed | phase-relational (best) | indexed (best) |
+|---:|---:|---:|
+| 3 | -0.16 | -8054.75 |
+| 7 | -0.10 | -9463.98 |
+| 11 | -0.12 | -9075.07 |
+| 17 | -0.10 | -9516.78 |
+| 21 | -0.12 | -7899.06 |
+| 25 | -0.16 | -7144.68 |
+
+| measure | phase-relational | indexed | \|diff\|/SE (unpaired, pstdev) | sample-std | drop-1 range | seeds favouring |
+|---|---:|---:|---:|---:|---:|---:|
+| best-ever round | **-0.13** | -8525.72 | **23.63** | 21.57 | 20.24 .. 28.42 | 6/6 |
+| final round | **-0.16** | -8965.09 | **30.93** | 28.24 | 25.99 .. 35.62 | 6/6 |
+| mean | **-0.18** | -9251.26 | **53.82** | 49.13 | 48.31 .. 52.73 | 6/6 |
+
+Config diff between arms is a single entry (`phase_relational: False -> True`); `--rounds` matches,
+so there is no `compute_eps_decay` confound (the §69 trap).
+
+**Verdict: CONFIRMED, 6 seeds.** Not convention-sensitive (clears the bar by an order of magnitude
+on both the pstdev and sample-std estimators), not carried by one seed (drop-1 floor 20.24), no
+direction split.
+
+**This is the fourth 6-seed confirmation of the phase-relational head, on the fourth distinct
+configuration:** grid4x4 8-phase light demand (§96), grid4x4 at 3x demand (§97), 3x3Grid2lanes
+4-phase with no untrained rows (§98), RESCO-exact timing on the standard roster (§99), and now the
+fully RESCO-exact roster here. The indexed head gridlocks in every one; phase-relational does not.
+
+**Caveats not retracted by the confirmation:**
+- **Budget.** 5 rounds, matching §96-§99's protocol. The effect is categorical (four orders of
+  magnitude) rather than the few-percent deltas that budget usually decides, so this is not a
+  plausible explanation for the *direction* — but nothing here establishes that phase-relational is
+  near its own ceiling, and the round-to-round volatility documented throughout §32-§53 has not been
+  re-measured on this roster.
+- **The reward numbers above are this project's internal `diff-waiting-time` unit and are NOT
+  comparable to any published figure** (§99's metric caveat). A confirmed holdout win is an internal
+  relative result. The external comparison requires the literature metrics.
+- **The in-distribution literature-metric evaluation — the actual reason this roster was built — is
+  not in this section.** It was launched at 04:06 on 2026-09-09, the host restarted at ~04:13, and
+  the log (`results/rescofull_eval_city_4_resco.log`) contains only SUMO stdout, no result rows. It
+  was relaunched 07:03 on 2026-09-09 over all 12 final-round checkpoints plus `max_pressure`/
+  `fixed_time`, on `city_4` and `city_6`, 5 episodes each -> `results/rf2_*.log`. **Pending.**
+- **Checkpoint choice.** The relaunched evaluation uses `global_round_005.pth` (the final round),
+  not `global_fed.pth` — these are different files, and picking the latter would have been a
+  hindsight selection of the kind §69/§70 warn about.
+
+**What this closes:** every one of §99's three mismatches is now fixed in a roster that has actually
+been trained on, and the headline result survives all of them. **What it opens:** the in-distribution
+Cologne/Ingolstadt comparison against RESCO's published Avg. Delay / Avg. Trip Time — the first
+like-for-like external comparison this project will have, and the replacement for the §59 claim §99
+retracted.
+
+### Process note, recorded because it nearly cost a day of compute
+
+Commit `a5ff771`'s message described the §97 and §99 6-seed confirmations in detail, but the commit
+touched **only** the four `environments_rescofull/config.yaml` files — none of those numbers reached
+`fidings/divergence_investigation.md`, where this document's own rules say results live. A cold
+session reading the fidings log would have seen "3 seeds, escalate to 6" on §97/§98 and could
+easily have re-run batches that had already finished. All four confirmations in this section
+(§97, §98, §99, §100) were re-derived from the raw batch logs with `/seedcheck` rather than copied
+from the commit message; §99's numbers reproduced it exactly (47.23 / 39.34 / 57.49), which is what
+established the message was accurate and not the reverse. **A result is not recorded until it is in
+this file.**
 
 ## Open questions / next steps
 

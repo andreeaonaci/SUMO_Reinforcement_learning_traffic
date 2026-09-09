@@ -15,6 +15,67 @@ investigation log wins.
 
 ---
 
+## A0. THE HEADLINE RESULT (2026-09-08/09) — `--phase_relational` beats `max_pressure` zero-shot
+    on an unseen topology, confirmed at 6 seeds on four configurations
+
+**This supersedes sections A-F as the paper's central claim.** Those sections remain valid as
+measured, but every one of them was measured on the broken action readout this section replaces —
+see "What this does to sections A-F" below.
+
+**The mechanism.** The shared Q-head indexed actions positionally: row k = phase k. Across cities,
+row k is trained on contradictory targets (index 1 is a protected left on arterial4x4/grid4x4, a
+through movement on ingolstadt7/cologne3), so even a fully-trained row carries no transferable
+meaning. `--phase_relational` replaces positional indexing with a phase-relational readout.
+
+**The result.** Zero-shot on a genuinely unseen holdout topology, phase-relational beats
+`max_pressure` — the first time in this project's history anything has. Confirmed at 6 seeds,
+6/6 seeds favouring it on every measure, on four distinct configurations:
+
+| configuration | section | phase-relational | indexed head | \|diff\|/SE best/final/mean | drop-1 floor |
+|---|---|---:|---:|---|---:|
+| grid4x4, 8-phase, light demand | §96 | -0.16 | -9296.84 | 6-seed confirmed | — |
+| grid4x4, 3x demand | §97 | -0.32 | -17952.96 | 46.31 / 50.59 / 64.80 | 38.62 |
+| 3x3Grid2lanes, 4-phase, no untrained rows | §98 | -1.41 | -9028.88 | 25.79 / 24.29 / 96.67 | 20.25 |
+| RESCO-exact signal timing, standard roster | §99 | -0.16 | -9411.88 | 47.23 / 39.34 / 57.49 | 32.77 |
+| fully RESCO-exact roster | §100 | -0.13 | -8525.72 | 23.63 / 30.93 / 53.82 | 20.24 |
+
+Against the rule-based controllers, on the holdout: §97 (3x demand) phase-relational -0.32 vs.
+`max_pressure` -0.640 and `fixed_time` -170.51, at matched throughput (99% of 4419 trips) and 4.5x
+lower waiting; §98 phase-relational -1.38 vs. `max_pressure` -2.225, 2.4x lower waiting, matched
+throughput.
+
+**The control that makes this a representation claim, not a bug fix (§98).** §95b had found that on
+unseen-topology rosters 37.5% of the holdout's action space is scored by Q-head rows no training
+city ever exercised. §98 eliminated that defect — a holdout whose phase count does not exceed the
+training maximum, so every usable row is fully trained — and **the indexed head still gridlocked
+(-9028.88), statistically indistinguishable from its score with dead rows (-9296.84).** The
+untrained-row defect was not the cause.
+
+**What this does to sections A-F.** The ~20 interventions of §73-§95 — algorithm swaps, capacity,
+aggregation strategies, curricula, retention levers — were all evaluated on a readout that cannot
+express a transferable policy however it is optimised. **Their null results are floor effects, not
+evidence about those mechanisms.** Sections C, E and F in particular ("well-verified negative
+results") should be reported as *negative under the indexed readout*, with the re-run on the
+phase-relational head flagged as open. Section A (sequential curriculum) and section B (potential-
+based reward shaping) remain confirmed as measured, same qualification.
+
+**Measurement correction that must ship with any external comparison (§99).** This project had
+never run RESCO's scenario configuration: wrong route files (`*_shifted`), wrong evaluation windows
+(cologne3 at 06:31-07:31 rather than RESCO's 07:00-08:00), and `yellow_time=2` against RESCO's 3 —
+which at a 5s action interval gave every controller in every experiment **50% more usable green per
+phase change than the benchmark being quoted**. **§59's "~4.4x behind published IDQN" claim is
+retracted.** All *relative* results are unaffected (both arms always shared the configuration);
+only absolute numbers quoted against external work were invalid.
+
+**Not yet available, and required before any table sits next to RESCO's:** the in-distribution
+Cologne/Ingolstadt comparison in the literature's own metrics. The reward numbers above are this
+project's internal `diff-waiting-time` unit. Only **Avg. Delay** and **Avg. Trip Time** reconcile
+with RESCO — this project's `wait` and `queue` do not, in both directions, so neither may appear in
+a table alongside RESCO's. That evaluation was running as of 2026-09-09 (`results/rf2_*.log`) and
+is **pending**.
+
+---
+
 ## Novelty / contribution framing
 
 Four distinct layers of contribution, useful for structuring a paper's framing (introduction /

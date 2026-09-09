@@ -196,7 +196,69 @@ which had gone stale):
   implemented and tested* FedProx proximal term, `DQNAgent.mu` — see next bullet — which is real
   and unaffected by this deletion.
 
-## RESUME HERE (as of 2026-09-07 — check this is still current before trusting it)
+## RESUME HERE (as of 2026-09-09 — check this is still current before trusting it)
+
+**READ THIS BLOCK ONLY. Everything below it, including the 2026-09-07 block, is superseded on
+framing** — those results are still factually correct as measured, but they were all measured on an
+action readout now known to be the actual problem. Full detail:
+`fidings/divergence_investigation.md` §95-§100; compressed: `fidings/project_knowledge_summary.md`
+section 7; paper-facing: `fidings/paper_results_summary.md` section A0.
+
+**THE CROSS-TOPOLOGY GAP WAS THE ACTION REPRESENTATION, and it is now largely closed.** The shared
+Q-head indexed actions positionally (row k = phase k), so row k is trained on contradictory targets
+across cities — index 1 is a protected left on arterial4x4/grid4x4 and a through movement on
+ingolstadt7/cologne3. A fully-trained row therefore carries no transferable meaning.
+`--phase_relational` replaces positional indexing with a phase-relational readout, and **zero-shot
+on an unseen holdout topology it beats `max_pressure`** — the first time anything in this project
+has. **Confirmed at 6 seeds, 6/6 seeds on every measure, on four distinct configurations:**
+
+| configuration | § | phase-relational | indexed | \|diff\|/SE best/final/mean | drop-1 floor |
+|---|---|---:|---:|---|---:|
+| grid4x4 8-phase, light demand | 96 | -0.16 | -9296.84 | 6-seed confirmed | — |
+| grid4x4 at 3x demand | 97 | -0.32 | -17952.96 | 46.31 / 50.59 / 64.80 | 38.62 |
+| 3x3Grid2lanes 4-phase, no untrained rows | 98 | -1.41 | -9028.88 | 25.79 / 24.29 / 96.67 | 20.25 |
+| RESCO-exact timing, standard roster | 99 | -0.16 | -9411.88 | 47.23 / 39.34 / 57.49 | 32.77 |
+| fully RESCO-exact roster (`environments_rescofull`) | 100 | -0.13 | -8525.72 | 23.63 / 30.93 / 53.82 | 20.24 |
+
+**§98 is the control that makes this a representation finding rather than a bug fix.** §95b found
+that on unseen-topology rosters 37.5% of the holdout's action space is scored by Q-head rows no
+training city ever exercised. §98 removed that defect entirely (holdout phase count ≤ training
+maximum, so every usable row is fully trained) and **the indexed head still gridlocked at -9028.88,
+indistinguishable from the -9296.84 it scored WITH dead rows.** The defect was not the cause.
+
+**CONSEQUENCE FOR THE WHOLE PRIOR RECORD: the ~20 interventions of §73-§95 were evaluated on a
+readout that cannot express a transferable policy regardless of how it is optimised.** Their nulls
+are floor effects, not evidence that algorithm / capacity / aggregation / curriculum don't matter.
+Do not cite them as "X doesn't help" without the qualification "under the indexed readout."
+Re-running that corpus on the phase-relational head is open; PCFT (§87) is the first candidate.
+
+**§99 — a measurement error that invalidates external comparisons only.** This project had never run
+RESCO's scenario configuration: `*_shifted` route files, wrong evaluation windows (cologne3 at
+06:31-07:31 vs. RESCO's 07:00-08:00), and `yellow_time=2` against RESCO's 3, which at a 5s action
+interval gave every controller in every experiment here **50% more usable green per phase change
+than the benchmark being quoted**. **§59's "~4.4x behind published IDQN" claim is RETRACTED.** Every
+*relative* result is unaffected (both arms always shared the configuration). `environments_resco/`
+(RESCO-exact cologne3/ingolstadt7), `environments_y3/` (standard roster at yellow=3) and
+`environments_rescofull/` (all three training cities fully RESCO-exact) now exist;
+`diagnostics/eval_paper_metrics.py --city` does in-distribution evaluation in the literature's
+metrics. **Metric caveat: only Avg. Delay and Avg. Trip Time reconcile with RESCO — this project's
+`wait` and `queue` do NOT, in both directions. Never put wait or queue in a table beside RESCO's.**
+
+**RUNNING as of 2026-09-09 07:03 (relaunch after a host restart killed the first attempt at 04:13):**
+the in-distribution literature-metric evaluation of §100's 12 checkpoints on `city_4` (Cologne) and
+`city_6` (Ingolstadt), plus `max_pressure`/`fixed_time`, 5 episodes each → `results/rf2_*.log`,
+progress in `results/rf2_driver.log`. **This is the first like-for-like external comparison this
+project will have and the replacement for the retracted §59 claim.** Check `results/rf2_driver.log`
+for "RF2 EVAL ALL DONE" before reading; write it into §100, which currently marks it pending.
+
+**Process rule reinforced 2026-09-09 (§100's process note):** commit `a5ff771`'s message described
+the §97/§99 6-seed confirmations in full, but the commit touched only four config.yaml files — none
+of those numbers reached the fidings log, and a cold session would have re-run finished batches. **A
+result is not recorded until it is in `fidings/divergence_investigation.md`.**
+
+---
+
+## SUPERSEDED (kept for detail) — RESUME HERE as of 2026-09-07
 
 **SUPERSEDES the 2026-08-29 update below for anything about current experimental status** (that
 update's strategic/publishability verdict, further down, is still valid background — just stale on

@@ -1,4 +1,12 @@
-# Everything we know — master summary (as of 2026-09-05)
+# Everything we know — master summary (as of 2026-09-09)
+
+> **READ THIS FIRST — the framing below sections 1-6 is superseded.** Between 2026-09-08 and
+> 2026-09-09 (`divergence_investigation.md` §95-§100) the cross-topology gap was traced to the
+> **action representation** — the indexed Q-head — and a replacement (`--phase_relational`) now
+> beats `max_pressure` zero-shot on the unseen holdout, confirmed at 6 seeds on four separate
+> configurations. **Section 7 at the bottom of this file has it.** Sections 3-6's ~20 null results
+> were all measured on the broken readout and should be read as floor effects, not as evidence
+> that architecture/aggregation/curriculum don't matter.
 
 **Purpose of this document:** a single entry point for "what has this project actually found,"
 spanning the whole research arc, not just one session or one campaign. Other documents hold the
@@ -472,3 +480,52 @@ post-hoc attempt (self-anchoring) tried earlier this session, the confident-lock
 mechanism has now resisted every lever aimed at it directly, at every level of the stack tried so
 far — only fine-tuning on real target-city data (§66-70), which sidesteps the zero-shot requirement
 rather than fixing it, reliably helps. See `divergence_investigation.md` §92 for full numbers.
+
+---
+
+## 7. THE ACTION REPRESENTATION WAS THE PROBLEM (§95-§100, 2026-09-08/09) — supersedes the framing above
+
+**The finding.** The shared Q-head indexed actions by *position* (row k = phase k). Row k is
+therefore trained on contradictory targets across cities — index 1 is a protected left turn on
+arterial4x4/grid4x4 and a through movement on ingolstadt7/cologne3 — so a fully-trained row still
+encodes nothing transferable. `--phase_relational` replaces positional indexing with a
+phase-relational readout.
+
+**Result: phase-relational beats `max_pressure` zero-shot on an unseen holdout topology** — the
+first time anything in this project has done that. Confirmed at 6 seeds on four distinct
+configurations, 6/6 seeds every time:
+
+| config | section | phase-relational | indexed | \|diff\|/SE (best/final/mean) | drop-1 floor |
+|---|---|---:|---:|---|---:|
+| grid4x4, 8-phase, light demand | §96 | -0.16 | -9296.84 | 6-seed confirmed | — |
+| grid4x4 at 3x demand | §97 | -0.32 | -17952.96 | 46.31 / 50.59 / 64.80 | 38.62 |
+| 3x3Grid2lanes 4-phase, no untrained rows | §98 | -1.41 | -9028.88 | 25.79 / 24.29 / 96.67 | 20.25 |
+| RESCO-exact timing, standard roster | §99 | -0.16 | -9411.88 | 47.23 / 39.34 / 57.49 | 32.77 |
+| **fully RESCO-exact roster** | **§100** | **-0.13** | **-8525.72** | **23.63 / 30.93 / 53.82** | **20.24** |
+
+**§98 is the control that makes this a representation result rather than a bug fix.** §95b had
+found that on unseen-topology rosters, 37.5% of the holdout's action space is scored by Q-head rows
+never trained by any city. §98 removed that defect entirely — a holdout whose phase count does not
+exceed the training maximum, so every row it can use is fully trained — and **the indexed head
+still gridlocked, at -9028.88, indistinguishable from its score with dead rows.** The defect was not
+the cause. The representation is.
+
+**Consequence for sections 3-6 of this document.** The ~20 interventions of §73-§95 (algorithm
+swaps, capacity, aggregation strategies, curricula, retention levers) were all evaluated on a
+readout that cannot express a transferable policy regardless of how it is optimised. **Their null
+results are floor effects, not evidence about those mechanisms.** Re-running that corpus on the
+phase-relational head is open; PCFT (§87, confirmed but modest) is the first candidate.
+
+**§99: a measurement error found in the same stretch, worth carrying.** This project had never run
+RESCO's scenario configuration — wrong route files, wrong evaluation windows, and `yellow_time=2`
+against RESCO's 3, i.e. 50% more usable green per phase change than the benchmark it was being
+compared to. §59's "~4.4x behind published IDQN" claim is **retracted**. Every *relative* result in
+the document is unaffected (both arms always shared the configuration); only absolute numbers quoted
+against external work were invalid. `environments_rescofull/` (§100) fixes all three mismatches, and
+the headline result survives all of them.
+
+**Standing caveat: the reward numbers above are this project's internal `diff-waiting-time` unit and
+are not comparable to published figures.** Only Avg. Delay and Avg. Trip Time reconcile with RESCO;
+this project's `wait` and `queue` do not (§99's metric caveat). The in-distribution
+literature-metric comparison against RESCO's Cologne/Ingolstadt numbers — the first like-for-like
+external comparison this project will have — was running as of 2026-09-09 and is **pending**.
