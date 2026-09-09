@@ -7152,6 +7152,69 @@ extracted for all four scenarios, `lane_sets` present for every real signal. Sha
 11 pairs with the existing `action_mask` machinery selecting per city. Framing: **MPLight given
 oracle hand-authored configuration for the unseen holdout vs. this project's method given none.**
 
+### 101b. A FOURTH RESCO MISMATCH, found while validating the FRAP config: our vendored
+    `ingolstadt7` is MISSING A GREEN PHASE that RESCO's net has
+
+**2026-09-09.** §99 found three scenario-configuration mismatches (route file, evaluation window,
+`yellow_time`) and fixed them. It never checked the **net files themselves**. Validating RESCO's
+hand-authored signal config against our nets forced that check, and it found two more differences.
+`diagnostics/compare_nets.py` compares the things that actually affect an experiment (signalised
+junction ids, their green-phase counts, lane/edge counts) rather than md5, which proves nothing
+after a netconvert version bump.
+
+| scenario | lanes/edges | signals | verdict |
+|---|---|---|---|
+| arterial4x4 | 360/320 both | 16 both | **identical** |
+| grid4x4 (the holdout) | 1008/464 both | 16 both | **identical** |
+| cologne3 | 257/205 both | 3 both | 1 junction **renamed** (`GS_` prefix) |
+| ingolstadt7 | 505/226 both | 7 both | 4 junctions **renamed** (`gneJ*`), **and one green phase missing** |
+
+**(1) Renaming — cosmetic, and resolved.** Five junctions across cologne3 and ingolstadt7 carry
+different ids in our copies (a netedit re-save renames joined clusters). Topology is untouched:
+identical lane and edge counts, identical signal counts, and every lane id RESCO's `lane_sets`
+reference exists in our nets. `build_frap_config.py::remap_signal_ids` re-identifies them by the
+set of lanes each signal controls; all five resolved unambiguously.
+
+**(2) The missing green phase — NOT cosmetic.** At ingolstadt7's
+`cluster_306484187_..._306484190`, RESCO's net has **7 phases / 4 green**; ours has **6 phases /
+3 green**. The absent one is the 25s `rrrrrrGGGGrr`:
+
+```
+RESCO   15s rrrrrrrrGGGG [GREEN]   3s rrrrrrrrGGyy    25s rrrrrrGGGGrr [GREEN]  <-- absent here
+         5s rrrrGGGGGGrr [GREEN]   3s rrrrGGyyyyrr    36s GGGGGGrrrrrr [GREEN]   3s yyyyyyrrrrrr
+ours    15s rrrrrrrrGGGG [GREEN]   3s rrrrrrrrGGyy
+         5s rrrrGGGGGGrr [GREEN]   3s rrrrGGyyyyrr    36s GGGGGGrrrrrr [GREEN]   3s yyyyyyrrrrrr
+```
+
+**One of ingolstadt7's seven intersections has one fewer control action available here than in
+RESCO's benchmark.** Consequences:
+
+- **Internal results are unaffected.** Every controller in this project runs on the same net, so
+  the constraint is shared and all within-project comparisons (§96-§100 included) still hold.
+- **External Ingolstadt comparisons are affected**, and this is a live issue rather than a
+  hypothetical: §100b's in-distribution Ingolstadt result is exactly where phase-relational LOST to
+  `max_pressure` (35.6 vs 26.6 delay) and where it sits ~14% behind RESCO's published IDQN (31.19).
+  A missing phase at one of seven intersections is a plausible partial contributor and must be
+  disclosed alongside that number. **It does not explain the result away** — six of seven
+  intersections are unaffected — but §100b's Ingolstadt row should not be quoted against RESCO
+  without this caveat.
+- **It would have silently corrupted the FRAP arm.** RESCO's `pair_to_act_map` is written against
+  *their* action indices; our net's indices shift after the missing phase, so aligning by index or
+  truncating by count would have mis-mapped every later action at that signal.
+  `align_actions_by_phase_state()` matches phases by their **state string** instead, which is exact.
+  Caught before any compute, by `diagnostics/check_frap_config.py`.
+
+**Not yet decided:** whether to re-vendor ingolstadt7 from RESCO's net. That would make the
+external comparison clean but invalidates round-for-round continuity with every ingolstadt7 result
+in this document. Recommend leaving it and disclosing, since the internal comparisons are the ones
+this project's claims rest on.
+
+**New tooling, both cheap and reusable:** `diagnostics/compare_nets.py` (semantic net diff vs. a
+RESCO checkout), `diagnostics/build_frap_config.py` (extract RESCO's authored config, re-identify
+signals by controlled lanes, align actions by phase state), `diagnostics/check_frap_config.py`
+(validate ids, lane ids and action counts against our nets before spending compute).
+`configs/resco_frap/phase_pairs.json` now validates clean on all four cities.
+
 **Sources:** FRAP (CIKM'19) jhc.sjtu.edu.cn/~gjzheng/files/papers/cikm2019_frap/; AttendLight
 arXiv:2010.05772; MPLight AAAI'20 / RESCO `agents/action_value/mplight.py`; MuJAM arXiv:2208.00659;
 TransferLight arXiv:2412.09719; G2P arXiv:2503.20205; HFRL arXiv:2504.05553; Vahidian et al.
