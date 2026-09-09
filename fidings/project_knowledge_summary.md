@@ -526,6 +526,17 @@ the headline result survives all of them.
 
 **Standing caveat: the reward numbers above are this project's internal `diff-waiting-time` unit and
 are not comparable to published figures.** Only Avg. Delay and Avg. Trip Time reconcile with RESCO;
-this project's `wait` and `queue` do not (§99's metric caveat). The in-distribution
-literature-metric comparison against RESCO's Cologne/Ingolstadt numbers — the first like-for-like
-external comparison this project will have — was running as of 2026-09-09 and is **pending**.
+this project's `wait` and `queue` do not (§99's metric caveat).
+
+**IN-DISTRIBUTION RESULT (§100b, 2026-09-09) — the holdout margin does NOT reproduce
+in-distribution.** Corrected for throughput, phase-relational **ties** `max_pressure` on Cologne
+(21.6 vs 22.4 Avg. Delay, over the 3 of 6 checkpoints at >=97% throughput) and is **clearly behind**
+it on Ingolstadt (35.6 vs 26.6, with no throughput advantage to explain it away). The raw 6-
+checkpoint Cologne mean of 21.2 is a **survivorship artifact** — `eval_paper_metrics.py` computes
+delay and trip time over *arrived* vehicles only, and two phase-relational seeds stranded 12-38% of
+traffic — and must not be quoted. **Never report trip time or delay from that script without
+`arrived` beside it.** This does not touch §96-§100: those are zero-shot on an *unseen topology*, a
+different and harder claim. Two new facts: the phase-relational head is also much better
+in-distribution than the indexed head (Cologne 21.2 vs 54.3, Ingolstadt 35.6 vs 69.0), so the action
+representation was costing in-distribution performance too, not only transfer; and it remains
+unstable in-distribution, so the representation fix did not fix retention.

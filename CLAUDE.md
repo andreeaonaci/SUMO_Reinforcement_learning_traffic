@@ -244,12 +244,26 @@ than the benchmark being quoted**. **§59's "~4.4x behind published IDQN" claim 
 metrics. **Metric caveat: only Avg. Delay and Avg. Trip Time reconcile with RESCO — this project's
 `wait` and `queue` do NOT, in both directions. Never put wait or queue in a table beside RESCO's.**
 
-**RUNNING as of 2026-09-09 07:03 (relaunch after a host restart killed the first attempt at 04:13):**
-the in-distribution literature-metric evaluation of §100's 12 checkpoints on `city_4` (Cologne) and
-`city_6` (Ingolstadt), plus `max_pressure`/`fixed_time`, 5 episodes each → `results/rf2_*.log`,
-progress in `results/rf2_driver.log`. **This is the first like-for-like external comparison this
-project will have and the replacement for the retracted §59 claim.** Check `results/rf2_driver.log`
-for "RF2 EVAL ALL DONE" before reading; write it into §100, which currently marks it pending.
+**§100b — THE IN-DISTRIBUTION RESULT, and it is the necessary counterweight to the table above.**
+The literature-metric evaluation of §100's checkpoints on RESCO's own Cologne and Ingolstadt
+(`results/rf2_*.log`, done 10:22 on 2026-09-09) shows **the holdout margin does NOT reproduce
+in-distribution.** Corrected for throughput, phase-relational **ties** `max_pressure` on Cologne
+(Avg. Delay 21.6 vs 22.4) and is **clearly behind** on Ingolstadt (35.6 vs 26.6). The raw
+6-checkpoint Cologne mean of 21.2 is a **survivorship artifact** and must not be quoted:
+`diagnostics/eval_paper_metrics.py` computes delay and trip time over *arrived* vehicles only, and
+two seeds stranded 12-38% of traffic, so stranding flatters the metric. **RULE: never report trip
+time or delay from that script without `arrived` beside it.**
+
+This does not retract §96-§100 — those are **zero-shot on an unseen topology**, a different and
+harder claim, and both arms share the scenario so the confound cancels. Two new facts from §100b:
+(1) the phase-relational head is also much better *in-distribution* than the indexed head (Cologne
+21.2 vs 54.3, Ingolstadt 35.6 vs 69.0), so the action representation was costing in-distribution
+performance too, not only transfer — not predicted by §95-§98; (2) phase-relational is still
+unstable in-distribution (2 of 6 Cologne seeds strand traffic), so the representation fix did **not**
+fix the retention/lock-in problem of §32-§53.
+
+**The honest one-line framing: zero-shot cross-topology, this beats `max_pressure`; in-distribution,
+it does not.** Claim the first, not the second.
 
 **Process rule reinforced 2026-09-09 (§100's process note):** commit `a5ff771`'s message described
 the §97/§99 6-seed confirmations in full, but the commit touched only four config.yaml files — none

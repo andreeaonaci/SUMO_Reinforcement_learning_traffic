@@ -67,12 +67,34 @@ phase change than the benchmark being quoted**. **§59's "~4.4x behind published
 retracted.** All *relative* results are unaffected (both arms always shared the configuration);
 only absolute numbers quoted against external work were invalid.
 
-**Not yet available, and required before any table sits next to RESCO's:** the in-distribution
-Cologne/Ingolstadt comparison in the literature's own metrics. The reward numbers above are this
-project's internal `diff-waiting-time` unit. Only **Avg. Delay** and **Avg. Trip Time** reconcile
-with RESCO — this project's `wait` and `queue` do not, in both directions, so neither may appear in
-a table alongside RESCO's. That evaluation was running as of 2026-09-09 (`results/rf2_*.log`) and
-is **pending**.
+**Metric rule for any table:** the reward numbers above are this project's internal
+`diff-waiting-time` unit and are not publishable against external work. Only **Avg. Delay** and
+**Avg. Trip Time** reconcile with RESCO — this project's `wait` and `queue` do not, in both
+directions, so neither may appear in a table alongside RESCO's.
+
+**IN-DISTRIBUTION RESULT (§100b, 2026-09-09) — the holdout margin does NOT reproduce
+in-distribution.** Corrected for throughput, phase-relational **ties** `max_pressure` on Cologne
+(21.6 vs 22.4 Avg. Delay, over the 3 of 6 checkpoints at >=97% throughput) and is **clearly behind**
+it on Ingolstadt (35.6 vs 26.6, with no throughput advantage to explain it away). The raw 6-
+checkpoint Cologne mean of 21.2 is a **survivorship artifact** — `eval_paper_metrics.py` computes
+delay and trip time over *arrived* vehicles only, and two phase-relational seeds stranded 12-38% of
+traffic — and must not be quoted. **Never report trip time or delay from that script without
+`arrived` beside it.** This does not touch §96-§100: those are zero-shot on an *unseen topology*, a
+different and harder claim. Two new facts: the phase-relational head is also much better
+in-distribution than the indexed head (Cologne 21.2 vs 54.3, Ingolstadt 35.6 vs 69.0), so the action
+representation was costing in-distribution performance too, not only transfer; and it remains
+unstable in-distribution, so the representation fix did not fix retention.
+
+**Framing consequence for the paper.** The claim is *zero-shot cross-topology generalization*, not
+*state-of-the-art in-distribution control*. Say so explicitly: in-distribution this method is
+competitive with a `max_pressure` reference on one RESCO scenario and behind it on another, while
+zero-shot on an unseen topology it beats that same reference — which is the interesting result, and
+the one a reviewer should be pointed at. Claiming both would be contradicted by §100b's own table.
+
+**Prior art a reviewer will ask for and this project has NOT run:** AttendLight (NeurIPS 2020 —
+varying phase counts, unseen intersections, i.e. the closest published analogue of this claim),
+MPLight (AAAI 2020), FRAP (CIKM 2019). Beating `fixed_time` and `max_pressure` does not establish
+novelty against methods designed for this problem.
 
 ---
 

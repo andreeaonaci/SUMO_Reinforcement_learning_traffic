@@ -6918,11 +6918,8 @@ fully RESCO-exact roster here. The indexed head gridlocks in every one; phase-re
 - **The reward numbers above are this project's internal `diff-waiting-time` unit and are NOT
   comparable to any published figure** (§99's metric caveat). A confirmed holdout win is an internal
   relative result. The external comparison requires the literature metrics.
-- **The in-distribution literature-metric evaluation — the actual reason this roster was built — is
-  not in this section.** It was launched at 04:06 on 2026-09-09, the host restarted at ~04:13, and
-  the log (`results/rescofull_eval_city_4_resco.log`) contains only SUMO stdout, no result rows. It
-  was relaunched 07:03 on 2026-09-09 over all 12 final-round checkpoints plus `max_pressure`/
-  `fixed_time`, on `city_4` and `city_6`, 5 episodes each -> `results/rf2_*.log`. **Pending.**
+- **The in-distribution literature-metric evaluation is in §100b below, and it does NOT reproduce
+  the holdout margin.** Read it before quoting this section as evidence of absolute quality.
 - **Checkpoint choice.** The relaunched evaluation uses `global_round_005.pth` (the final round),
   not `global_fed.pth` — these are different files, and picking the latter would have been a
   hindsight selection of the kind §69/§70 warn about.
@@ -6932,6 +6929,100 @@ been trained on, and the headline result survives all of them. **What it opens:*
 Cologne/Ingolstadt comparison against RESCO's published Avg. Delay / Avg. Trip Time — the first
 like-for-like external comparison this project will have, and the replacement for the §59 claim §99
 retracted.
+
+### 100b. IN-DISTRIBUTION on RESCO's own Cologne and Ingolstadt: phase-relational does NOT beat
+    `max_pressure` — competitive on one scenario, clearly behind on the other
+
+**2026-09-09.** The evaluation this roster was built for. All 12 final-round checkpoints from §100
+plus `max_pressure`/`fixed_time`, 5 episodes each, on `city_4` (cologne3, 07:00-08:00) and `city_6`
+(ingolstadt7, 16:00-17:00), via `diagnostics/eval_paper_metrics.py --city`. Logs: `results/rf2_*.log`.
+The first attempt was killed by a host restart at ~04:13; this is the 07:03 relaunch, which
+completed all six arms at 10:22.
+
+**Only Avg. Delay and Avg. Trip Time are reported.** Per §99's metric caveat, this project's `wait`
+and `queue` do not reconcile with RESCO's definitions in either direction, and reward is an internal
+unit. **`arrived` is reported alongside every row and is not optional — see the confound below.**
+
+#### Cologne (cologne3, RESCO-exact window)
+
+| controller | Avg. Delay | Avg. Trip Time | arrived |
+|---|---:|---:|---:|
+| `fixed_time` | 34.6 | 72.4 | 2810 |
+| indexed head (6 ckpts) | 54.3 | 91.5 | 2196 |
+| `max_pressure` | **22.4** | 60.1 | 2817 |
+| phase-relational (6 ckpts, raw mean) | *21.2* | *58.6* | *2548* |
+| **phase-relational (3 ckpts at >=97% throughput)** | **21.6** | **59.3** | **2794** |
+| *RESCO IPPO (published)* | *22.13* | *57.45* | *--* |
+| *RESCO IDQN (published)* | *23.99* | *59.0* | *--* |
+
+#### Ingolstadt (ingolstadt7, RESCO-exact window)
+
+| controller | Avg. Delay | Avg. Trip Time | arrived |
+|---|---:|---:|---:|
+| `fixed_time` | 92.2 | 136.2 | 2833 |
+| indexed head (6 ckpts) | 69.0 | 112.4 | 2497 |
+| **phase-relational (6 ckpts)** | **35.6** | **79.5** | **2891** |
+| `max_pressure` | **26.6** | **71.5** | 2681 |
+| *RESCO IDQN (published)* | *31.19* | *--* | *--* |
+
+#### THE CONFOUND, and why the raw Cologne mean is struck through
+
+**`eval_paper_metrics.py` computes trip time and delay over ARRIVED vehicles only.** A controller
+that strands vehicles therefore reports *better* delay, because the vehicles that would have dragged
+the mean up never finish. On Cologne the phase-relational arm's per-seed throughput ranges from
+**1749 to 2821** against `max_pressure`'s 2817, and the correlation runs exactly the wrong way:
+
+| seed | arrived | Avg. Delay |
+|---:|---:|---:|
+| 3 | 1749 (62%) | 21.7 |
+| 7 | 2489 (88%) | **19.7** (best-looking, second-worst throughput) |
+| 11 | 2821 (100%) | 21.5 |
+| 17 | 2740 (97%) | 20.7 |
+| 21 | 2821 (100%) | **22.6** (worst-looking, full throughput) |
+| 25 | 2669 (95%) | 21.2 |
+
+**The raw 6-checkpoint mean of 21.2 is a survivorship artifact and must not be quoted.** Restricted
+to the three seeds at >=97% throughput the number is 21.6 delay / 59.3 trip, against
+`max_pressure`'s 22.4 / 60.1 — a tie, not a win. Restricted to the two seeds at full throughput it
+is 22.05 / 59.85, an even flatter tie. **Ingolstadt has no such confound in phase-relational's
+favour — all six of its checkpoints clear `max_pressure`'s own 2681 arrivals — and there
+phase-relational loses outright: 35.6 vs 26.6 delay, 34% worse.**
+
+#### Verdict
+
+**The holdout result does NOT transfer into an in-distribution win over `max_pressure`.** Corrected
+for throughput, phase-relational ties `max_pressure` on Cologne and is clearly behind it on
+Ingolstadt. Against the two RESCO numbers this document has on record, Cologne's 21.6 sits in the
+IPPO (22.13) / IDQN (23.99) range and Ingolstadt's 35.6 is ~14% worse than IDQN's 31.19. Following
+the `/benchmark` rule, the defensible framing is **relative to the `max_pressure` reference measured
+under identical conditions**, not "beats IDQN": only a partial RESCO table is recorded here, and
+RESCO reports best-episode-averaged-over-5-seeds while these are 5-episode means over 6 independent
+training seeds — different statistics.
+
+**What this does NOT retract.** §96-§100's holdout results are **zero-shot on an unseen topology**,
+a different and strictly harder claim than the in-distribution one measured here; nothing above
+touches them. The indexed-vs-phase-relational comparison is also unaffected — both arms share the
+scenario, so the confound cancels.
+
+**Two genuinely new facts, both worth carrying:**
+1. **The phase-relational head is also much better IN-DISTRIBUTION than the indexed head** — Cologne
+   21.2 vs 54.3 delay, Ingolstadt 35.6 vs 69.0, and it strands far fewer vehicles (one indexed
+   Cologne checkpoint arrived only 757 of ~2820, 27%). The action representation was not only
+   blocking transfer; it was costing in-distribution performance too. This was not predicted by
+   §95-§98, which framed the defect purely as a transfer problem.
+2. **Phase-relational is unstable in-distribution on Cologne** — 2 of 6 seeds strand 12-38% of
+   traffic. The confident-lock-in/volatility thread (§32-53) is alive on this head as well; the
+   representation fix did not fix retention.
+
+**Methodological rule now established: never report trip time or delay from
+`eval_paper_metrics.py` without `arrived` beside it.** The metric is conditioned on completion, so a
+gridlocking controller can look good on it. This is the same class of error as §97's ceiling/floor
+effects and §25's silent holdout fallback — a measurement that returns a plausible number for the
+wrong reason.
+
+**Open:** whether phase-relational's in-distribution deficit on Ingolstadt closes with more than 5
+rounds of training, and whether the Cologne stranding is a lock-in instance identifiable by the
+existing std-based screen.
 
 ### Process note, recorded because it nearly cost a day of compute
 
