@@ -7036,6 +7036,127 @@ from the commit message; §99's numbers reproduced it exactly (47.23 / 39.34 / 5
 established the message was accurate and not the reverse. **A result is not recorded until it is in
 this file.**
 
+## 101. LITERATURE POSITIONING: what is actually novel here, what is not, and the one
+    documented difference from the closest prior art
+
+**2026-09-09.** First real prior-art review of this project, prompted by the question of whether
+§96-§100 is publishable and against what. Seven papers checked, several fetched in full. **No
+compute.** This section exists because the answer changes what the paper claims, and because
+nothing in this document previously recorded where this work sits in its own literature.
+
+### What is NOT novel
+
+| component of this project | prior art | status |
+|---|---|---|
+| phase-invariant / action-as-input readout | **FRAP** (CIKM'19) — pairwise phase competition, invariant to flip/rotation; explicitly claims it "can learn from one environment and transfer to another with high accuracy without any additional training" | anticipated, 2019 |
+| per-phase pressure as a feature | **MPLight** (AAAI'20); **G2P** (2025) derives it from queueing theory | anticipated |
+| handling ANY number of phases | **AttendLight** (NeurIPS'20) — second attention model exists precisely for this | anticipated |
+| zero-shot transfer to unseen road networks | **MuJAM** (2022, inductive graph RL, 3971 signals in Manhattan); **TransferLight** (Dec 2024) | anticipated |
+| beating `max_pressure` zero-shot on Cologne/Ingolstadt-family scenarios | **TransferLight** — Cologne1 6.70+-5.72 vs MaxPressure 8.00+-5.22 | anticipated, on overlapping scenarios |
+| federated RL for TSC across heterogeneous intersections | **HFRL** (Apr 2025), plus several others | anticipated |
+| clustering clients for within-cluster FedAvg | **HFRL** — same idea as this project's `ClusteredFedAvgStrategy` | anticipated |
+| curriculum over CLIENTS in federated learning | **Vahidian et al., ICCV 2023**, §4.2 "Client Curriculum": *"To the best of our knowledge, our paper is the first attempt to introduce the idea of curriculum on clients in an FL setting."* Scoring function + pacing function + ordering | anticipated — this is PCFT's skeleton |
+| curriculum learning in RL for TSC | Zheng et al. 2022 "From Local to Global"; Springer 2023 multi-agent RL with curriculum transfer | anticipated |
+
+**Consequence: §96-§100 must NOT be framed as "we propose a new action head."** That family is
+occupied and has been since 2019. Nor as "federated" — and this project's own §49/§50/§64 found
+federation makes no significant difference to its results at either budget, so that framing is
+weak on this project's own evidence too.
+
+### THE ONE DOCUMENTED DIFFERENCE — and it is a real one
+
+**MPLight/FRAP cannot be applied to an unseen intersection without a human first authoring that
+intersection's configuration.** From RESCO's own `docs/Environment Configuration.md`, verbatim:
+
+> `phase_pairs`: "MPLight requires a defined set of traffic movements (in terms of traffic flow
+> direction) which are **consistent across traffic signals**. ... The defined phase_pairs for an
+> environment should include all possible movement directions for all traffic signals on the map."
+>
+> `pair_to_act_map`: "In shared parameter algorithms such as MPLight agents might be heterogeneous
+> in terms of their action space. Therefore, actions which two signals have in common **must be
+> remapped to correspond to the same action in each agent**."
+
+These are hand-written per scenario AND per signal — `cologne3`'s `pair_to_act_map` is three
+hand-authored dictionaries, one per intersection, mapping local action indices onto a global
+movement table.
+
+**This project's `PhaseFeatureExtractor` derives that mapping automatically** from
+`traci.trafficlight.getControlledLinks()` plus turn-direction inference, at any intersection, with
+no configuration. That is the defensible claim:
+
+> Prior phase-invariant methods achieve topology transfer with hand-authored per-signal movement
+> configuration. We derive it automatically from the simulator's topology and match the
+> hand-configured method zero-shot.
+
+**Second structural difference:** FRAP's `oshape` is fixed at construction and it enumerates all
+ordered phase pairs (O(A^2)), so one FRAP model has a **fixed action count**. It is
+phase-*symmetric*, not phase-count-agnostic. Measured across this project's rosters, RESCO's own
+`phase_pairs` lengths differ per scenario: cologne3=9, ingolstadt7=11, grid4x4=8, arterial4x4=5 —
+so a single shared FRAP cannot span them as RESCO configures them. RESCO trains MPLight per
+scenario, never across.
+
+### Measurement made while checking feasibility: FRAP has NO dead-pair problem on this holdout
+
+Normalising RESCO's `phase_pairs` as unordered movement pairs, the union over this project's three
+training cities (arterial4x4, cologne3, ingolstadt7) is **11 distinct pairs**, and **0 of the
+8 pairs `grid4x4` uses are absent from it** — every holdout phase pair is exercised in training.
+
+**This matters twice.** (1) A ported FRAP is a genuinely STRONG baseline here, not a strawman — its
+readout is fully trained for the holdout, unlike the indexed head, which §95b measured at 37.5% of
+the holdout's action space scored by never-trained rows. (2) It is independent quantitative support
+for §98's mechanism claim: a readout indexed by MOVEMENT SEMANTICS gets full holdout coverage from
+the same training data on which a POSITIONAL readout gets 62.5% coverage. Same cities, same data,
+different indexing scheme, and the coverage gap falls straight out of the representation choice.
+
+### PCFT (§87) novelty assessment
+
+Every component is published (curriculum-over-clients in FL: ICCV'23; curriculum in TSC: Zheng 2022;
+federated RL for TSC: HFRL 2025). Four searches found no publication of the **specific combination**
+(client curriculum + growing federation pool + per-client focus fine-tune, in federated RL, targeting
+zero-shot generalization to a client never in the federation). Genuine differences from ICCV'23: a
+**structural** scoring function (intersection count, fixed a priori) rather than loss-based; client
+**admission** with a dedicated solo adaptation phase rather than per-round client *selection*; RL
+rather than supervised.
+
+**Verdict: combination-level novelty at best, and it is not yet supported by this project's own
+evidence** — §87's budget/mechanism confound (the curriculum embeds the already-confirmed fine-tune
+mechanism at every step) is still unresolved, and given ICCV'23 already established that client
+ordering works in FL, **the ablation isolating ordering is now the whole claim.** If PCFT is
+pursued, it needs three arms, not two: plain FedAvg / PCFT in complexity order / PCFT with
+reversed-or-shuffled order at identical budget and identical focus fine-tunes. B-vs-C isolates
+ordering; A-vs-C isolates the fine-tune effect.
+
+### Positioning decision recorded
+
+Write the **mechanism + evaluation-artifacts** paper, not a performance paper:
+1. §95b/§98's controlled isolation of the action representation as the binding constraint — the
+   control no architecture paper in this list runs, because none of them had reason to.
+2. The §73-§95 corpus reinterpreted: ~20 interventions measured on a readout that cannot express a
+   transferable policy, so their nulls are floor effects, not evidence about those mechanisms.
+3. Four evaluation artifacts, each of which produced a plausible wrong number: silent holdout
+   fallback (§25), dead rows (§95b), the `yellow_time` mismatch (§99), the throughput/survivorship
+   confound (§100b).
+
+`--phase_relational` appears as constructive validation, not as the novelty claim. Realistic venue:
+ITSC / IEEE T-ITS, or a benchmarks track; an ML workshop as a fast first outing. Do NOT pursue a
+head-to-head performance claim against TransferLight — it trains with domain randomization over
+randomly generated networks, a structurally stronger generalization signal than three real cities,
+and §100b already shows this project ties `max_pressure` on Cologne and loses on Ingolstadt.
+
+### Next experiment, feasibility CONFIRMED, not yet implemented
+
+Port MPLight's actual network (`FRAP`, from RESCO's `agents/action_value/mplight.py`) into this
+project's harness as a third readout arm, so all three arms share observations, seeds, holdout and
+`/seedcheck`. Verified available: RESCO cloned, `phase_pairs` + `pair_to_act_map` + `lane_sets`
+extracted for all four scenarios, `lane_sets` present for every real signal. Shared union table of
+11 pairs with the existing `action_mask` machinery selecting per city. Framing: **MPLight given
+oracle hand-authored configuration for the unseen holdout vs. this project's method given none.**
+
+**Sources:** FRAP (CIKM'19) jhc.sjtu.edu.cn/~gjzheng/files/papers/cikm2019_frap/; AttendLight
+arXiv:2010.05772; MPLight AAAI'20 / RESCO `agents/action_value/mplight.py`; MuJAM arXiv:2208.00659;
+TransferLight arXiv:2412.09719; G2P arXiv:2503.20205; HFRL arXiv:2504.05553; Vahidian et al.
+arXiv:2212.12712 (ICCV 2023).
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
