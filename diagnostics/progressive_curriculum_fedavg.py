@@ -50,6 +50,7 @@ Usage:
 """
 import argparse
 import logging
+import random
 import os
 import sys
 
@@ -101,6 +102,13 @@ def main():
                     help="Use the per-phase Q scorer instead of the action-indexed head "
                          "(fidings sec 96). PCFT changes the training CURRICULUM and this "
                          "changes the HEAD -- they are orthogonal and compose.")
+    ap.add_argument("--city_order", default="complexity",
+                    choices=["complexity", "reverse", "shuffled"],
+                    help="Order cities are phased in. 'complexity' is PCFT as "
+                         "proposed (simplest first). 'reverse'/'shuffled' keep "
+                         "budget and focus phases identical and change only the "
+                         "order -- the control that isolates the curriculum "
+                         "from the fine-tuning (sec 87 confound, sec 101).")
     ap.add_argument("--seed", type=int, default=3)
     ap.add_argument("--eval_episodes", type=int, default=5)
     ap.add_argument("--log_loss_every_steps", type=int, default=50)
@@ -128,11 +136,28 @@ def main():
     else:
         head_weight_key, head_bias_key = head_key_names(dueling=False)
 
-    logger.info("Ranking cities by intersection count (simplest first)...")
+    # --city_order is the control that separates PCFT's CURRICULUM from the
+    # per-city focus fine-tuning embedded in every one of its steps. sec 87
+    # confirmed PCFT at 6 seeds but flagged that confound as unresolved, and
+    # sec 101 found the curriculum-over-clients idea is already published
+    # (Vahidian et al., ICCV 2023), so ordering is now the whole claim. 'reverse'
+    # and 'shuffled' keep the budget and the focus phases identical and change
+    # ONLY the order, which is what makes the comparison interpretable.
     ranked = sorted(
         ((name, cfg, _n_intersections(cfg, action_dim)) for name, cfg in city_configs),
         key=lambda t: t[2],
     )
+    if args.city_order == "complexity":
+        logger.info("City order: by intersection count, simplest first (PCFT as proposed).")
+    elif args.city_order == "reverse":
+        ranked = list(reversed(ranked))
+        logger.info("City order: REVERSED (most complex first) -- ordering control.")
+    elif args.city_order == "shuffled":
+        rng = random.Random(args.seed)
+        rng.shuffle(ranked)
+        logger.info("City order: SHUFFLED on seed %d -- ordering control.", args.seed)
+    else:
+        raise ValueError(f"unknown --city_order {args.city_order!r}")
     for name, _, n in ranked:
         logger.info("  %s: %d intersections", name, n)
     ordered_cities = [(name, cfg) for name, cfg, _ in ranked]

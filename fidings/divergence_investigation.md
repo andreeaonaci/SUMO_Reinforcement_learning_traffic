@@ -7220,6 +7220,62 @@ arXiv:2010.05772; MPLight AAAI'20 / RESCO `agents/action_value/mplight.py`; MuJA
 TransferLight arXiv:2412.09719; G2P arXiv:2503.20205; HFRL arXiv:2504.05553; Vahidian et al.
 arXiv:2212.12712 (ICCV 2023).
 
+## 102. PCFT x phase-relational: does the curriculum still add anything once the readout is
+    fixed? -- design and launch, results pending
+
+**2026-09-09, user request.** §87 confirmed PCFT at 6 seeds, but every one of those runs used the
+**indexed** head -- the readout §98 later showed cannot express a transferable policy. §101's
+reading of that is that the §73-§95 corpus consists of floor effects. **PCFT is the sharpest test
+of that claim available**, because it is the one intervention in that corpus that DID clear the
+bar. Two outcomes, both informative:
+
+- **PCFT still helps on the phase-relational head** -> it is a real training-procedure effect,
+  independent of the representation, and the floor-effect reading needs narrowing.
+- **PCFT adds nothing once the readout is fixed** -> it was compensating for a broken
+  representation, which is direct evidence FOR the floor-effect reading rather than an inference
+  from it, and it retires PCFT as a contribution.
+
+### Design: three arms, and why the third one is not optional
+
+`environments_c1_4_6`, seeds 3/7/11, **all three arms `--phase_relational`**:
+
+| arm | what it runs | isolates |
+|---|---|---|
+| `pcftC` | PCFT, complexity order (simplest first) -- PCFT as proposed in §87 | -- |
+| `pcftR` | PCFT, **reverse** order (most complex first); identical budget, identical focus fine-tune phases, ONLY the order differs | `pcftC` vs `pcftR` = the CURRICULUM |
+| `fedavg` | plain FedAvg, budget-matched: 8 rounds x 2 local episodes x 3 cities = 48 episodes vs PCFT's 10+5+12+5+18 = 50 | `fedavg` vs `pcftR` = the focus-fine-tune / extra-budget effect |
+
+**§87's own stated confound was never resolved**: PCFT embeds §66-70's confirmed per-city
+fine-tuning at every curriculum step, so its win may have been re-confirming that fine-tuning helps
+rather than that ORDERING helps. §101 makes that decisive rather than tidy: curriculum-over-clients
+in FL is already published (Vahidian et al., ICCV 2023, which explicitly claims to be the first),
+so ordering is now the entire claim PCFT could make. A two-arm PCFT-vs-baseline result would be
+uninterpretable. Hence `--city_order {complexity,reverse,shuffled}`, added to
+`diagnostics/progressive_curriculum_fedavg.py` for this experiment.
+
+**§87's budget confound is also fixed here**: its baseline was a standard 5-round run (30 episodes)
+against PCFT's 50. The `fedavg` arm above is matched to 48.
+
+### Headroom check before launching (the §97 ceiling/floor discipline)
+
+Reward on this roster: phase-relational ~-0.16, `max_pressure` -0.34, floor 0.0. Per-seed spread in
+§100 was ~+-0.03, so headroom-to-noise is roughly 5x -- tight but measurable, and NOT the saturated
+ceiling §97's `grid4x4_dense` turned out to be. **Stated in advance: this arm is much closer to its
+floor than any previous PCFT comparison, so a null here is weaker evidence than a null on the
+indexed head would have been, and must not be over-read.**
+
+### Verified before compute
+
+Real SUMO smoke run of both orders at `--warmup_episodes 1 --focus_episodes 1 --fedavg_rounds 1`,
+both exit clean. Ordering confirmed correct in both directions (complexity: city_4(3) -> city_6(7)
+-> city_1(16); reverse: city_1 -> city_6 -> city_4). Phase-relational confirmed active: holdout
+rewards land in the -0.07..-5.83 range even at 1-episode budgets, versus the thousands the indexed
+head produces on this roster.
+
+**Status: SCREEN, 3 seeds, launched 2026-09-09. Results pending.** Escalates to 6 seeds only if
+`pcftC` vs `pcftR` shows something -- and per §101's tally (CQL 2.35->1.05, TC-FedAvg,
+`n_attn_layers` twice), a clean 3-seed result here is a screen and nothing more.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
