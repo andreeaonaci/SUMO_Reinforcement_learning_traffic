@@ -90,8 +90,11 @@ PY
       --rounds $FED_ROUNDS --local_episodes 2 --eval_every 1 --eval_episodes 5 \
       --lr 3e-4 --q_entropy_weight 0.05 --seed "$seed" $resume \
       >> "$OUT/$tag.log" 2>&1
+    # Capture python's status BEFORE anything else runs, or $? reports the
+    # grep's exit code instead and every job looks like it succeeded.
+    local rc=$?
     grep -oE "results/run_[0-9_-]+_[0-9]+" "$OUT/$tag.log" | head -1 > "$marker"
-    log "finished $tag exit=$?" ) &
+    log "finished $tag exit=$rc" ) &
 }
 
 log "6-seed escalation starting, seeds: $SEEDS"
