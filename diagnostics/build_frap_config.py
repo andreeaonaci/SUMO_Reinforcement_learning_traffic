@@ -85,6 +85,39 @@ def _net_signal_lanes(net_file):
     return {k: frozenset(v) for k, v in controlled.items()}
 
 
+def derive_lane_sets_outbound(sigs):
+    """Per signal, the DOWNSTREAM lanes each of its movements feeds into.
+
+    Ported from RESCO's `traffic_signal.py` (the block that builds
+    `lane_sets_outbound`), because MPLight's state is per-movement PRESSURE --
+    inbound queue minus the queue on the lanes that movement discharges onto --
+    and the outbound half is not stored in signal.yaml, only derivable from it:
+    for each `downstream` neighbour in direction D, take that neighbour's
+    lane_sets whose INCOMING direction is D, and attach them to every local
+    movement whose OUTGOING direction is D.
+
+    Movement keys are "IN-OUT" (e.g. "W-S" = westbound incoming, turning south),
+    so key.split("-")[0] is the incoming direction and [1] the outgoing one.
+    """
+    out = {}
+    for sid, blk in sigs.items():
+        lane_sets = blk["lane_sets"]
+        downstream = blk.get("downstream") or {}
+        outbound = {k: set() for k in lane_sets}
+        for direction, dwn_signal in downstream.items():
+            if not dwn_signal or dwn_signal not in sigs:
+                continue
+            dwn_lane_sets = sigs[dwn_signal]["lane_sets"]
+            for key, lanes in dwn_lane_sets.items():
+                if key.split("-")[0] != direction:
+                    continue
+                for selfkey in lane_sets:
+                    if selfkey.split("-")[1] == direction:
+                        outbound[selfkey].update(lanes or [])
+        out[sid] = {k: sorted(v) for k, v in outbound.items()}
+    return out
+
+
 def _green_phase_states(net_file):
     """-> {tl_id: [state strings of its green phases, in programme order]}."""
     import xml.etree.ElementTree as ET
@@ -218,6 +251,7 @@ def build(resco_src, base_dir=None):
             act_to_union[sid] = mapping
 
         lane_sets = {sid: sigs[sid]["lane_sets"] for sid in sigs}
+        lane_sets_outbound = derive_lane_sets_outbound(sigs)
 
         # Re-identify RESCO's signal names against our own net file where they
         # were renamed by a netedit re-save (sec 101).
@@ -231,6 +265,8 @@ def build(resco_src, base_dir=None):
                 act_to_union = {id_map.get(k, k): v
                                 for k, v in act_to_union.items()}
                 lane_sets = {id_map.get(k, k): v for k, v in lane_sets.items()}
+                lane_sets_outbound = {id_map.get(k, k): v
+                                      for k, v in lane_sets_outbound.items()}
 
                 # Re-index actions by phase state string, since our vendored
                 # nets can differ from RESCO's in which green phases exist.
@@ -256,6 +292,7 @@ def build(resco_src, base_dir=None):
             "n_signals": len(sigs),
             "act_to_union": act_to_union,
             "lane_sets": lane_sets,
+            "lane_sets_outbound": lane_sets_outbound,
             "pairs_outside_union": sorted({tuple(p) for _, p in unmapped}),
             "renamed_signals": renamed,
             "unresolved_signals": unresolved,
