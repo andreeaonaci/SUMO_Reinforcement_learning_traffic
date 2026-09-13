@@ -103,7 +103,8 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
                 n_quantiles: int = 21, bounded_q: bool = False, q_bound_scale: float = 5.0,
                 trunk_lr_scale: float = 1.0, lora_adapter: bool = False, lora_rank: int = 8,
                 boot_heads: int = 1, boot_mask_prob: float = 0.5,
-                phase_relational: bool = False):
+                phase_relational: bool = False,
+                frap_head: bool = False, frap_phase_pairs=None):
     """Single place that constructs the local/global agent -- DQNAgent
     (default, unchanged), PPOAgent (--algo ppo, agents/ppo.py), or
     MunchausenDQNAgent (--algo munchausen, agents/munchausen_dqn.py; see
@@ -217,6 +218,8 @@ def _make_agent(own_dim, neighbor_dim, k_max, action_dim, eps_decay, head_fix: b
         boot_heads=boot_heads,
         boot_mask_prob=boot_mask_prob,
         phase_relational=phase_relational,
+        frap_head=frap_head,
+        frap_phase_pairs=frap_phase_pairs,
     )
 
 
@@ -483,6 +486,7 @@ def make_holdout_evaluator(
     eval_comm_dropout_cfg: dict | None = None,
     holdout_base_dir: str | None = None,
     eval_sumo_seed: int = 12345,
+    movement_pressure: bool = False,
 ) -> "HoldoutEvaluator | None":
     candidate_base_dirs = [base_dir]
     if holdout_base_dir and holdout_base_dir not in candidate_base_dirs:
@@ -578,6 +582,13 @@ def make_holdout_evaluator(
             action_dim,
         )
         return None
+
+    # --frap_head (fidings sec 101): the evaluation city needs the same
+    # movement-pressure observation the training cities got, or the FRAP head
+    # would be handed all-zero pressure at eval time and score garbage for a
+    # reason that has nothing to do with the method.
+    if movement_pressure:
+        selected_cfg["movement_pressure"] = True
 
     is_true_holdout = selected_name == "city_5_holdout"
 
@@ -880,6 +891,24 @@ def main(args):
             action_dim = maybe_pad_action_dim_to_true_holdout(action_dim, base, args.eval_base_dir)
         own_dim, neighbor_dim, k_max = obs_dims
 
+        # --frap_head (fidings sec 101). The movement-pressure observation is off
+        # by default because it costs extra traci queries every tick; switch it on
+        # by injecting one key into each city's cfg dict. Workers are handed the
+        # raw cfg and build their own env in their own process, so this reaches
+        # every city for free -- no extra parameter on build_federated_env, whose
+        # dozen other call sites stay untouched.
+        _frap_pairs = None
+        if args.frap_head:
+            from agents.frap_head import load_union_pairs
+            _frap_pairs = load_union_pairs()
+            for _name, _cfg in city_configs:
+                _cfg["movement_pressure"] = True
+            logger.info(
+                "[frap] MPLight/FRAP baseline readout: %d union movement-pair phases, "
+                "movement-pressure observation enabled on %d training cities.",
+                len(_frap_pairs), len(city_configs),
+            )
+
         eps_decay = compute_eps_decay(
             rounds=args.rounds,
             local_episodes=args.local_episodes,
@@ -934,6 +963,8 @@ def main(args):
             boot_heads=args.boot_heads,
             boot_mask_prob=args.boot_mask_prob,
             phase_relational=args.phase_relational,
+            frap_head=args.frap_head,
+            frap_phase_pairs=_frap_pairs,
         )
 
         start_round = 1
@@ -966,6 +997,7 @@ def main(args):
             holdout_base_dir=args.eval_base_dir,
             eval_sumo_seed=args.eval_sumo_seed,
             eval_comm_dropout_cfg=comm_dropout_cfg,
+            movement_pressure=args.frap_head,
         )
 
         aggregation_config = {
@@ -1043,6 +1075,8 @@ def main(args):
             boot_heads=args.boot_heads,
             boot_mask_prob=args.boot_mask_prob,
             phase_relational=args.phase_relational,
+            frap_head=args.frap_head,
+            frap_phase_pairs=_frap_pairs,
         )
         history = server.run(
             rounds=args.rounds,
@@ -1115,6 +1149,7 @@ def main(args):
             holdout_base_dir=args.eval_base_dir,
             eval_sumo_seed=args.eval_sumo_seed,
             eval_comm_dropout_cfg=comm_dropout_cfg,
+            movement_pressure=args.frap_head,
         )
 
         aggregation_config = {
@@ -1363,6 +1398,14 @@ if __name__ == "__main__":
     parser.add_argument("--lora_rank", type=int, default=8,
                          help="Bottleneck width of the --lora_adapter residual correction. Ignored "
                               "unless --lora_adapter.")
+    parser.add_argument("--frap_head", action="store_true",
+                        help="BASELINE readout: MPLight's FRAP head (fidings sec 101) instead "
+                             "of the action-indexed one. Scores a fixed table of movement-pair "
+                             "phases from RESCO's own hand-authored per-signal configuration, "
+                             "which this project's --phase_relational head does NOT need -- the "
+                             "comparison is parity-without-configuration. Requires "
+                             "configs/resco_frap/phase_pairs.json (diagnostics/"
+                             "build_frap_config.py). Default off is an exact no-op.")
     parser.add_argument("--phase_relational", action="store_true",
                          help="Phase-relational Q-head (fidings sec 96): replace the "
                               "action-INDEXED head with one shared scorer over "
@@ -1637,6 +1680,16 @@ if __name__ == "__main__":
                 "Add --parallel, or thread them through _make_agent's sequential call "
                 "site and FederatedServer first."
             )
+    if args.frap_head and not args.parallel:
+        parser.error(
+            "--frap_head is only wired through the --parallel path; without it "
+            "the flag would be silently inert. Add --parallel."
+        )
+    if args.frap_head and args.phase_relational:
+        parser.error(
+            "--frap_head and --phase_relational are two different readouts and are "
+            "mutually exclusive; run them as separate arms."
+        )
     if args.phase_relational and not args.parallel:
         parser.error(
             "--phase_relational is only wired through the --parallel path; without it "

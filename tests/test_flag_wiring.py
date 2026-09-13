@@ -977,3 +977,53 @@ def test_boot_heads_stay_diverse_after_real_training():
         f"heads collapsed to one function (disagreement="
         f"{agent.last_head_disagreement}); the vote would be decorative."
     )
+
+
+def test_frap_head_reaches_the_worker_and_changes_the_agent():
+    """--frap_head (fidings sec 101) must reach BOTH the network and the worker.
+
+    This is the flag class that has silently no-opped three times in this
+    project's history (--disable_head_fix sec 10, fixed_ts sec 24,
+    --lora_adapter's missing global_model entry). Checked here rather than
+    trusted: the flag adds parameters, so an omission crashes every worker's
+    strict load_state_dict on round 1 instead of quietly training the wrong
+    thing -- but only if it is actually threaded everywhere.
+    """
+    import inspect
+
+    from agents.dqn import DQNAgent
+    from agents.frap_head import load_union_pairs
+    from federated.parallel_server import ParallelFederatedServer, _client_worker
+
+    # 1. the worker and the server both accept it
+    assert "frap_head" in inspect.signature(_client_worker).parameters
+    assert "frap_phase_pairs" in inspect.signature(_client_worker).parameters
+    assert "frap_head" in inspect.signature(ParallelFederatedServer.__init__).parameters
+
+    # 2. it is the LAST pair of positional args, matching the Process tuple.
+    params = list(inspect.signature(_client_worker).parameters)
+    assert params[-2:] == ["frap_head", "frap_phase_pairs"], (
+        "frap_head must stay at the END of _client_worker's signature -- the "
+        "Process args tuple is positional, and inserting mid-list silently "
+        "shifts every later flag onto the wrong parameter."
+    )
+
+    # 3. it actually changes the agent's parameter set (so it cannot no-op)
+    pairs = load_union_pairs()
+    base = DQNAgent(own_dim=8, neighbor_dim=4, k_max=2, action_dim=8)
+    frap = DQNAgent(own_dim=8, neighbor_dim=4, k_max=2, action_dim=8,
+                    frap_head=True, frap_phase_pairs=pairs)
+    base_keys = set(base.state_dict())
+    frap_keys = set(frap.state_dict())
+    assert frap_keys != base_keys, "--frap_head did not change the network at all"
+    assert any(k.startswith("frap.") for k in frap_keys)
+
+
+def test_frap_head_default_is_an_exact_noop():
+    """The baseline arm of the sec 101 comparison must be a genuine control."""
+    from agents.dqn import DQNAgent
+
+    a = DQNAgent(own_dim=8, neighbor_dim=4, k_max=2, action_dim=8)
+    b = DQNAgent(own_dim=8, neighbor_dim=4, k_max=2, action_dim=8, frap_head=False)
+    assert set(a.state_dict()) == set(b.state_dict())
+    assert not a.frap_head and not b.frap_head

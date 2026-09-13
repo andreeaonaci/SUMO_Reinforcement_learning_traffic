@@ -122,6 +122,8 @@ def _client_worker(
     boot_heads: int = 1,
     boot_mask_prob: float = 0.5,
     phase_relational: bool = False,
+    frap_head: bool = False,
+    frap_phase_pairs=None,
 ):
     """Runs inside its own process for the ENTIRE training run.
 
@@ -265,6 +267,8 @@ def _client_worker(
                 boot_heads=boot_heads,
                 boot_mask_prob=boot_mask_prob,
                 phase_relational=phase_relational,
+                frap_head=frap_head,
+                frap_phase_pairs=frap_phase_pairs,
             )
 
         while True:
@@ -415,6 +419,8 @@ class ParallelFederatedServer:
         boot_heads: int = 1,
         boot_mask_prob: float = 0.5,
         phase_relational: bool = False,
+        frap_head: bool = False,
+        frap_phase_pairs=None,
     ):
         # item 20 (fidings sec 78): if >0, a round whose eval std_reward
         # falls below this threshold (the same std<50 screen already used
@@ -443,6 +449,8 @@ class ParallelFederatedServer:
         self.q_bound_scale = q_bound_scale
         self.trunk_lr_scale = trunk_lr_scale
         self.phase_relational = bool(phase_relational)
+        self.frap_head = bool(frap_head)
+        self.frap_phase_pairs = frap_phase_pairs
         self.boot_heads = int(boot_heads)
         self.boot_mask_prob = float(boot_mask_prob)
         self.lora_adapter = lora_adapter
@@ -495,7 +503,8 @@ class ParallelFederatedServer:
         # so per-action row aggregation is meaningless for it -- excluded
         # explicitly rather than left to silently no-op on a missing key.
         supports_masked_head = (
-            algo not in ("ppo", "qrdqn") and not use_batchnorm and not phase_relational
+            algo not in ("ppo", "qrdqn") and not use_batchnorm
+            and not phase_relational and not frap_head
         )
         self.head_fix = bool(head_fix) and supports_masked_head
         self.neighbor_attention = bool(neighbor_attention)
@@ -577,6 +586,11 @@ class ParallelFederatedServer:
                     self.lora_adapter, self.lora_rank,
                     self.boot_heads, self.boot_mask_prob,
                     self.phase_relational,
+                    # Appended at the END on purpose: this tuple is POSITIONAL,
+                    # and inserting anywhere else silently shifts every later
+                    # argument onto the wrong parameter (see the lever skill /
+                    # audit_flag.py --align).
+                    self.frap_head, self.frap_phase_pairs,
                 ),
                 daemon=True,
             )

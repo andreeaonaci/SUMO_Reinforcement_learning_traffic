@@ -160,6 +160,36 @@ class FRAPHead(nn.Module):
         return q_local.masked_fill(act_to_union < 0, torch.finfo(q_local.dtype).min)
 
 
+def load_union_pairs(config_path: str = None):
+    """Union movement-pair table as MOVEMENT INDICES, for FRAPHead.
+
+    Reads configs/resco_frap/phase_pairs.json (built by
+    diagnostics/build_frap_config.py from RESCO's own signal.yaml) and converts
+    its movement-name pairs like ["N-N", "S-S"] into index pairs against
+    RESCO's canonical 12-movement table. Raises rather than returning a partial
+    table -- a FRAP arm running on a silently-truncated phase set would be a
+    strawman baseline, which is worse than no baseline.
+    """
+    import json
+    import os
+    if config_path is None:
+        config_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "configs", "resco_frap", "phase_pairs.json")
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(
+            f"--frap_head needs {config_path}; build it with "
+            "python diagnostics/build_frap_config.py --resco_src <RESCO checkout>")
+    cfg = json.load(open(config_path))
+    directions = cfg["directions"]
+    pairs = []
+    for a, b in cfg["union_pairs"]:
+        if a not in directions or b not in directions:
+            raise ValueError(f"unknown movement in union pair {(a, b)}")
+        pairs.append([directions.index(a), directions.index(b)])
+    return pairs
+
+
 def act_to_union_vector(act_map: dict, action_dim: int) -> np.ndarray:
     """{local_act: union_phase} -> (action_dim,) int64 vector, -1 where unused."""
     vec = np.full(action_dim, -1, dtype=np.int64)
