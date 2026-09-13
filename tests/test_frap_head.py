@@ -73,8 +73,11 @@ def test_output_shape_and_padding_masked():
     q = head(demand, current, a2u)
     assert q.shape == (B, action_dim)
     assert torch.isfinite(q[:, :3]).all(), "real action slots must be finite"
-    assert torch.isinf(q[:, 3:]).all() and (q[:, 3:] < 0).all(), \
-        "padded slots must be -inf so argmax can never select them"
+    floor = torch.finfo(q.dtype).min
+    assert (q[:, 3:] == floor).all(), \
+        "padded slots must be finfo.min so argmax can never select them"
+    assert torch.isfinite(q).all(), \
+        "no true -inf anywhere -- it NaNs the moment Q-values are averaged"
 
 
 def test_gather_selects_the_right_union_rows():

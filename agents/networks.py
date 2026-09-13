@@ -491,8 +491,9 @@ class NeighborAttentionQNetwork(nn.Module):
         observation would make it a different (and unfairly advantaged) method,
         and the point of this arm is a faithful published baseline.
 
-        Padding slots come back -inf from FRAPHead, so callers must not add a
-        second action mask on top -- `_mask_q` would turn -inf into NaN.
+        Padding slots come back as finfo.min from FRAPHead, matching
+        `agents/dqn.py::_mask_q`, so an extra action mask on top is harmless
+        (idempotent) rather than NaN-producing.
         """
         if not self.frap_head:
             raise RuntimeError("forward_frap() called on a non-FRAP network.")

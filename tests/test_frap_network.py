@@ -65,7 +65,8 @@ def test_forward_frap_shape_and_padding():
         q = net.forward_frap(pressure, current, a2u)
     assert q.shape == (B, 8)
     assert torch.isfinite(q[:, :4]).all()
-    assert torch.isinf(q[:, 4:]).all()
+    assert (q[:, 4:] == torch.finfo(q.dtype).min).all()
+    assert torch.isfinite(q).all()
 
 
 def test_forward_frap_rejected_on_non_frap_network():

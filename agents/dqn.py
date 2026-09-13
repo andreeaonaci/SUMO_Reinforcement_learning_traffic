@@ -109,6 +109,39 @@ def _collate_phase_feats(obs_list, device, action_dim: int, phase_dim: int):
     return torch.tensor(batch, dtype=torch.float32, device=device)
 
 
+def _collate_frap(obs_list, device, action_dim: int, n_movements: int = 12):
+    """(movement_pressure, current_union_phase, act_to_union) for the FRAP
+    baseline head (fidings sec 101).
+
+    Observations from before this feature existed -- old replay buffers, the
+    mock envs, any run without --frap_head -- carry none of these keys. Those
+    rows come back zero pressure with act_to_union all -1, which the head reads
+    as "this intersection has no usable phases" rather than crashing. That is
+    the same degrade-quietly contract _collate_phase_feats follows.
+    """
+    B = len(obs_list)
+    pressure = np.zeros((B, n_movements), dtype=np.float32)
+    current = np.full(B, -1, dtype=np.int64)
+    a2u = np.full((B, action_dim), -1, dtype=np.int64)
+    for i, o in enumerate(obs_list):
+        mp = o.get("movement_pressure")
+        if mp is not None:
+            n = min(len(mp), n_movements)
+            pressure[i, :n] = mp[:n]
+        cu = o.get("current_union_phase")
+        if cu is not None:
+            current[i] = int(cu)
+        av = o.get("act_to_union")
+        if av is not None:
+            n = min(len(av), action_dim)
+            a2u[i, :n] = av[:n]
+    return (
+        torch.tensor(pressure, dtype=torch.float32, device=device),
+        torch.tensor(current, dtype=torch.long, device=device),
+        torch.tensor(a2u, dtype=torch.long, device=device),
+    )
+
+
 _HEAD_PARAM_PREFIXES = ("head.", "value_head.", "advantage_head.", "policy_head.", "ac_value_head.")
 
 
@@ -191,6 +224,8 @@ class DQNAgent:
         boot_heads: int = 1,
         boot_mask_prob: float = 0.5,
         phase_relational: bool = False,
+        frap_head: bool = False,
+        frap_phase_pairs=None,
         phase_dim: int = 10,
     ):
         self.own_dim = own_dim
@@ -223,12 +258,15 @@ class DQNAgent:
             lora_rank=lora_rank,
             boot_heads=boot_heads,
             phase_relational=phase_relational,
+            frap_head=frap_head,
+            frap_phase_pairs=frap_phase_pairs,
             phase_dim=phase_dim,
         )
         # Bootstrapped multi-head vote (fidings sec 94). boot_heads=1 is an exact
         # no-op: the network builds its original single head and every branch
         # below falls through to the pre-existing single-head path.
         self.phase_relational = bool(phase_relational)
+        self.frap_head = bool(frap_head)
         self.phase_dim = int(phase_dim)
         self.boot_heads = int(boot_heads)
         self.boot_mask_prob = float(boot_mask_prob)
@@ -429,6 +467,13 @@ class DQNAgent:
         the raw obs dicts are threaded through; every other head ignores them.
         One place to branch, so no call site can silently take the wrong path.
         """
+        if self.frap_head:
+            # MPLight's state is ONLY [current phase, per-movement pressure] --
+            # own/neighbor observations are deliberately unused here, see
+            # networks.forward_frap.
+            pressure, current, a2u = _collate_frap(
+                obs_list, self.device, self.action_dim)
+            return net.forward_frap(pressure, current, a2u)
         if self.phase_relational:
             pf = _collate_phase_feats(obs_list, self.device, self.action_dim, self.phase_dim)
             return net.forward_phase(own, neighbors, neighbor_mask, pf, hop_dist)

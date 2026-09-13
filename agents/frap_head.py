@@ -28,7 +28,7 @@ ADAPTATIONS, all forced by this project's multi-city setting and all recorded:
    covered and this costs FRAP nothing.
 2. `act_to_union` travels in the OBSERVATION, not in code, so the network still
    never learns which city it is looking at -- the same discipline `action_mask`
-   follows. Slots with -1 are padding and are masked to -inf.
+   follows. Slots with -1 are padding and are masked to finfo.min.
 3. Demand is per-movement PRESSURE (inbound queue minus downstream queue), which
    is exactly RESCO's `mplight` state with `demand_shape=1`.
 """
@@ -101,7 +101,7 @@ class FRAPHead(nn.Module):
 
     def forward(self, movement_demand: torch.Tensor, current_union_phase: torch.Tensor,
                 act_to_union: torch.Tensor) -> torch.Tensor:
-        """-> (B, action_dim) Q-values, unmasked padding set to -inf.
+        """-> (B, action_dim) Q-values; padding slots set to finfo.min.
 
         movement_demand      (B, N_MOVEMENTS * demand_shape)
         current_union_phase  (B,) index into the union phase table, or -1 when the
@@ -154,7 +154,10 @@ class FRAPHead(nn.Module):
         # --- gather union phases into this intersection's local action slots ---
         safe = act_to_union.clamp(min=0)
         q_local = q_union.gather(1, safe)
-        return q_local.masked_fill(act_to_union < 0, float("-inf"))
+        # finfo.min, not -inf, matching agents/dqn.py::_mask_q. A true -inf
+        # survives argmax fine but produces NaN the moment anything averages or
+        # subtracts Q-values, which is why this codebase never uses it.
+        return q_local.masked_fill(act_to_union < 0, torch.finfo(q_local.dtype).min)
 
 
 def act_to_union_vector(act_map: dict, action_dim: int) -> np.ndarray:
