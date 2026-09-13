@@ -138,6 +138,8 @@ class NeighborAttentionQNetwork(nn.Module):
         boot_heads: int = 1,
         phase_relational: bool = False,
         phase_dim: int = 10,
+        frap_head: bool = False,
+        frap_phase_pairs=None,
     ):
         super().__init__()
         if dueling and actor_critic:
@@ -148,6 +150,18 @@ class NeighborAttentionQNetwork(nn.Module):
             raise ValueError(
                 "phase_relational replaces the action-indexed Q-head entirely and is "
                 "mutually exclusive with dueling/actor_critic/distributional."
+            )
+        if frap_head and (dueling or actor_critic or distributional or phase_relational):
+            raise ValueError(
+                "frap_head (the MPLight/FRAP baseline readout, fidings sec 101) replaces "
+                "the action-indexed Q-head entirely and is mutually exclusive with "
+                "dueling/actor_critic/distributional/phase_relational."
+            )
+        if frap_head and not frap_phase_pairs:
+            raise ValueError(
+                "frap_head requires frap_phase_pairs (the union movement-pair table from "
+                "configs/resco_frap/phase_pairs.json). Without it the head has no phases "
+                "to score -- build it with diagnostics/build_frap_config.py."
             )
         if boot_heads > 1 and (dueling or actor_critic or distributional):
             raise ValueError(
@@ -208,6 +222,15 @@ class NeighborAttentionQNetwork(nn.Module):
         self.boot_heads = int(boot_heads)
         self.phase_relational = bool(phase_relational)
         self.phase_dim = int(phase_dim)
+        # FRAP baseline readout (fidings sec 101). Like phase_relational it has
+        # no per-action rows; unlike it, the phase set is a FIXED table supplied
+        # from RESCO's hand-authored configuration, and each intersection's
+        # local actions are gathered out of it via act_to_union carried in the
+        # observation. frap_head=False is an exact structural no-op.
+        self.frap_head = bool(frap_head)
+        if self.frap_head:
+            from agents.frap_head import FRAPHead
+            self.frap = FRAPHead(frap_phase_pairs, action_dim=action_dim)
         # "Upgraded DQN" (fidings/divergence_investigation.md, 2026-09-05):
         # BatchNorm1d + relu6/leaky_relu in place of the original plain-ReLU
         # design, tested against the overnight algorithm-swap campaign's
@@ -453,6 +476,27 @@ class NeighborAttentionQNetwork(nn.Module):
                 remapped[k] = v
             state_dict = remapped
         return super().load_state_dict(state_dict, strict=strict)
+
+    def forward_frap(
+        self,
+        movement_pressure: torch.Tensor,
+        current_union_phase: torch.Tensor,
+        act_to_union: torch.Tensor,
+    ) -> torch.Tensor:
+        """FRAP baseline entry point (fidings sec 101): -> (B, A) Q-values.
+
+        Deliberately does NOT consume own_obs/neighbor_obs. MPLight is a
+        decentralised per-intersection controller whose entire state is
+        [current phase, per-movement pressure]; feeding it this project's richer
+        observation would make it a different (and unfairly advantaged) method,
+        and the point of this arm is a faithful published baseline.
+
+        Padding slots come back -inf from FRAPHead, so callers must not add a
+        second action mask on top -- `_mask_q` would turn -inf into NaN.
+        """
+        if not self.frap_head:
+            raise RuntimeError("forward_frap() called on a non-FRAP network.")
+        return self.frap(movement_pressure, current_union_phase, act_to_union)
 
     def forward_phase(
         self,
