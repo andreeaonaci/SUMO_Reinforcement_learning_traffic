@@ -883,6 +883,7 @@ class MultiAgentFederatedWrapper(FixedTsForwardingMixin):
         neighbor_summary: NeighborSummaryExtractor,
         action_inspector: ActionSpaceInspector,
         k_max: int = 8,
+        movement_pressure: bool = False,
     ):
         self.env = env
         self.lane_extractor = lane_extractor
@@ -895,6 +896,16 @@ class MultiAgentFederatedWrapper(FixedTsForwardingMixin):
         # observation gains a key; whether the network USES it is the
         # --phase_relational flag's business, so the env stays one code path.
         self.phase_features = PhaseFeatureExtractor(env)
+        # MPLight/FRAP state (fidings sec 101). Unlike phase_feats this is NOT
+        # always computed: it costs ~24 extra traci lane queries per
+        # intersection per tick, and only the --frap_head baseline arm reads it.
+        # Paying that in every other arm would slow every future run for one
+        # experiment's benefit.
+        self.movement_pressure_enabled = bool(movement_pressure)
+        self.movement_pressure = None
+        if self.movement_pressure_enabled:
+            from environments.movement_pressure import MovementPressureExtractor
+            self.movement_pressure = MovementPressureExtractor(env)
         self.k_max = k_max
 
         self.ts_ids: List[str] = list(getattr(env, "ts_ids", []))
@@ -943,7 +954,7 @@ class MultiAgentFederatedWrapper(FixedTsForwardingMixin):
             ts_id, lanes, phase, elapsed, self.action_inspector.max_action_dim
         )
 
-        return {
+        obs = {
             "own": own,
             "neighbors": neighbors,
             "neighbor_mask": neighbor_mask,
@@ -951,6 +962,14 @@ class MultiAgentFederatedWrapper(FixedTsForwardingMixin):
             "action_mask": action_mask,
             "phase_feats": phase_feats,
         }
+        if self.movement_pressure is not None:
+            pressure, current_union, act_to_union = self.movement_pressure.extract(
+                ts_id, phase, self.action_inspector.max_action_dim
+            )
+            obs["movement_pressure"] = pressure
+            obs["current_union_phase"] = np.int64(current_union)
+            obs["act_to_union"] = act_to_union
+        return obs
 
     def _build_all_obs(self) -> Dict[str, Dict[str, np.ndarray]]:
         cache: Dict[str, Tuple[List[Lane], int, float, float, float, float]] = {}
@@ -1087,6 +1106,12 @@ def build_federated_env(cfg: Dict[str, Any]) -> MultiAgentFederatedWrapper:
         neighbor_summary=neighbor_summary,
         action_inspector=action_inspector,
         k_max=k_max,
+        # Read off the city cfg rather than added as a parameter, so the flag
+        # reaches worker processes for free: workers are handed the raw cfg dict
+        # and build their own env inside their own process, so one key injected
+        # by federated_training propagates to every city AND the holdout without
+        # touching any of build_federated_env's dozen other call sites.
+        movement_pressure=bool(cfg.get("movement_pressure", False)),
     )
 
 
