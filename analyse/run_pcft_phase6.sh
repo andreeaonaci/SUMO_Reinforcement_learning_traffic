@@ -33,6 +33,17 @@ PCFT_ARGS="--base_dir environments_c1_4_6 --pad_to_true_holdout --phase_relation
 log() { echo "=== [$(date '+%F %T')] $* ===" >> $DRIVER; }
 throttle() { while [ "$(jobs -rp | wc -l)" -ge "$MAX_CONCURRENT" ]; do sleep 20; done; }
 
+drain() {   # wait until no job of this batch is left running
+  # `wait` alone proved unreliable here (it returned while three subshells were
+  # still live, so the driver logged DONE early). Poll the real processes: this
+  # cannot return while work is outstanding.
+  wait 2>/dev/null || true
+  while pgrep -f "experiments.federated_training" > /dev/null \
+     || pgrep -f "progressive_curriculum_fedavg.py" > /dev/null; do
+    sleep 30
+  done
+}
+
 pcft_done() {   # order, seed -> 0 if all steps complete
   python - "$1" "$2" <<'PY'
 import os, sys, torch
@@ -93,7 +104,11 @@ PY
     # Capture python's status BEFORE anything else runs, or $? reports the
     # grep's exit code instead and every job looks like it succeeded.
     local rc=$?
-    grep -oE "results/run_[0-9_-]+_[0-9]+" "$OUT/$tag.log" | head -1 > "$marker"
+    # tail, not head: this log is APPENDED across relaunches, so head -1
+    # returns the first run_dir ever written -- which may be an aborted
+    # stub from a killed launch that has no federated_history.json. A
+    # resumed run re-logs the same dir, so tail is correct in both cases.
+    grep -oE "results/run_[0-9_-]+_[0-9]+" "$OUT/$tag.log" | tail -1 > "$marker"
     log "finished $tag exit=$rc" ) &
 }
 
@@ -103,5 +118,5 @@ for SEED in $SEEDS; do
   throttle; run_pcft reverse    "$SEED"
   throttle; run_fedavg "$SEED"
 done
-wait
+drain
 log "PCFT PHASE 6-SEED BATCH DONE"

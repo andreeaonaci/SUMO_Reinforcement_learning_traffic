@@ -7319,6 +7319,59 @@ representation, and stops helping once the representation is fixed.
 
 **Escalation launched 2026-09-09 to 6 seeds** (adding 17/21/25 to 3/7/11), all three arms.
 
+### §102 FINAL RESULT, 6 seeds, 2026-09-13: CONFIRMED -- PCFT does not help once the readout is
+### fixed, and the curriculum itself is a NULL
+
+All 9 remaining runs exited 0. Holdout reward, `environments_c1_4_6`, all arms
+`--phase_relational`:
+
+| arm | s3 | s7 | s11 | s17 | s21 | s25 | **mean best** | **mean final** |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| plain FedAvg | -0.096 | -0.060 | -0.082 | -0.112 | -0.076 | -0.104 | **-0.088** | **-0.110** |
+| PCFT reverse | -0.370 | -0.170 | -0.200 | -0.152 | -0.098 | -0.240 | -0.205 | -0.418 |
+| PCFT complexity | -0.220 | -0.170 | -4.600 | -6.630 | -0.352 | -1.460 | -2.239 | -2.894 |
+
+| comparison | isolates | \|diff\|/SE best | sample | \|diff\|/SE final | sample | seeds | drop-1 (best) |
+|---|---|---:|---:|---:|---:|---|---|
+| FedAvg vs PCFT-reverse | fine-tune + budget | **3.27** | 2.99 | **3.34** | 3.05 | **6/6** | 2.69 .. 3.80 |
+| FedAvg vs PCFT-complexity | PCFT overall | 2.11 | 1.93 | 2.20 | 2.01 | **6/6** | 1.51 .. 2.25 |
+| complexity vs reverse | **THE CURRICULUM** | 1.99 | 1.82 | 1.96 | 1.78 | 1/6 | 1.34 .. 2.17 |
+
+**Verdict: plain FedAvg beats both PCFT arms on 6/6 seeds on both measures.** The
+FedAvg-vs-reverse comparison clears the bar on both estimators with a drop-1 floor of 2.69, so it
+is not carried by one seed. **The curriculum itself is a NULL** (1.99/1.96, below the bar on the
+project convention and further below on sample std), and the little signal there is runs AGAINST
+the proposal: reverse order beats simplest-first on 5 of 6 seeds.
+
+**This is the point of the experiment, and it lands.** §87 confirmed PCFT at 6 seeds on the
+INDEXED head. On the phase-relational head it reverses. The one intervention in the §73-§95 corpus
+that ever cleared this project's bar was compensating for a broken representation, and stops
+helping -- indeed hurts -- once the representation is fixed. **That upgrades §101's floor-effect
+reading of that corpus from an inference to a measurement.** Combined with §101's finding that
+curriculum-over-clients is already ICCV 2023's contribution, PCFT is closed: it is neither novel
+nor, on the fixed readout, beneficial.
+
+**Caveats not retracted:**
+- **FedAvg vs PCFT-complexity is CONVENTION-SENSITIVE on best-round** (2.11 pstdev, 1.93 sample
+  std) and its drop-1 floor is 1.51. Quote the **reverse** comparison, which clears on both.
+- **The complexity arm is dominated by two catastrophic seeds** (11: -4.600, 17: -6.630). Excluding
+  them it sits at -0.55 against reverse's -0.22 -- direction holds, magnitude does not.
+- **PCFT's per-phase mean is not comparable** to FedAvg's per-round mean, so only best and final
+  are quoted.
+- **Seed 21's three runs were RESUMED**, not run straight through (§102b: resume restores weights
+  but not replay buffers, optimizer momentum or epsilon counters). Seed 21 is not an outlier in
+  either PCFT arm, so this does not appear to have mattered, but it is disclosed.
+- **Headroom is tight** (floor 0.0, `max_pressure` -0.34), as pre-registered before launch.
+
+**A tooling bug found while reading this batch, worth recording because it made the data look
+wrong:** the driver recorded each fedavg job's `run_dir` with `grep ... | head -1`, but those logs
+are APPENDED across relaunches, so for seed 25 it captured an aborted 2026-09-09 stub (killed
+seconds after launch, no `federated_history.json`) instead of the run that actually completed --
+making the arm look like it had only 5 seeds. `tail -1` is correct in every case, since a resumed
+run re-logs the same directory. Fixed in both drivers. Separately, `wait` returned early in the
+follow-on batch's driver, logging BATCH DONE while three jobs were still live; the jobs themselves
+completed fine but the log under-reported, so both drivers now poll the real processes instead.
+
 ### 102b. Resume support, added and functionally verified before the 6-seed batch
 
 Per user request, since the 6-seed batch may be interrupted. **`federated_training.py` already had
