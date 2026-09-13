@@ -1,5 +1,11 @@
 #!/bin/bash
-# Budget sensitivity of the phase-relational result (fidings sec 103).
+# Budget sensitivity AND the FRAP baseline, in one batch (fidings sec 103).
+#
+# Three arms at a MATCHED 20-round budget, so one batch answers two questions:
+#   indexed  vs phase  -> does the sec 96-100 gap survive 2.5-4x the budget?
+#   frap     vs phase  -> does a published phase-invariant readout, handed
+#                         RESCO's own hand-authored per-signal configuration,
+#                         match ours which is handed none? (sec 101)
 #
 # THE QUESTION A REVIEWER WILL ASK: every indexed-vs-phase-relational comparison
 # in this document (sec 96-100, sec 102) runs 5-8 rounds. "The indexed head just
@@ -39,6 +45,7 @@ run_arm() {   # arm(phase|indexed), seed
   local resume=""
   local extra=""
   [ "$arm" = "phase" ] && extra="--phase_relational"
+  [ "$arm" = "frap" ]  && extra="--frap_head"
 
   if [ -f "$marker" ]; then
     local rd
@@ -68,10 +75,11 @@ PY
     log "finished $tag exit=$rc" ) &
 }
 
-log "budget sensitivity starting: seeds=$SEEDS rounds=$ROUNDS"
+log "budget + FRAP batch starting: seeds=$SEEDS rounds=$ROUNDS arms=phase,indexed,frap"
 for SEED in $SEEDS; do
   throttle; run_arm phase   "$SEED"
   throttle; run_arm indexed "$SEED"
+  throttle; run_arm frap    "$SEED"
 done
 wait
-log "BUDGET SENSITIVITY BATCH DONE"
+log "BUDGET + FRAP BATCH DONE"

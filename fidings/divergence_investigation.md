@@ -7421,6 +7421,73 @@ final-round mean shifts marginally. No conclusion changes.
    configuration" from a capability claim into a parity claim.
 4. **Do NOT chase** a performance comparison against TransferLight (§101).
 
+## 103. The FRAP/MPLight baseline is BUILT and smoke-tested, and queued alongside a budget
+    sensitivity test -- one batch, two questions
+
+**2026-09-13.** §101 identified the two things the phase-relational result still needs and neither
+required new science, only work: a published baseline to compare against, and an answer to the
+obvious "the indexed head just needs more training" objection. Both are now implemented and queued
+as a single 3-arm batch at a matched 20-round budget (2.5-4x the 5-8 rounds every comparison in
+§96-§100 and §102 used).
+
+| arm | readout | configuration it is given for the UNSEEN holdout |
+|---|---|---|
+| `indexed` | positional Q-head | none |
+| `phase` | `--phase_relational` (ours) | none -- derived from the simulator |
+| `frap` | `--frap_head` (MPLight's network) | **RESCO's hand-authored `phase_pairs` + `pair_to_act_map` + `lane_sets`** |
+
+`indexed` vs `phase` answers the budget objection. `frap` vs `phase` answers §101's real question:
+**does a published phase-invariant readout, handed the per-intersection configuration it cannot
+work without, beat ours which is handed none?** The comparison is deliberately generous to FRAP --
+the claim under test is parity-without-configuration, not "we beat FRAP".
+
+### What was built
+
+- `agents/frap_head.py` -- FRAP ported from RESCO's `agents/action_value/mplight.py`, plus
+  `load_union_pairs()`.
+- `environments/movement_pressure.py` -- RESCO's `mplight` state (per-movement pressure,
+  `demand_shape=1`) from their authored `lane_sets` and the `lane_sets_outbound` derived from their
+  `downstream` wiring.
+- `agents/networks.py::forward_frap`, `agents/dqn.py::_collate_frap` + the `_q_of` branch,
+  `MultiAgentFederatedWrapper(movement_pressure=...)`, and `--frap_head` threaded through
+  `federated_training` and `parallel_server`.
+
+**Three adaptations, all forced by the multi-city setting, none hidden:** (1) RESCO sizes FRAP to
+ONE scenario's phase table (5/8/9/11 across our four cities) so this head is sized to the union of
+the training cities' pairs (11), with each intersection gathering its local actions out of it --
+§101 measured that all 8 of grid4x4's pairs are already in that union, so the holdout is fully
+covered and FRAP loses nothing; (2) `act_to_union` travels in the OBSERVATION, not in code, so the
+network still never learns which city it is in; (3) padding is `finfo.min` rather than `-inf`,
+matching `_mask_q`, because a true `-inf` NaNs the moment Q-values are averaged.
+
+### Verification before compute
+
+- **60 tests green.** The competition mask is checked **exactly against RESCO's `build_comp_mask`
+  verbatim** -- a FRAP arm that quietly differs from FRAP is a strawman, which is worse than no
+  baseline. Plus: `frap_head=False` is an exact structural no-op (parameter names and counts vs. a
+  network built without the argument); two intersections with different local->union maps read the
+  same union phase identically; the flag sits at the END of `_client_worker`'s signature, since the
+  Process args tuple is positional; and every signal of every city is covered by the config.
+- `audit_flag.py`: the same 3 gaps as `--phase_relational`, all the known sequential-path gap, and
+  `--frap_head` hard-errors without `--parallel` rather than being silently inert. `--align` reports
+  52/52 positional args still lined up.
+- **Real-SUMO smoke run, exit 0.** Args dump shows `frap_head: True`; the `[frap]` line confirms 11
+  union phases and movement-pressure enabled on 3 cities; round 1 completed; holdout eval returned
+  **reward -0.2200, 1456 vehicles arrived**.
+
+**That smoke number is already informative, with the obvious caveat that it is one round of one
+seed: FRAP scores -0.22 after a SINGLE round where the indexed head scores in the thousands.** It
+is doing what a phase-invariant readout should, which is convergent support for §98's mechanism
+claim from a completely independent implementation -- and it means the FRAP arm is a real baseline
+rather than a broken one.
+
+**Status: batch queued, not yet run.** Results pending. **Pre-registered so it cannot be
+rationalised afterwards:** if `frap` matches or beats `phase`, the §101 claim narrows to
+"equivalent performance without requiring per-intersection configuration", which is a weaker but
+still real and honest contribution. If `phase` beats `frap` despite FRAP's configuration advantage,
+that is a stronger result than this project currently claims. Either way it is 3 seeds and
+therefore a SCREEN.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
