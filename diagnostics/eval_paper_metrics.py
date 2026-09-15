@@ -60,6 +60,18 @@ def detect_phase_relational(state: dict) -> bool:
     return any(k.startswith("phase_scorer.") for k in state)
 
 
+def detect_frap(state: dict) -> bool:
+    """FRAP baseline readout (fidings sec 101/103b).
+
+    Like phase_relational, a FRAP checkpoint has no action-indexed head, so
+    infer_arch_from_checkpoint cannot read action_dim off head.4.weight. Unlike
+    it, the phase table IS recoverable from the weights -- frap.pair_index is
+    (P, 2) movement indices -- so the head can be rebuilt exactly as trained
+    without consulting the config on disk.
+    """
+    return any(k.startswith("frap.") for k in state)
+
+
 def build_agent(state: dict, k_max: int, env_action_dim: int):
     """Construct the agent a checkpoint came from.
 
@@ -71,7 +83,23 @@ def build_agent(state: dict, k_max: int, env_action_dim: int):
     from the environment instead of the weights. phase_dim is still recoverable,
     from the scorer's input width minus d_model.
     """
-    if detect_phase_relational(state):
+    if detect_frap(state):
+        own_dim = state["own_encoder.0.weight"].shape[1]
+        neighbor_dim = state["neighbor_encoder.0.weight"].shape[1]
+        d_model = state["head.0.weight"].shape[0]
+        # Rebuild the exact phase table the checkpoint was trained with, rather
+        # than re-reading configs/resco_frap/phase_pairs.json -- if that file
+        # were ever rebuilt with a different roster the two would silently
+        # disagree and the head would score the wrong phases.
+        pairs = state["frap.pair_index"].tolist()
+        agent = DQNAgent(
+            own_dim=own_dim, neighbor_dim=neighbor_dim, k_max=k_max,
+            action_dim=env_action_dim, d_model=d_model,
+            frap_head=True, frap_phase_pairs=pairs,
+        )
+        arch = {"own_dim": own_dim, "neighbor_dim": neighbor_dim,
+                "action_dim": env_action_dim, "n_phases": len(pairs)}
+    elif detect_phase_relational(state):
         own_dim = state["own_encoder.0.weight"].shape[1]
         neighbor_dim = state["neighbor_encoder.0.weight"].shape[1]
         d_model = state["head.0.weight"].shape[0]
@@ -207,7 +235,12 @@ def main():
             state = torch.load(path, map_location="cpu")
             state = state.get("model", state) if isinstance(state, dict) and "model" in state else state
             agent, _ = build_agent(state, k_max, action_dim)
-            head = "phase" if detect_phase_relational(state) else "indexed"
+            if detect_frap(state):
+                head = "frap"
+            elif detect_phase_relational(state):
+                head = "phase"
+            else:
+                head = "indexed"
         else:
             agent, head = None, rule
 
