@@ -7534,12 +7534,82 @@ is doing what a phase-invariant readout should, which is convergent support for 
 claim from a completely independent implementation -- and it means the FRAP arm is a real baseline
 rather than a broken one.
 
-**Status: batch queued, not yet run.** Results pending. **Pre-registered so it cannot be
-rationalised afterwards:** if `frap` matches or beats `phase`, the §101 claim narrows to
+**Status: DONE, 6 seeds -- see the result block below.** **Pre-registered before launch so it
+cannot be rationalised afterwards:** if `frap` matches or beats `phase`, the §101 claim narrows to
 "equivalent performance without requiring per-intersection configuration", which is a weaker but
 still real and honest contribution. If `phase` beats `frap` despite FRAP's configuration advantage,
 that is a stronger result than this project currently claims. Either way it is 3 seeds and
 therefore a SCREEN.
+
+### §103 RESULT, 6 seeds, 2026-09-15: the budget objection is DEAD, and phase-relational beats
+### FRAP on best-round despite FRAP holding the configuration advantage
+
+All 18 runs exited 0 (`environments_c1_4_6`, 20 rounds, `--local_episodes 2`, seeds 3/7/11/17/21/25;
+the machine slept ~32h mid-batch on 2026-09-14/15 -- jobs froze and resumed cleanly, the documented
+behaviour, no data lost).
+
+| arm | s3 | s7 | s11 | s17 | s21 | s25 | **mean best** | **mean final** |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `indexed` | -6191.25 | -1590.87 | -2324.46 | -6083.02 | -6403.76 | -7363.26 | **-4992.77** | **-6387.32** |
+| **`phase`** | -0.094 | -0.100 | -0.076 | -0.076 | -0.080 | -0.066 | **-0.082** | **-0.175** |
+| `frap` (oracle config) | -0.178 | -0.208 | -0.442 | -0.338 | -0.160 | -0.192 | **-0.253** | **-1.115** |
+
+| comparison | measure | \|diff\|/SE | sample std | drop-1 | seeds | verdict |
+|---|---|---:|---:|---|---|---|
+| `phase` vs `indexed` | best | **5.57** | 5.08 | 4.55 .. 7.31 | 6/6 | **CLEARS** |
+| `phase` vs `indexed` | final | **13.32** | 12.16 | 11.10 .. 19.01 | 6/6 | **CLEARS** |
+| `phase` vs `frap` | best | **4.06** | 3.71 | 3.26 .. 4.57 | 6/6 | **CLEARS** |
+| `phase` vs `frap` | final | 1.71 | 1.56 | 1.48 .. 2.41 | 6/6 | below bar |
+
+#### 1. The budget objection is answered, decisively
+
+**At 20 rounds -- 2.5-4x the budget every comparison in §96-§100 and §102 used -- the indexed head
+is still at -4992.77 against phase-relational's -0.082.** Four orders of magnitude, 6/6 seeds,
+clearing on both estimators with a drop-1 floor of 4.55. "The indexed head just needs more
+training" is no longer an open objection: more training does not close this gap, and on final-round
+the separation actually WIDENS (13.32). This is the single cheapest thing that was missing from the
+paper and it is now in hand.
+
+#### 2. FRAP works -- which is the strongest independent confirmation of §98 available
+
+A completely separate implementation of a phase-invariant readout -- RESCO's own FRAP, ported
+verbatim with its competition mask checked against their `build_comp_mask` -- reaches **-0.253**
+where the positional head sits at **-4992.77**. **This is not our architecture being special; it is
+the representation CLASS being the thing that matters**, which is precisely what §98 claimed and
+what §101's coverage measurement predicted. Convergent evidence from an independent codebase is
+worth more here than another seed of our own.
+
+#### 3. Phase-relational beats FRAP on best-round, and FRAP was given the advantage
+
+`phase` wins **6/6 seeds on BOTH measures**, and on best-round clears the bar on both estimators
+(4.06 / 3.71, drop-1 floor 3.26) -- **while FRAP was handed RESCO's hand-authored `phase_pairs`,
+`pair_to_act_map` and `lane_sets` for every city including the unseen holdout, and phase-relational
+was handed none.** Per §103's pre-registration this is the stronger of the two possible outcomes:
+not merely parity-without-configuration, but better-without-configuration on the primary measure.
+
+**The final-round comparison does NOT clear (1.71 / 1.56)** and must not be quoted as if it did.
+The direction is unanimous but the magnitude is dominated by FRAP's volatility.
+
+#### 4. New finding: FRAP transfers but does not HOLD
+
+| arm | best -> final | mean degradation | worst seed | final-round spread | final-round std |
+|---|---|---:|---:|---:|---:|
+| `phase` | -0.082 -> -0.175 | 2.19x | 4.61x | 0.284 | 0.096 |
+| `frap` | -0.253 -> -1.115 | **3.49x** | **9.17x** | **3.812** | **1.346** |
+
+**FRAP's final-round spread is 13x phase-relational's and its worst-seed degradation is twice as
+bad** (seed 11 ends at -4.052 from a best of -0.442). Both readouts reach good policies; the
+phase-relational one keeps them substantially better. That rhymes with the retention thread of
+§32-§53 -- reaching a good region is not the hard part, staying there is -- and it suggests the
+advantage over FRAP is a STABILITY advantage rather than a capacity one. **Not tested here:** why.
+Candidate explanations (FRAP's O(A^2) pairwise structure, its much smaller per-movement embedding,
+the fixed union table) are untested speculation and are recorded as such.
+
+**Caveats:** 3 seeds would have been a screen, 6 is this project's confirmation bar and is met on
+three of the four comparisons; the fourth (final-round vs FRAP) is explicitly not claimed.
+`environments_c1_4_6` is NOT RESCO-exact (§99's three mismatches), so **these numbers are
+internally valid -- all arms share the configuration -- but CANNOT be quoted against RESCO's
+published figures.** The RESCO-exact three-way comparison is §103b.
 
 ## Open questions / next steps
 
