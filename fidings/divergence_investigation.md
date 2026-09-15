@@ -7611,6 +7611,121 @@ three of the four comparisons; the fourth (final-round vs FRAP) is explicitly no
 internally valid -- all arms share the configuration -- but CANNOT be quoted against RESCO's
 published figures.** The RESCO-exact three-way comparison is §103b.
 
+### 103b. THE RESCO VALIDATION, done the correct way: three readouts in the literature's own
+### metrics, on the RESCO-exact roster
+
+**2026-09-15.** The comparison §103's numbers could NOT support. §103 ran on
+`environments_c1_4_6`, which still carries §99's three mismatches, so quoting it against RESCO
+would repeat exactly the error that retracted §59. This uses `environments_rescofull` (RESCO's own
+route files, windows and `yellow_time=3`), all three readouts at §100's identical protocol
+(5 rounds, `--local_episodes 2`, seeds 3/7/11/17/21/25), evaluated **in-distribution** because
+RESCO's published numbers are in-distribution.
+
+**Discipline applied, per §99/§100b/§101b:** only **Avg. Delay** and **Avg. Trip Time** are
+reported (this project's `wait` and `queue` do not reconcile with RESCO's definitions in either
+direction; reward is an internal unit). **`arrived` is beside every row** because
+`eval_paper_metrics.py` computes delay and trip time over ARRIVED vehicles only, so a controller
+that strands traffic reports *better* delay.
+
+#### cologne3 (RESCO's Cologne Corridor, 07:00-08:00, yellow=3)
+
+| controller | Avg. Delay | Avg. Trip | arrived | per-seed delay |
+|---|---:|---:|---:|---|
+| `frap` (6 seeds) | 150.3 | 188.0 | 2411 | 134.9 .. 170.5 |
+| `indexed` (6 seeds) | 54.0 | 91.2 | **2217** | 25.7 .. 99.1 |
+| `fixed_time` | 34.6 | 72.4 | 2810 | -- |
+| `max_pressure` | 22.4 | 60.1 | **2817** | -- |
+| **`phase` (6 seeds)** | **21.4** | **58.9** | 2615 | 19.7 .. 23.0 |
+| *RESCO IPPO (published)* | *22.13* | *57.45* | -- | -- |
+| *RESCO IDQN (published)* | *23.99* | *59.0* | -- | -- |
+
+#### ingolstadt7 (16:00-17:00, yellow=3)
+
+| controller | Avg. Delay | Avg. Trip | arrived | per-seed delay |
+|---|---:|---:|---:|---|
+| `frap` (6 seeds) | 93.4 | 137.3 | 2690 | 90.5 .. 97.5 |
+| `fixed_time` | 92.2 | 136.2 | 2833 | -- |
+| `indexed` (6 seeds) | 84.7 | 128.0 | **2433** | 50.8 .. **232.2** |
+| **`phase` (6 seeds)** | **35.2** | **79.0** | **2891** | 32.0 .. 37.9 |
+| `max_pressure` | **26.6** | **71.5** | 2681 | -- |
+| *RESCO IDQN (published)* | *31.19* | -- | -- | -- |
+
+### What this establishes
+
+**1. The representation gap holds IN-DISTRIBUTION, at 6 seeds, on the RESCO-exact roster.** Phase
+21.4 vs indexed 54.0 on Cologne, 35.2 vs 84.7 on Ingolstadt -- **and phase arrives MORE traffic in
+both** (2615 vs 2217; 2891 vs 2433). Since delay is conditioned on arrival, the indexed head's
+number is *flattered* by the traffic it strands, so **the true gap is wider than the table shows.**
+This extends §98/§102: the action representation is not only a transfer problem, it costs
+in-distribution performance too, which §95-§98 did not predict.
+
+**2. Phase-relational is dramatically more stable.** Per-seed delay spans 19.7-23.0 (Cologne) and
+32.0-37.9 (Ingolstadt) against the indexed head's 25.7-99.1 and 50.8-**232.2**. One indexed
+Ingolstadt seed is 6.6x worse than its own best seed.
+
+**3. Against RESCO's published numbers, honestly stated.** On Cologne, phase's 21.4 delay sits
+nominally ahead of IPPO (22.13) and IDQN (23.99) -- **but this is NOT a clean win and must not be
+quoted as one: phase arrives 2615 vehicles against `max_pressure`'s 2817 (7% fewer), and delay is
+conditioned on arrival.** The same caveat applies to the 21.4-vs-22.4 margin over `max_pressure`.
+What can be said without qualification is that phase reaches *the same range* as RESCO's published
+methods while training federated across three cities at ~10 episodes each, against RESCO's ~100
+episodes on the single scenario (§58).
+
+**On Ingolstadt phase LOSES outright and there is no excuse available:** 35.2 against
+`max_pressure`'s 26.6, while arriving MORE traffic (2891 vs 2681), so survivorship works against
+the comparison rather than for it. It is also ~13% behind IDQN's 31.19. **§101b's caveat attaches
+to this row: our vendored `ingolstadt7` is missing a green phase RESCO's net has at one of its
+seven intersections**, so that intersection has 3 actions where RESCO has 4.
+
+### 4. FRAP is poor in-distribution -- and the reason is measurable, not mysterious
+
+FRAP lands at 150.3 (Cologne) and 93.4 (Ingolstadt), worse than the indexed head and, on
+Ingolstadt, barely better than `fixed_time`. **This must NOT be read as "MPLight is a weak
+method", and must NOT be quoted against RESCO's published MPLight.** Two reasons:
+
+**(a) Budget.** These are round-5 checkpoints at §100's protocol. FRAP is still unstable there --
+its own holdout trajectory ends on a bad round for several seeds (`s11` -5.44, `s21` -5.24, `s7`
+-15.04), while the same head on the 20-round roster settles to -0.24/-0.3 (§103). Phase-relational
+is stable at 5 rounds; FRAP is not. RESCO trains MPLight ~100 episodes per scenario. Quoting a
+5-round FRAP against that would be §59's budget confound in the opposite direction.
+
+**(b) A measured structural reason, and this one is interesting.** MPLight's entire state is
+per-movement PRESSURE = inbound queue minus downstream queue. Where a movement has no downstream
+lanes inside the network, pressure degenerates to plain queue length and the signal is lost.
+Coverage, measured from RESCO's own `lane_sets`/`downstream` wiring:
+
+| city | movements with downstream lanes | FRAP result |
+|---|---:|---|
+| grid4x4 (holdout) | **144/192 (75%)** | FRAP does WELL (§103: -0.253) |
+| arterial4x4 | 144/192 (75%) | -- |
+| ingolstadt7 | 33/84 (**39%**) | FRAP poor (93.4) |
+| cologne3 | 12/36 (**33%**) | FRAP worst (150.3) |
+
+**FRAP's performance tracks its pressure coverage exactly across all four cities.** Corridor
+networks, where most movements exit the map, strip MPLight of the signal it is built on; regular
+grids retain it. That is a property of MPLight's *state design*, not of this port -- RESCO computes
+pressure the same way. **Stated as a well-supported hypothesis, not a proven mechanism:** the
+correlation is across only four cities and confounded with budget, and the clean test (equalise
+budget, or evaluate FRAP on a high-coverage in-distribution city) has not been run.
+
+Note the per-seed spreads are TIGHT in-distribution (134.9-170.5, 90.5-97.5), i.e. FRAP is
+*consistently* poor here rather than erratic -- which is what a missing input signal looks like,
+and is a different failure from the volatility §103 measured on the holdout.
+
+### A bug this exposed, worth recording
+
+`eval_paper_metrics.py` could not load FRAP checkpoints at all: `build_agent` knew the
+phase-relational head but not FRAP, so it built a plain network and strict `load_state_dict`
+rejected the `frap.*` keys. Both FRAP arms failed (exit 1, 13s) on the first pass. **It crashed
+loudly rather than silently evaluating a differently-shaped network** -- the good failure mode, and
+the driver's `exit=1` made it visible instead of emitting a plausible wrong row. Fixed by rebuilding
+the head from `frap.pair_index` in the checkpoint itself rather than re-reading
+`configs/resco_frap/phase_pairs.json`, so a later rebuild of that file with a different roster
+cannot silently make the head score the wrong phases. `diagnostics/swa_reeval.py` had the identical
+defect (it infers `action_dim` from `head.4.weight`, which neither head has) and was fixed the same
+way -- which also means **§93's ensemble result can now be re-tested on the fixed readout**, having
+been measured on the indexed one.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit

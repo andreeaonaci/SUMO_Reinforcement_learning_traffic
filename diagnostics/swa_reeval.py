@@ -128,21 +128,45 @@ def main():
     print(f"Command: {' '.join(sys.argv)}")
 
     states = [torch.load(p, map_location="cpu") for p in ckpt_paths]
-    arch = infer_arch_from_checkpoint(states[0])
-    for s, p in zip(states[1:], ckpt_paths[1:]):
-        other = infer_arch_from_checkpoint(s)
-        if other != arch:
+
+    # Heads without per-action rows (sec 96 phase-relational, sec 101 FRAP) carry
+    # no action_dim in their weights -- that independence is the whole point of
+    # those architectures -- so infer_arch_from_checkpoint, which reads it off
+    # head.4.weight, cannot describe them. Detect the head first and take
+    # action_dim from the environment instead, as eval_paper_metrics.py does.
+    def _head_kind(st):
+        if any(k.startswith("frap.") for k in st):
+            return "frap"
+        if any(k.startswith("phase_scorer.") for k in st):
+            return "phase"
+        return "indexed"
+
+    head_kind = _head_kind(states[0])
+    for st, pth in zip(states[1:], ckpt_paths[1:]):
+        k = _head_kind(st)
+        if k != head_kind:
             raise ValueError(
-                f"Checkpoint {p} has architecture {other}, expected {arch} (from "
-                f"{ckpt_paths[0]}) -- all checkpoints being combined must share one "
-                "architecture (same run, or at least identical own_dim/neighbor_dim/"
-                "action_dim/dueling/head_fix)."
-            )
+                f"Checkpoint {pth} uses the '{k}' head but {ckpt_paths[0]} uses "
+                f"'{head_kind}' -- averaging or ensembling across different readouts "
+                "is meaningless.")
+
+    arch = None
+    if head_kind == "indexed":
+        arch = infer_arch_from_checkpoint(states[0])
+        for st, pth in zip(states[1:], ckpt_paths[1:]):
+            other = infer_arch_from_checkpoint(st)
+            if other != arch:
+                raise ValueError(
+                    f"Checkpoint {pth} has architecture {other}, expected {arch} (from "
+                    f"{ckpt_paths[0]}) -- all checkpoints being combined must share one "
+                    "architecture (same run, or at least identical own_dim/neighbor_dim/"
+                    "action_dim/dueling/head_fix)."
+                )
 
     city_configs, (own_dim, neighbor_dim, k_max), action_dim, _ = resolve_city_configs_and_dims(args.base_dir)
     if args.pad_to_true_holdout:
         action_dim = maybe_pad_action_dim_to_true_holdout(action_dim, args.base_dir)
-    if action_dim != arch["action_dim"]:
+    if arch is not None and action_dim != arch["action_dim"]:
         raise ValueError(
             f"Checkpoint action_dim={arch['action_dim']} doesn't match this base_dir/flags' "
             f"action_dim={action_dim} -- pass --pad_to_true_holdout if the checkpoint was "
@@ -150,11 +174,29 @@ def main():
         )
 
     def build_agent(state):
-        agent = DQNAgent(
-            own_dim=arch["own_dim"], neighbor_dim=arch["neighbor_dim"], k_max=k_max,
-            action_dim=arch["action_dim"], dueling=arch["dueling"], head_fix=arch["head_fix"],
-            encoder_depth=arch["encoder_depth"], n_attn_layers=arch["n_attn_layers"],
-        )
+        if head_kind == "phase":
+            d_model = state["head.0.weight"].shape[0]
+            agent = DQNAgent(
+                own_dim=state["own_encoder.0.weight"].shape[1],
+                neighbor_dim=state["neighbor_encoder.0.weight"].shape[1],
+                k_max=k_max, action_dim=action_dim, d_model=d_model,
+                phase_relational=True,
+                phase_dim=state["phase_scorer.0.weight"].shape[1] - d_model,
+            )
+        elif head_kind == "frap":
+            agent = DQNAgent(
+                own_dim=state["own_encoder.0.weight"].shape[1],
+                neighbor_dim=state["neighbor_encoder.0.weight"].shape[1],
+                k_max=k_max, action_dim=action_dim,
+                d_model=state["head.0.weight"].shape[0],
+                frap_head=True, frap_phase_pairs=state["frap.pair_index"].tolist(),
+            )
+        else:
+            agent = DQNAgent(
+                own_dim=arch["own_dim"], neighbor_dim=arch["neighbor_dim"], k_max=k_max,
+                action_dim=arch["action_dim"], dueling=arch["dueling"], head_fix=arch["head_fix"],
+                encoder_depth=arch["encoder_depth"], n_attn_layers=arch["n_attn_layers"],
+            )
         agent.load_state_dict(state)
         return agent
 
