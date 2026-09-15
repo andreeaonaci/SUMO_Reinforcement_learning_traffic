@@ -1,4 +1,12 @@
-# Everything we know — master summary (as of 2026-09-09)
+# Everything we know — master summary (as of 2026-09-16)
+
+> **UPDATE 2026-09-16 (§100-§104).** The phase-relational result is confirmed at 6 seeds on five
+> configurations, survives 2.5-4x budget, and holds in-distribution too. But a prior-art review
+> (§101) found the architecture family, the zero-shot claim, the federated setting and the
+> curriculum design are **all already published** — what survives is that we need no
+> per-intersection configuration where the closest prior art does. PCFT was re-tested on the fixed
+> readout and **reverses** (§102), which upgrades the floor-effect reading of §73-§95 from
+> inference to measurement. See `CLAUDE.md`'s RESUME HERE for the current claim ledger.
 
 > **READ THIS FIRST — the framing below sections 1-6 is superseded.** Between 2026-09-08 and
 > 2026-09-09 (`divergence_investigation.md` §95-§100) the cross-topology gap was traced to the

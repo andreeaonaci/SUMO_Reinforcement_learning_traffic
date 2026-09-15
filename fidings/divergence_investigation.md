@@ -7726,6 +7726,84 @@ defect (it infers `action_dim` from `head.4.weight`, which neither head has) and
 way -- which also means **§93's ensemble result can now be re-tested on the fixed readout**, having
 been measured on the indexed one.
 
+## 104. Training-topology DIVERSITY on the phase-relational head: no benefit, but the test is
+    SATURATED and should not be treated as a clean null
+
+**2026-09-15/16.** Domain randomization over varied synthetic networks is the mechanism the
+2024-2026 generalization literature credits -- TransferLight (arXiv:2412.09719) for zero-shot
+transfer, the domain-randomization/meta-learning line (arXiv:2307.11357) for robustness. Robustness
+is this project's remaining weakness (§103), so the SOTA mechanism and our own open problem point
+at the same lever. §71 appeared to have tested it and found null, but that result is uninterpretable
+for two independent reasons (see below), so it was re-run properly.
+
+**Design.** Both arms `--phase_relational`, 10 rounds, `--local_episodes 2`, seeds 3/7/11, true
+holdout. The three real cities are SHARED, not swapped, so the only variable is added diversity:
+
+- `base` — `environments_c1_4_6`: city_1/4/6, 26 intersections.
+- `div` — `environments_divwide`: the same three PLUS four synthetic irregular grids
+  (3x3/4x4/5x5/6x6, 20-30% of interior signals deleted so junction degree varies *within* a city),
+  93 intersections.
+
+### Why §71 could not answer this
+
+§71 ran 14 cities and got a null. That is uninterpretable twice over:
+
+1. **It used the INDEXED readout**, which §102 showed produces floor effects — no intervention can
+   demonstrate benefit through a readout that cannot express a transferable policy.
+2. **NEW, found while building this experiment: its roster (`environments_wide`) contains
+   `city_7`, whose `net_file` IS `grid4x4.net.xml` — the holdout's own network** (§95a).
+   `is_true_holdout` does not catch this: it checks the evaluation city's NAME, not whether a
+   training city shares its topology. So §71's cross-topology framing was invalid independently of
+   the readout.
+
+`environments_divwide` and `environments_wide_clean` both exclude `city_7` and are verified
+leak-free by explicit net-file comparison.
+
+### Result
+
+| measure | `div` | `base` | \|diff\|/SE | sample | seeds favouring div | drop-1 |
+|---|---:|---:|---:|---:|---|---|
+| best-ever round | -0.079 | **-0.071** | 3.56 | 2.91 | **0/3** | 2.55 .. 6.96 |
+| final round | **-0.111** | -0.135 | 0.59 | 0.48 | 2/3 | 0.17 .. 3.89 |
+
+Per-seed best: `div` [-0.080, -0.074, -0.084]; `base` [-0.072, -0.070, -0.070].
+
+**DO NOT read the best-round row as "diversity hurts".** The arms differ by **0.008 reward** on a
+scale where the floor is 0.0 and `max_pressure` scores -0.34. The statistic is large because the
+within-arm variance is minuscule (base spans 0.002 across three seeds), not because the effect
+matters. **This is a textbook ceiling effect and exactly what `/scenario` exists to prevent** —
+at 10 rounds the phase-relational head is effectively saturated on this holdout, so the comparison
+has almost no dynamic range to resolve anything.
+
+### The one directionally interesting signal
+
+| arm | best -> final degradation | final-round spread |
+|---|---:|---:|
+| `base` | 1.92x | 0.130 |
+| `div` | **1.38x** | **0.102** |
+
+`div` degrades less from its best and its final-round seeds sit closer together — which is the
+direction domain randomization predicts, and it targets the exact weakness §103 identified. **But
+it is 3 seeds, the differences are tiny, and final-round reward itself is a clean null (0.59).**
+This is a hint worth following, not a finding.
+
+### Verdict and what it changes
+
+**§71's null does NOT reverse on the fixed readout — but this test cannot establish that either,
+because it is saturated.** The honest statement is: *at a budget and holdout where phase-relational
+is already near the floor, adding topological diversity changes nothing measurable.* That is much
+weaker than "diversity does not help", and the two must not be conflated.
+
+**Confound not controlled** (stated before launch): `div` also sees 3.6x more data per round (93 vs
+26 intersections), so it had more gradient steps as well as more diverse ones. Since the result is
+null, the confound is moot — it would only matter had `div` won.
+
+**Next, and this is the actionable part:** re-run on a scenario with real headroom. §97's congestion
+holdout (grid4x4 at 3x demand) has phase-relational at -0.32 against `max_pressure`'s -0.64 — an
+order of magnitude more dynamic range than the -0.07 seen here — and §97 already verified it sits
+off both the ceiling and the floor. `analyse/run_diversity.sh` takes `SEEDS`/`ROUNDS` and needs
+only `--eval_base_dir` pointed at the dense roster to run there.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit

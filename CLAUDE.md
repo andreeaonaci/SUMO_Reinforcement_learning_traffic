@@ -196,7 +196,95 @@ which had gone stale):
   implemented and tested* FedProx proximal term, `DQNAgent.mu` — see next bullet — which is real
   and unaffected by this deletion.
 
-## RESUME HERE (as of 2026-09-09 20:05 — check this is still current before trusting it)
+## RESUME HERE (as of 2026-09-16 02:10 — check this is still current before trusting it)
+
+### Nothing is running. Nothing is queued. The machine was shut down cleanly.
+
+Everything below is committed and pushed to `origin/next_phases`. **The main checkout may be
+behind — `git pull` first.** All work since 2026-09-09 lives in the worktree branch
+`worktree-rescofull-writeup`, already merged into `origin/next_phases`.
+
+### THE HEADLINE, in one paragraph
+
+The action representation is the binding constraint on cross-topology generalization.
+`--phase_relational` (a movement-relational readout derived automatically from the simulator)
+beats a positionally-indexed head by four orders of magnitude zero-shot on an unseen topology,
+**confirmed at 6 seeds on five configurations**, and beats it in-distribution too. It also beats
+`max_pressure` zero-shot. What it does NOT do is beat `max_pressure` in-distribution on every
+scenario, and it is not a novel architecture — see the claim ledger.
+
+### What was established 2026-09-09 → 09-16
+
+| § | finding | rigor |
+|---|---|---|
+| 100 | phase-relational CONFIRMED on the fully RESCO-exact roster | 6 seeds, \|diff\|/SE 23.6/30.9/53.8, 6/6 |
+| 100b | in-distribution it does NOT beat `max_pressure`: ties Cologne, loses Ingolstadt. Raw Cologne mean was a **survivorship artifact** | 6 seeds |
+| 101 | **prior-art review: the architecture family, zero-shot claim, federated setting and curriculum are ALL already published.** What survives is the *automatic configuration* property | no compute |
+| 101b | **4th RESCO mismatch: our `ingolstadt7` is missing a green phase** RESCO's net has, at 1 of 7 intersections | measured |
+| 102 | **PCFT does not help on the fixed readout — it hurts.** Plain FedAvg beats both PCFT arms 6/6. Curriculum itself a null | 6 seeds, 3.27/3.34 |
+| 103 | **budget objection DEAD** (indexed still 4 orders behind at 20 rounds, 5.57/13.32, 6/6). **FRAP works** (independent confirmation of §98). **Phase beats FRAP on best-round** (4.06, 6/6) *while FRAP held the oracle config* | 6 seeds |
+| 103b | RESCO validation in literature metrics, three readouts, done correctly | 6 seeds |
+| 104 | training-topology diversity: **no measurable effect, but the test is SATURATED** — do not cite as a clean null | 3 seeds |
+
+### The claim ledger — what can and cannot be said
+
+**CAN claim (fully supported):** the action representation is the binding constraint (§98's
+dead-rows control: indexed still gridlocks with every usable row fully trained); phase-relational
+beats `max_pressure` zero-shot, 6 seeds × 5 configurations; the gap survives 2.5-4x budget (§103);
+the gap holds in-distribution too, *while arriving more traffic*, so the true gap is wider (§103b);
+phase-relational is far more stable (per-seed delay 19.7-23.0 vs indexed's 25.7-232.2); ~20 prior
+interventions were floor effects — **now a measurement, not an inference** (§102); six evaluation
+artifacts, each of which produced a plausible wrong number (§25, §95a, §95b, §99, §100b, §101b).
+
+**CAN claim with the caveat in the same sentence:** "we require no per-intersection configuration
+where the closest prior art does" — this is a **capability** claim; §103's best-round win over FRAP
+is the parity evidence, but §103's final-round comparison does **not** clear the bar.
+
+**CANNOT claim:** better than SOTA; a novel architecture (FRAP 2019, AttendLight 2020); novel
+zero-shot transfer (MuJAM 2022, TransferLight Dec 2024); novel federated TSC or clustered
+aggregation (HFRL 2025); PCFT as a contribution (ICCV 2023 owns client curricula, and §102 shows it
+hurts); in-distribution competitiveness with `max_pressure`; any absolute Ingolstadt number without
+§101b's missing-phase disclosure.
+
+### Two rules that must survive
+
+1. **Never report trip time or delay without `arrived` beside it.** `eval_paper_metrics.py`
+   computes both over ARRIVED vehicles only, so stranding traffic *improves* them. This produced a
+   wrong headline once already (§100b).
+2. **Never quote a number from `environments_c1_4_6` against RESCO.** That roster still carries
+   §99's three mismatches. Only `environments_rescofull` is RESCO-exact. This is the error that
+   retracted §59.
+
+### New this stretch, and reusable
+
+- **`--frap_head`** — MPLight's FRAP ported from RESCO's source as a baseline arm, with its
+  competition mask asserted equal to their `build_comp_mask` verbatim. 60 tests.
+- **`/priorart` skill** — the claim-level counterpart to `/benchmark`. Would have saved a week.
+- `/lever`, `/launch`, `/runstatus` extended with this session's bugs (see their own docs).
+- `environments_divwide`, `environments_wide_clean` — leak-free diversity rosters.
+- `analyse/`: `run_resco_validation.sh`, `run_diversity.sh`, `run_rescofull_frap.sh`,
+  `run_budget_sensitivity.sh`, `run_pcft_phase6.sh` — all skip-or-resume, safe to stop and relaunch.
+
+### NEXT, in priority order
+
+1. **Re-run §104 on a scenario with headroom.** §104 is saturated (arms differ by 0.008 on a
+   0.0-floor scale). §97's congestion holdout has 10x the dynamic range and is already verified off
+   ceiling and floor. `analyse/run_diversity.sh` needs only `--eval_base_dir` pointed at it.
+2. **Re-test §93's ensemble on the phase-relational head.** `diagnostics/swa_reeval.py` was fixed
+   to support it (it previously inferred `action_dim` from `head.4.weight`, which neither the
+   phase nor FRAP head has). §93's ensemble WON on the indexed head; ensembling directly targets
+   the volatility that is the remaining weakness, and the 6 checkpoints already exist — **near-zero
+   compute.** Start here if compute is tight.
+3. **The paper needs no new compute.** §101's positioning decision stands: write the mechanism +
+   evaluation-artifacts paper, with phase-relational as constructive validation rather than the
+   novelty claim. Do NOT chase a performance claim against TransferLight.
+4. Open and untested: why phase-relational beats FRAP — §103 suggests *stability*, not capacity.
+   §103b's pressure-coverage hypothesis (FRAP's results track its % of movements with downstream
+   lanes across all four cities: 75/75/39/33) is well-supported but unproven.
+
+---
+
+## SUPERSEDED (kept for detail) — RESUME HERE as of 2026-09-09
 
 ### FIRST: there is a half-finished batch. One command restarts it.
 

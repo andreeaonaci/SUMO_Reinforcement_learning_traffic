@@ -15,6 +15,24 @@ investigation log wins.
 
 ---
 
+## A0-UPDATE (2026-09-16): what §100-§104 changed about the claims below
+
+**Strengthened:** the gap survives 2.5-4x training budget (§103, 6 seeds) and holds
+**in-distribution** as well (§103b: delay 21.4 vs 54.0 on Cologne, 35.2 vs 84.7 on Ingolstadt)
+*while arriving more traffic*, so the real gap exceeds the numbers. A published phase-invariant
+readout (MPLight's FRAP, ported from RESCO's source) independently reproduces the mechanism — and
+phase-relational still beats it on best-round **while FRAP holds the hand-authored configuration
+advantage**. §102's PCFT reversal turns the floor-effect claim into a measurement.
+
+**Narrowed:** §101's prior-art review — the architecture family (FRAP 2019, AttendLight 2020),
+zero-shot transfer (MuJAM 2022, TransferLight 2024), federated TSC with clustered aggregation
+(HFRL 2025) and curriculum-over-clients (ICCV 2023) are all published. **Claim the automatic
+configuration property and the mechanism isolation, not the architecture.**
+
+**Do not claim:** in-distribution competitiveness with `max_pressure` (§103b: loses on Ingolstadt
+outright); any Ingolstadt number without §101b's missing-green-phase disclosure; any number from
+`environments_c1_4_6` against RESCO (§99's mismatches).
+
 ## A0. THE HEADLINE RESULT (2026-09-08/09) — `--phase_relational` beats `max_pressure` zero-shot
     on an unseen topology, confirmed at 6 seeds on four configurations
 
