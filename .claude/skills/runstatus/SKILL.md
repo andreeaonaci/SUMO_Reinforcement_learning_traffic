@@ -37,6 +37,45 @@ via the run dir's PID suffix).
 - **Nonzero exits** — treat the whole arm as incomplete. An arm with a missing seed
   is not a clean multi-seed comparison; relaunch the missing seed before analyzing.
 
+## Confirming host sleep rather than guessing
+
+A run that looks frozen for hours is usually the host sleeping. Prove it from the
+round timestamps instead of assuming either way:
+
+```bash
+grep -oE "^[0-9-]+ [0-9:]+.*Federated round [0-9]+ /" results/<arm>.log | tail -8
+```
+
+A clean sleep looks like an abrupt jump between two otherwise evenly-spaced
+rounds, with normal spacing resuming after:
+
+```
+2026-09-14 04:39:58   Federated round 13 / 20
+2026-09-15 12:29:10   Federated round 14 / 20     <- ~32h gap, resumed fine
+```
+
+That is the documented behaviour (§30, §42) and needs no action. A *stall* looks
+different: the process is alive but the log's mtime is also old, or the process is
+gone entirely.
+
+## Reading a batch whose driver mis-reported
+
+The driver's own bookkeeping can be wrong even when every run is fine — both of
+these happened here, and both made complete arms look incomplete:
+
+- **`exit=0` on a job that did not finish.** `$?` captured after a later command
+  reports that command's status. Trust `federated_history.json`'s round count over
+  the driver's exit line.
+- **A `run_dir` marker pointing at an aborted stub.** Logs are appended across
+  relaunches; a marker written with `head -1` can name a killed launch that has no
+  history. Check for multiple run dirs in one log and take the last:
+  ```bash
+  grep -oE "results/run_[0-9_-]+_[0-9]+" results/<arm>.log | sort -u
+  ```
+
+**Before concluding an arm is short a seed, verify against the run dirs**, not the
+driver log.
+
 ## After the batch
 
 `/seedcheck --batch-log <same log>` reads the same finish markers and does the

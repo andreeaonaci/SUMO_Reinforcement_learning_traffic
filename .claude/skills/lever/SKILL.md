@@ -1,6 +1,6 @@
 ---
 name: lever
-description: Implement a new training-time intervention (a CLI flag / lever) end-to-end through this repo's long, partly-positional plumbing chain, then verify it actually reaches the network before spending seed budget. Use when adding any new --flag to federated_training, changing DQNAgent/network behavior behind a switch, or auditing whether an existing flag is wired correctly.
+description: Implement a new training-time intervention OR a ported published baseline as a CLI flag, end-to-end through this repo's long, partly-positional plumbing chain, then verify it actually reaches the network before spending seed budget. Use when adding any new --flag to federated_training, porting a paper's method as a comparison arm, changing DQNAgent/network behavior behind a switch, or auditing whether an existing flag is wired correctly.
 ---
 
 # lever — add an intervention without it silently doing nothing
@@ -100,6 +100,49 @@ Then verify from the run's own `training.log`:
   confirmation from inside the code path if there is no other observable.
 
 Also run `pytest tests/test_flag_wiring.py -q`.
+
+## Porting a PUBLISHED BASELINE rather than your own lever
+
+Same plumbing chain, **higher verification bar**. A self-built baseline that
+loses is worse than no baseline: it looks like a strawman, and a reviewer who
+knows the method will say so. `--frap_head` (MPLight's FRAP, fidings §101/§103)
+is the worked example.
+
+**1. Use the authors' own configuration verbatim.** Do not re-derive it. RESCO
+ships `phase_pairs`, `pair_to_act_map` and `lane_sets` per scenario; those were
+copied, not regenerated, because the whole point of the comparison was that their
+method *needs* them and ours does not. `diagnostics/build_frap_config.py` extracts
+them; `check_frap_config.py` validates them against our nets before any compute.
+
+**2. Check the arithmetic against their reference implementation, not their
+paper.** `tests/test_frap_head.py` includes RESCO's `build_comp_mask` copied
+verbatim and asserts our mask equals theirs. That single test is what makes the
+arm quotable.
+
+**3. Be generous to the baseline, on purpose.** FRAP was handed the hand-authored
+configuration for *every* city including the unseen holdout. If you win anyway,
+the result is strong; if you win only by handicapping them, it is worthless.
+
+**4. Document every adaptation in the module docstring.** Three were forced here
+(union phase table across cities, `act_to_union` carried in the observation,
+`finfo.min` instead of `-inf`), each with its reason. An undocumented adaptation
+is indistinguishable from a bug.
+
+**5. Their state may not be your state.** MPLight's input is only
+`[current_phase, per-movement pressure]`. Feeding it this project's richer
+observation would make it a *different, unfairly advantaged* method — so
+`forward_frap` deliberately ignores `own_obs`/`neighbor_obs`, and a test pins the
+signature so that cannot drift.
+
+**6. If the baseline needs new observation keys**, gate them off by default. The
+movement-pressure extractor costs ~24 extra traci calls per intersection per
+tick; paying that in every other arm would slow every future run. Read the switch
+off the city `cfg` dict — workers build their own env from the raw cfg, so one
+injected key reaches every city and the holdout without touching
+`build_federated_env`'s dozen other call sites.
+
+**7. The no-op proof is stricter.** Assert the parameter *names and count* match a
+network built without the argument at all, not just that the flag defaults false.
 
 ## Step 5 — then, and only then, spend compute
 

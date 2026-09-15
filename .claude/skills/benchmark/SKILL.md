@@ -75,6 +75,12 @@ them.
 
 ## Step 5 — check the prior art is actually beaten
 
+**This step now has its own skill: `/priorart`.** Use it for the claim-level
+question ("is this new, and what can we honestly say?"); this skill stays the
+number-level one ("is this comparison valid?"). §101 ran it once and found the
+architecture family, the zero-shot claim, the federated setting and the
+curriculum design were all already published — at no compute cost.
+
 Beating `fixed_time` and `max_pressure` establishes nothing against methods designed for the
 problem. For phase-based readouts the relevant prior art is **AttendLight** (NeurIPS 2020, varying
 phase counts, unseen intersections), **MPLight** (AAAI 2020) and **FRAP** (CIKM 2019). If a claim
