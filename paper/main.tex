@@ -484,13 +484,89 @@ ingolstadt7 the proposed readout is outperformed by max pressure, and that
 comparison carries no such qualification---it arrives more traffic and is still
 behind.
 
-\subsection{Prior negative results are floor effects}
+\subsection{Prior negative results are floor effects}\label{sec:floor}
 
-Approximately twenty training-time interventions had previously been evaluated on
-this task---algorithm substitutions, capacity changes, aggregation strategies,
-curricula and retention mechanisms---of which one, a progressive curriculum with
-per-city fine-tuning, had cleared the significance threshold at six seeds.
-Re-running that intervention on the corrected readout reverses its sign.
+Thirty distinct interventions were evaluated on this task before the readout was
+identified as the constraint, spanning aggregation strategy, network architecture,
+learning algorithm, loss shaping, training procedure and test-time adaptation.
+Table~\ref{tab:inventory} is the complete inventory. Every entry was run under the
+positionally indexed readout, on the same rosters and the same
+$|\Delta|/\mathrm{SE}\geq 2$ criterion used elsewhere in this paper.
+
+The distribution of outcomes is itself the evidence. Of thirty interventions,
+twenty-one were null or negative, four were inconclusive, and five reached the
+threshold---of which three were test-time or evaluation-time procedures that do not
+alter the learned policy, and one, discussed below, reverses when the readout is
+corrected. No training-time change to architecture, algorithm, aggregation or loss
+produced a durable improvement. A search of that breadth returning that result is
+the signature of a floor, not of thirty independently unhelpful mechanisms.
+
+Of the interventions that did clear the threshold, the strongest was a progressive
+curriculum with per-city fine-tuning. Re-running it on the corrected readout
+reverses its sign.
+
+\begin{table*}[t]
+\caption{Complete inventory of interventions evaluated under the positionally
+indexed readout. Verdicts follow the study's own criterion
+($|\Delta|/\mathrm{SE}\geq2$ at six seeds; three-seed outcomes are screens).
+``Floor'' in the final column marks results that Section~\ref{sec:floor}
+reinterprets as uninformative about the mechanism tested.}
+\label{tab:inventory}
+\centering\footnotesize
+\begin{tabular}{@{}llll@{}}
+\toprule
+Intervention & Category & Outcome & Status after this paper \\
+\midrule
+FedAvg (sample-count weighted) & aggregation & reference & --- \\
+EMA loss-improvement weighting & aggregation & null & floor \\
+EMA gradient-alignment weighting & aggregation & null & floor \\
+Learning-velocity novelty weighting & aggregation & null & floor \\
+Gradient-survival weighting & aggregation & null & floor \\
+Clustered FedAvg (by action dim.) & aggregation & null & floor \\
+Server momentum & aggregation & negative with dueling & floor \\
+FedProx proximal term & aggregation & no effect & floor \\
+Reptile-style meta-aggregation & aggregation & null ($0.82/0.07$) & floor \\
+No federation (independent training) & aggregation & null ($1.78/1.43$) & floor \\
+\midrule
+Dueling head $+$ $n$-step returns & architecture & not retained under true holdout & floor \\
+Neighbour attention vs.\ mean pooling & architecture & indistinguishable & floor \\
+Masked-head aggregation & architecture & benefit vanishes with roster size & floor \\
+Encoder depth / attention layers & architecture & null & floor \\
+Width, BatchNorm, activation & architecture & null & floor \\
+Recurrent (GRU) policy & architecture & inconclusive & floor \\
+Topology-conditioned FiLM & architecture & screen positive, null at six seeds & floor \\
+Bootstrapped multi-head $Q$ & architecture & null & floor \\
+Low-rank adapter & architecture & null ($0.38/0.28$) & floor \\
+Bounded $Q$-spread & architecture & null ($0.22/0.07$) & floor \\
+Differential trunk learning rate & architecture & negative ($2.15/1.99$) & floor \\
+\midrule
+PPO & algorithm & null & floor \\
+Munchausen DQN & algorithm & null & floor \\
+Distributional (QR-DQN) & algorithm & negative ($1.69/1.13$) & floor \\
+Evolution strategies & algorithm & inconclusive & floor \\
+Second-order MAML & algorithm & negative & floor \\
+\midrule
+$Q$-entropy regularization & loss & split, unresolved & floor \\
+Conservative $Q$-learning (CQL) & loss & screen $2.35$, $1.05$ at six seeds & floor \\
+Ad hoc reward shaping & loss & inconclusive & floor \\
+Pressure-normalised reward & loss & null & floor \\
+Potential-based shaping (max-pressure) & loss & \textbf{confirmed} ($\approx2.5$) & floor \\
+Added pressure features to state & state & negative (single seed) & floor \\
+\midrule
+Periodic $\varepsilon$ reset & procedure & null ($\approx0.1$--$0.2$) & floor \\
+Replay-buffer reset on lock-in & procedure & null ($0.30/0.38$) & floor \\
+Self-anchoring weight reversion & procedure & inconclusive ($1.53/0.90$) & floor \\
+Wider training roster (14 cities) & data & null ($0.60$) & floor; roster also leaked \\
+Sequential curriculum & procedure & \textbf{confirmed} ($1.92$--$4.22$) & untested on corrected readout \\
+Progressive curriculum $+$ fine-tune & procedure & \textbf{confirmed} ($2.42/3.42$) & \textbf{reverses} (Table~\ref{tab:curriculum}) \\
+\midrule
+Softmax evaluation temperature & test-time & partial recovery & does not alter the policy \\
+Checkpoint averaging (SWA) & test-time & real, not deployable & does not alter the policy \\
+Independent-seed ensemble & test-time & \textbf{confirmed} & does not alter the policy \\
+Fine-tuning on holdout topology & test-time & \textbf{confirmed}, large & random-init control matches it \\
+\bottomrule
+\end{tabular}
+\end{table*}
 
 \begin{table}[h]
 \caption{Curriculum intervention re-run on the corrected readout, six seeds}
