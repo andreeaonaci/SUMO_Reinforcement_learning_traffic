@@ -366,12 +366,68 @@ aggregate is evaluated after every round on a network excluded from training.
 % =============================================================================
 \section{Experimental Setup}
 
-Experiments use SUMO with the RESCO scenario family. Training uses
-\texttt{arterial4x4} ($16$ signals, $A=5$), \texttt{cologne3} ($3$, $A=4$) and
-\texttt{ingolstadt7} ($7$, $A=3$); \texttt{grid4x4} ($16$, $A=8$) is held out and
-never trained on. The holdout's action space is strictly wider than any training
+Experiments use SUMO with the RESCO scenario family. Table~\ref{tab:networks}
+lists the networks. The holdout's action space is strictly wider than any training
 city's, which is the condition that makes untrained rows possible and that
-Section~\ref{sec:control} manipulates.
+Section~\ref{sec:control} manipulates. Two of the training networks are real
+corridors and one is a synthetic arterial grid, so the roster spans both the
+regular and the irregular case.
+
+\begin{table}[h]
+\caption{Networks. $A$ is the green-phase count; where it varies within a network
+the range is given. Movement coverage is the fraction of movements possessing a
+downstream lane inside the modelled area, used in Section~\ref{sec:results}-E.}
+\label{tab:networks}
+\centering\footnotesize
+\begin{tabular}{@{}llrrr@{}}
+\toprule
+Network & Role & Signals & $A$ & Coverage \\
+\midrule
+\texttt{arterial4x4} & train & $16$ & $5$ & $75\%$ \\
+\texttt{cologne3} & train & $3$ & $3$--$4$ & $33\%$ \\
+\texttt{ingolstadt7} & train & $7$ & $2$--$3$ & $39\%$ \\
+\texttt{grid4x4} & \textbf{holdout} & $16$ & $8$ & $75\%$ \\
+\midrule
+$4$-phase grid & control holdout & $9$ & $4$ & --- \\
+\texttt{grid4x4}, $3\times$ demand & stress holdout & $16$ & $8$ & $75\%$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:hyper} gives the training configuration, which is held fixed across
+every arm of every comparison reported here; only the readout varies.
+
+\begin{table}[h]
+\caption{Training configuration, identical across all arms.}
+\label{tab:hyper}
+\centering\footnotesize
+\begin{tabular}{@{}ll@{}}
+\toprule
+Quantity & Value \\
+\midrule
+Action interval $\Delta t$ & $5$\,s \\
+Yellow interval & $3$\,s (benchmark-matched) \\
+Episode length & $3600$\,s simulated \\
+State embedding width $d$ & $128$ \\
+Neighbour slots $K_{\max}$ & $8$ \\
+Own-observation width & $117$ \\
+Phase descriptor width & $10$ \\
+Optimiser & Adam, lr $3\times10^{-4}$, decay $0.97$, floor $10^{-5}$ \\
+Loss & Huber, Double DQN targets \\
+Target network & soft update, $\tau$ \\
+Reward clipping & $\pm10$ \\
+Exploration & linear $\varepsilon$ decay sized from round count \\
+Local episodes per round & $2$ \\
+Evaluation & $5$ episodes, fixed simulator seed, pure $\arg\max$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A detail of the exploration schedule is worth stating because it invalidated one
+earlier comparison. The $\varepsilon$ decay is sized from the total round count, so
+a seven-round run and a five-round run do not share an exploration schedule over
+their common rounds; arms of a comparison must therefore use identical round
+counts, and all comparisons reported here do.
 
 Results are over six seeds unless stated. Significance is $|\Delta|/\mathrm{SE}$,
 unpaired, with population standard deviation; $2$ is the threshold. Drop-one
@@ -389,7 +445,7 @@ evaluation windows and $3$\,s yellow interval, for reasons given in
 Section~\ref{sec:artifacts}.
 
 % =============================================================================
-\section{Results}
+\section{Results}\label{sec:results}
 
 \subsection{The representation, not undertrained rows}\label{sec:control}
 Section~\ref{sec:problem} identified two candidate failure modes. They separate by
@@ -542,6 +598,163 @@ offered as a supported hypothesis and not a demonstrated mechanism: four network
 confounded with training budget, and the isolating experiment has not been run.
 
 % =============================================================================
+\section{The Experimental Programme}\label{sec:programme}
+
+The control of Section~\ref{sec:control} was not the study's starting point; it was
+its conclusion. Roughly two years of experiments preceded it, and because
+Section~\ref{sec:inventory} argues that those experiments were measuring a floor,
+they are described here in enough detail for that argument to be checked rather
+than taken on trust. The account is organised by what each group of experiments was
+trying to establish.
+
+\subsection{Characterising the failure: confident lock-in}
+The earliest symptom was not poor average performance but bimodality. Individual
+training rounds collapsed to policies that were both bad and extremely stable, and
+the instability was characterised over roughly twenty experiments before the
+representation was suspected.
+
+Re-evaluating a collapsed checkpoint over thirty \emph{different} simulator seeds
+returned rewards that clustered onto a handful of distinct values, in the most
+extreme case a standard deviation of exactly $0.00$ across thirty episodes. A
+degenerate policy repeating one action is invariant to the traffic it is shown.
+Within a single checkpoint possessing genuine variance, the mean gap between the
+best and second-best $Q$-value correlated $-0.884$ with episode reward: the more
+confident the network, the worse it performed. Rounds that escaped had mean
+$Q$-gaps $30$--$50\times$ lower than their neighbours ($0.14$ against $3.8$--$7.2$)
+and the most balanced action usage, and typically relapsed within one round.
+
+Three candidate explanations were eliminated. Weight divergence between cities did
+not predict which round would collapse. The collapses survived a sixfold increase
+in evaluation episodes, so they were policy failures and not measurement noise.
+Most significantly, removing federation entirely did not remove the phenomenon:
+independently trained single-city agents exhibited the identical signature, and the
+measured lock-in rate was $7/100$ model-rounds federated against $12/200$
+independent, $|\Delta|/\mathrm{SE}=0.34$. Aggregation neither caused the failure
+nor changed its frequency.
+
+Interventions aimed at the mechanism directly---softmax action selection at
+evaluation, periodic exploration resets, replay-buffer clearing on detection,
+$Q$-entropy regularization, conservative $Q$-learning, a bounded $Q$-spread, and a
+confidence-triggered weight reversion---are the corresponding rows of
+Table~\ref{tab:inventory}. Softmax evaluation recovered near-optimal episodes from
+checkpoints that pure $\arg\max$ never escaped, which confirmed the diagnosis
+without repairing the policy.
+
+In hindsight the interpretation changes. A readout whose rows carry contradictory
+meanings across cities will produce exactly this: confident commitment to an action
+whose value was averaged over incompatible targets. The lock-in was a symptom of the
+representation, which is why none of the seven interventions aimed at it held.
+
+\subsection{Was the deficit a training budget artifact?}
+Published methods on these scenarios train for roughly one hundred episodes per
+scenario; this study's standard runs used forty. A budget study was therefore run
+before any conclusion about representation was drawn.
+
+In-distribution, on a single network at an extended budget, the best checkpoint
+reached reward $-2.01$ and $37.4$\,s mean waiting time---$6.2\times$ better than
+fixed-time control and within $1.4\times$ of max pressure. Budget was almost the
+entire story there. Under the true cross-topology protocol the same extension
+improved the holdout substantially and significantly ($|\Delta|/\mathrm{SE}=2.38$
+best-round, $2.43$ mean; best-round mean $-5278.1 \rightarrow -2285.2$) yet left a
+gap of several thousand-fold to the rule-based baselines. The two comparisons are
+therefore not interchangeable, and conflating them had previously produced an
+overstated claim that was withdrawn.
+
+Table~\ref{tab:zeroshot} settles the question for the readout specifically: at
+$2.5$--$4\times$ the standard budget the indexed head remains four orders of
+magnitude behind, with the final-round gap wider than the best-round gap.
+
+\subsection{Was the training data insufficiently diverse?}
+Two experiments tested the hypothesis that three training networks were too few.
+Eight synthetic irregular grids were generated by removing a fraction of interior
+signalised junctions from a lattice, producing three-way and dead-end junctions and
+an action-count spread within a single network. Combined with the real networks
+this gave fourteen training cities and $116$ intersections against the
+three-city roster's $26$. The result was null: mean holdout reward $-6304.85$
+against $-6110.73$, $|\Delta|/\mathrm{SE}=0.60$, with the narrow roster nominally
+ahead.
+
+Two implementation details were required for that experiment to be meaningful and
+are recorded because either would have silently invalidated it. SUMO's default
+traffic-light layout collapses every generated junction to two phases regardless of
+geometry, so varied topology would still have yielded an action-space monoculture;
+and at single-lane width the generator does not signalise junctions at all. A
+third defect was found only later: the roster contained a training city whose
+network file was identical to the holdout's (artifact~2 of
+Section~\ref{sec:artifacts}), so the experiment was not measuring cross-topology
+generalization at all. The null therefore cannot be relied upon in either
+direction, and a corrected repetition on the phase-relational readout was
+inconclusive because the holdout was saturated at the budget used.
+
+\subsection{Test-time adaptation, and a control that reframes it}
+If training cannot produce a transferable policy, brief adaptation on the target
+network might substitute. A checkpoint was fine-tuned on \emph{synthetic}
+randomised demand over the holdout topology---never the evaluation route file---and
+then evaluated normally. The effect was large and highly replicated: against a
+zero-shot baseline of $-8664.73$ with a standard deviation of $0.00$ over thirty
+episodes, the adapted checkpoint scored $-1092.10$ with a standard deviation of
+$636.86$, and every one of its thirty episodes beat the zero-shot constant. Across
+four seeds, $|\Delta|/\mathrm{SE}=72.78$ for the best round and $32.18$ for the
+unbiased final round. A duration study over seven rounds found the effect had not
+plateaued at five, and two seeds reached $-1.24$ and $-4.31$, within an order of
+magnitude of max pressure's $-0.34$ and closer than anything else in the study.
+
+The result did not survive its control. Adding a randomly initialised arm---same
+architecture, same adaptation procedure, only the pretrained weights
+discarded---produced $-406.85$ against the pretrained arm's $-693.84$ at matched
+thirty-episode rigour. \emph{Training on the target topology helps; federated
+pre-training does not transfer.} Two further observations from the same runs: the
+federated model's final checkpoint was worse on the holdout than a randomly
+initialised network, and a two-phase learning-rate schedule did not arrest the
+degradation, which argues the instability is not a step-size problem.
+
+Combination at evaluation time was also tested. A majority vote over six
+independently trained checkpoints scored $-8507.91$, beating every individual
+member (best $-9240.70$) and their weight-space average ($-9068.94$). The mechanism
+was measured rather than assumed: the ensemble's episode-level standard deviation
+was $422.02$ against $23.79$--$204.08$ for its members, so the vote is demonstrably
+not locked while its inputs partly are. Weight averaging blends locked members
+together; vote-space combination outvotes them.
+
+\subsection{Scenario design}
+Three properties of the evaluation had to be established before any comparison
+could be trusted, and each required discarding at least one candidate scenario.
+
+\emph{Saturation.} The original holdout was not congested: both rule-based
+controllers cleared $99\%$ of vehicles, so the reported margin rested on a few
+seconds of waiting on a network with spare capacity. Re-testing at triple demand
+required two attempts. A file assumed heavy from its name proved lighter than the
+baseline and produced $0.00$\,s waiting for both baselines---a ceiling at which
+nothing is distinguishable. A second candidate at $8.5\times$ per-signal load
+gridlocked max pressure itself---a floor. The lesson, subsequently enforced, is to
+calibrate scenario difficulty by the \emph{baseline controller's own waiting time}
+rather than by vehicles per signal, which does not normalise across networks of
+differing capacity.
+
+At a correctly calibrated triple demand the proposed readout scored $-0.32$ against
+max pressure's $-0.640$ and fixed-time's $-170.51$, at matched throughput
+($4364$ of $4419$ trips against $4370$). The scenario was demonstrably doing work:
+fixed-time degraded $62\times$ and lost $7\%$ of its trips, and max pressure
+doubled its own waiting time, so neither baseline was coasting.
+
+\emph{Topological novelty.} A holdout must not share a network with a training
+city, which one roster silently did (artifact~2).
+
+\emph{Untrained rows.} A holdout whose phase count exceeds the training maximum
+confounds representation with coverage, which is precisely the confound
+Section~\ref{sec:control} removes. On the four-phase holdout constructed for that
+control the proposed readout scored $-1.38$ against max pressure's $-2.225$ at
+matched throughput, while the indexed readout gridlocked at $-9107.61$---losing
+even to fixed time.
+
+\subsection{Summary of the programme}
+Five distinct explanations for the cross-topology gap were tested and rejected
+before the sixth was confirmed: instability of the optimiser, insufficient training
+budget, insufficient data diversity, the aggregation rule, and insufficient
+network capacity. The representation was tested last because it was the assumption
+least visible as an assumption---it is inherited from single-scenario practice,
+where it is harmless.
+
 \section{The Intervention Corpus}\label{sec:inventory}
 
 Before the readout was identified as the constraint, thirty interventions were
