@@ -602,47 +602,49 @@ stability than as peak quality.
 
 \begin{table}[h]
 \caption{\texttt{cologne3}, in-distribution, benchmark-exact, six seeds.
-$2856$ vehicles depart inside the evaluation window; \emph{completed} is
-arrived/departed. Delay and trip time are means over arrived vehicles only, so
-they must be read together with that column. The benchmark does not report
+\emph{Completed} is the percentage of the $2856$ vehicles departing inside the
+evaluation window that reach their destination---higher is better. Delay and trip
+time are means over completed vehicles only, so they must be read together with
+that column: a controller that strands traffic reports a better delay. The benchmark does not report
 throughput for its own methods, which is why the IPPO and IDQN rows are blank
 there and why the margin over them cannot be adjudicated.}
 \label{tab:cologne}
 \centering\footnotesize
-\begin{tabular}{@{}lrrrr@{}}
+\begin{tabular}{@{}lrrr@{}}
 \toprule
-Controller & Delay (s) & Trip (s) & Arrived & Completed \\
+Controller & Delay (s) & Trip (s) & Completed \\
 \midrule
-C. FRAP ($5$-round ckpt.) & $150.3$ & $188.0$ & $2411$ & $84.4\%$ \\
-A. Indexed & $54.0$ & $91.2$ & $2217$ & $77.6\%$ \\
-Fixed time & $34.6$ & $72.4$ & $2810$ & $98.4\%$ \\
-Max pressure & $22.4$ & $60.1$ & $2817$ & $\mathbf{98.6\%}$ \\
-\textbf{B. Phase-relational} & $\mathbf{21.4}$ & $\mathbf{58.9}$ & $2615$ & $91.6\%$ \\
+C. FRAP ($5$-round ckpt.) & $150.3$ & $188.0$ & $84.4\%$ \\
+A. Indexed & $54.0$ & $91.2$ & $77.6\%$ \\
+Fixed time & $34.6$ & $72.4$ & $98.4\%$ \\
+Max pressure & $22.4$ & $60.1$ & $\mathbf{98.6\%}$ \\
+\textbf{B. Phase-relational} & $\mathbf{21.4}$ & $\mathbf{58.9}$ & $91.6\%$ \\
 \midrule
-\textit{IPPO}~\cite{resco} & \textit{22.13} & \textit{57.45} & --- & --- \\
-\textit{IDQN}~\cite{resco} & \textit{23.99} & \textit{59.0} & --- & --- \\
+\textit{IPPO}~\cite{resco} & \textit{22.13} & \textit{57.45} & --- \\
+\textit{IDQN}~\cite{resco} & \textit{23.99} & \textit{59.0} & --- \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \begin{table}[h]
-\caption{\texttt{ingolstadt7}, in-distribution, six seeds. $3031$ vehicles depart
-inside the evaluation window. The proposed readout attains the highest completion
+\caption{\texttt{ingolstadt7}, in-distribution, six seeds. \emph{Completed} is the
+percentage of the $3031$ vehicles departing inside the evaluation window that
+reach their destination. The proposed readout attains the highest completion
 rate of any controller here, $95.4\%$, and is nonetheless beaten on delay by max
 pressure---so survivorship works against this comparison rather than for it.}
 \label{tab:ingolstadt}
 \centering\footnotesize
-\begin{tabular}{@{}lrrrr@{}}
+\begin{tabular}{@{}lrrr@{}}
 \toprule
-Controller & Delay (s) & Trip (s) & Arrived & Completed \\
+Controller & Delay (s) & Trip (s) & Completed \\
 \midrule
-C. FRAP ($5$-round ckpt.) & $93.4$ & $137.3$ & $2690$ & $88.7\%$ \\
-Fixed time & $92.2$ & $136.2$ & $2833$ & $93.5\%$ \\
-A. Indexed & $84.7$ & $128.0$ & $2433$ & $80.3\%$ \\
-\textbf{B. Phase-relational} & $35.2$ & $79.0$ & $\mathbf{2891}$ & $\mathbf{95.4\%}$ \\
-Max pressure & $\mathbf{26.6}$ & $\mathbf{71.5}$ & $2681$ & $88.5\%$ \\
+C. FRAP ($5$-round ckpt.) & $93.4$ & $137.3$ & $88.7\%$ \\
+Fixed time & $92.2$ & $136.2$ & $93.5\%$ \\
+A. Indexed & $84.7$ & $128.0$ & $80.3\%$ \\
+\textbf{B. Phase-relational} & $35.2$ & $79.0$ & $\mathbf{95.4\%}$ \\
+Max pressure & $\mathbf{26.6}$ & $\mathbf{71.5}$ & $88.5\%$ \\
 \midrule
-\textit{IDQN}~\cite{resco} & \textit{31.19} & --- & --- & --- \\
+\textit{IDQN}~\cite{resco} & \textit{31.19} & --- & --- \\
 \bottomrule
 \end{tabular}
 \end{table}

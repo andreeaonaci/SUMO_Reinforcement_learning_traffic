@@ -67,6 +67,10 @@ from environments.federated_env import build_federated_env
 from diagnostics.generate_random_routes import generate_variants
 
 REAL_HOLDOUT_CFG_PATH = os.path.join("environments", "city_5_holdout", "config.yaml")
+# NOTE: the default above is the yellow_time=2 roster. A checkpoint trained at
+# the benchmark's 3 s yellow (environments_rescofull / environments_y3) must be
+# fine-tuned and evaluated at 3 s too, or the adaptation is measured against a
+# different signal timing than it was trained under -- pass --holdout_config.
 
 
 def infer_arch_from_checkpoint(state: dict) -> dict:
@@ -90,8 +94,26 @@ def infer_arch_from_checkpoint(state: dict) -> dict:
     own_dim = state["own_encoder.0.weight"].shape[1]
     neighbor_dim = state["neighbor_encoder.0.weight"].shape[1]
     dueling = "advantage_head.weight" in state
-    action_dim = (state["advantage_head.weight"].shape[0] if dueling
-                  else state["head.4.weight"].shape[0])
+
+    # Readouts without per-action rows (sec 96 phase-relational, sec 101 FRAP)
+    # carry no action_dim in their weights -- that independence is the point of
+    # those architectures. Detect them and leave action_dim None for the caller
+    # to fill from the live environment, as eval_paper_metrics.py and
+    # swa_reeval.py do.
+    head_kind = ("frap" if any(k.startswith("frap.") for k in state)
+                 else "phase" if any(k.startswith("phase_scorer.") for k in state)
+                 else "indexed")
+    d_model = state["head.0.weight"].shape[0]
+    phase_dim = (state["phase_scorer.0.weight"].shape[1] - d_model
+                 if head_kind == "phase" else None)
+    frap_pairs = (state["frap.pair_index"].tolist()
+                  if head_kind == "frap" else None)
+
+    if head_kind != "indexed":
+        action_dim = None
+    else:
+        action_dim = (state["advantage_head.weight"].shape[0] if dueling
+                      else state["head.4.weight"].shape[0])
     head_fix = "pool_head.0.weight" not in state
     # encoder_depth (fidings sec 75): count of distinct Linear layers in
     # own_encoder -- each contributes exactly one "own_encoder.<i>.weight"
@@ -111,7 +133,9 @@ def infer_arch_from_checkpoint(state: dict) -> dict:
         n_attn_layers = 1
     return dict(own_dim=own_dim, neighbor_dim=neighbor_dim,
                 action_dim=action_dim, dueling=dueling, head_fix=head_fix,
-                encoder_depth=encoder_depth, n_attn_layers=n_attn_layers)
+                encoder_depth=encoder_depth, n_attn_layers=n_attn_layers,
+                head_kind=head_kind, d_model=d_model, phase_dim=phase_dim,
+                frap_phase_pairs=frap_pairs)
 
 
 def main():
@@ -143,6 +167,11 @@ def main():
                           "likely been found and stability matters more than fast progress "
                           "(sec 69's motivation: large round-to-round swings suggestive of too "
                           "high an LR for the later rounds).")
+    ap.add_argument("--holdout_config", default=REAL_HOLDOUT_CFG_PATH,
+                    help="Holdout city config.yaml to adapt on and evaluate against. "
+                         "Must match the signal timing the checkpoint was trained "
+                         "under: use environments_rescofull/city_5_holdout/config.yaml "
+                         "for a 3 s-yellow checkpoint.")
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--eval_episodes", type=int, default=5,
                      help="Matches this project's standard per-round eval_episodes. Use a "
@@ -192,7 +221,7 @@ def main():
               "random initialization (architecture kept identical to the checkpoint's). "
               "This is the control arm for 'does the federated pre-training help at all?'")
 
-    with open(REAL_HOLDOUT_CFG_PATH) as f:
+    with open(args.holdout_config) as f:
         real_cfg = yaml.safe_load(f)
     k_max = int(real_cfg.get("k_max", 8))
     num_seconds = int(real_cfg.get("num_seconds", 3600))
@@ -204,7 +233,14 @@ def main():
     # CURRENT environment's obs shape.
     probe_env = build_federated_env(real_cfg)
     live_own_dim, live_neighbor_dim = probe_env.own_dim, probe_env.neighbor_dim
+    live_action_dim = probe_env.max_action_dim
     probe_env.close()
+    if arch["action_dim"] is None:
+        # phase-relational / FRAP: the width comes from the target network, not
+        # from the weights.
+        arch["action_dim"] = live_action_dim
+        print(f"[{arch['head_kind']} head] action_dim taken from the environment: "
+              f"{live_action_dim}")
     if arch["own_dim"] != live_own_dim or arch["neighbor_dim"] != live_neighbor_dim:
         raise RuntimeError(
             f"Checkpoint's obs dims (own_dim={arch['own_dim']}, neighbor_dim="
@@ -221,6 +257,10 @@ def main():
         action_dim=arch["action_dim"], dueling=arch["dueling"], head_fix=arch["head_fix"],
         n_step=args.n_step,
         encoder_depth=arch["encoder_depth"], n_attn_layers=arch["n_attn_layers"],
+        phase_relational=(arch["head_kind"] == "phase"),
+        phase_dim=(arch["phase_dim"] or 10),
+        frap_head=(arch["head_kind"] == "frap"),
+        frap_phase_pairs=arch["frap_phase_pairs"],
     )
     if not args.random_init:
         global_model.load_state_dict(state)
@@ -305,6 +345,10 @@ def main():
             action_dim=arch["action_dim"], dueling=arch["dueling"], head_fix=arch["head_fix"],
             n_step=args.n_step, eps_decay=eps_decay,
             encoder_depth=arch["encoder_depth"], n_attn_layers=arch["n_attn_layers"],
+            phase_relational=(arch["head_kind"] == "phase"),
+            phase_dim=(arch["phase_dim"] or 10),
+            frap_head=(arch["head_kind"] == "frap"),
+            frap_phase_pairs=arch["frap_phase_pairs"],
         )
         server_model.load_state_dict(start_state)
         return ParallelFederatedServer(
