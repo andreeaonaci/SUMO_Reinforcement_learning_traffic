@@ -814,6 +814,24 @@ was $422.02$ against $23.79$--$204.08$ for its members, so the vote is demonstra
 not locked while its inputs partly are. Weight averaging blends locked members
 together; vote-space combination outvotes them.
 
+Repeated on the corrected readout, this splits. Over the six checkpoints of
+Table~\ref{tab:zeroshot3} the vote scores $-0.12$ against a member mean of $-0.172$
+(members spanning $-0.12$ to $-0.29$), beating the mean by $2.20$ times the
+member-level standard error but only \emph{matching} its best member rather than
+exceeding it. Its value is consequently one of selection rather than magnitude:
+which seed is best is not identifiable without a holdout, and the vote attains
+best-member performance without requiring that identification, from checkpoints a
+multi-seed protocol already produces. The weight-space average, by contrast,
+reverses outright---$-3.87$, an order of magnitude worse than the worst individual
+member. Independently seeded runs occupy distinct loss basins, and averaging
+parameters across basins is defined only up to permutation symmetry; the indexed
+readout tolerated it because its members were degenerate and mutually similar,
+whereas the corrected members are distinct working policies whose parameter
+average is not a policy. This does not bear on federated averaging itself, which
+averages clients broadcast from a common point each round and therefore never
+leaves a shared basin---a property this test removed deliberately. Both figures
+rest on a single group of six and are reported as a screen.
+
 \subsection{Scenario design}
 Three properties of the evaluation had to be established before any comparison
 could be trusted, and each required discarding at least one candidate scenario.
@@ -1109,8 +1127,8 @@ Sequential curriculum & procedure & \textbf{confirmed} ($1.92$--$4.22$) & untest
 Progressive curriculum $+$ fine-tune & procedure & \textbf{confirmed} ($2.42/3.42$) & \textbf{reverses}, Table~\ref{tab:curriculum} \\
 \midrule
 Softmax evaluation temperature & test-time & partial recovery & does not alter the policy \\
-Checkpoint averaging (SWA) & test-time & real, not deployable & does not alter the policy \\
-Independent-seed ensemble & test-time & \textbf{confirmed} & does not alter the policy \\
+Checkpoint averaging (SWA) & test-time & real, not deployable & \textbf{reverses} across seeds, $-3.87$ \\
+Independent-seed ensemble & test-time & \textbf{confirmed} & ties best member; does not alter the policy \\
 Fine-tuning on holdout topology & test-time & \textbf{confirmed}, large & \textbf{reverses}, Table~\ref{tab:finetune} \\
 \bottomrule
 \end{tabular}
