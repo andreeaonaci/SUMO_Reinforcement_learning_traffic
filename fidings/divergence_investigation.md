@@ -7804,6 +7804,87 @@ order of magnitude more dynamic range than the -0.07 seen here — and §97 alre
 off both the ceiling and the floor. `analyse/run_diversity.sh` takes `SEEDS`/`ROUNDS` and needs
 only `--eval_base_dir` pointed at the dense roster to run there.
 
+## 105. Short-burst fine-tuning on the target topology REVERSES on the phase-relational head
+    -- the second intervention to do so, and the largest one in the whole corpus
+
+**2026-09-20.** §66-§70 established target-topology fine-tuning as the single strongest
+intervention in this project's history: against a zero-shot baseline of $-8664.73$ (std $0.00$ over
+30 episodes) the adapted checkpoint reached $-1092.10$, |diff|/SE $72.78$ over four seeds, every
+round of every seed beating zero-shot by at least $3.9\times$. It was measured on the **indexed**
+head. This tests one- and two-round bursts on the **phase-relational** head.
+
+**Protocol.** Start from §100's phase-relational checkpoints (`environments_rescofull`, 6 seeds,
+RESCO-exact, yellow=3), adapt on synthetic randomised demand over the holdout topology --- never
+the evaluation route file --- and evaluate on real holdout traffic. Seeds 3/7/11, 10 eval episodes.
+`--phase1_rounds = --rounds` so a 1-round burst is single-phase and the two-phase LR schedule does
+not silently apply. **Timing matched deliberately**: `--holdout_config` points at the rescofull
+holdout so adaptation happens at the same 3s yellow the checkpoint was trained under; the script's
+hardcoded default is the yellow=2 roster and would have introduced §99's confound in a new place.
+
+### Result: fine-tuning makes it strictly worse
+
+| arm | seed | zero-shot | final | delta |
+|---|---:|---:|---:|---:|
+| 1 round | 3 | -0.120 | -0.310 | **-0.190** |
+| 1 round | 7 | -0.070 | -0.240 | **-0.170** |
+| 1 round | 11 | -0.120 | -0.210 | **-0.090** |
+| 2 rounds | 3 | -0.120 | -0.220 | **-0.110** |
+| 2 rounds | 7 | -0.070 | -0.230 | **-0.170** |
+| 2 rounds | 11 | -0.120 | -0.230 | **-0.110** |
+
+| arm | mean | \|diff\|/SE vs zero-shot | seeds improved |
+|---|---:|---:|---|
+| zero-shot | **-0.103** | --- | --- |
+| 1 round | -0.253 | 5.40 | **0/3** |
+| 2 rounds | -0.227 | 8.89 | **0/3** |
+
+**0 of 6 runs improved on their own zero-shot starting point**, and the separation is statistically
+clear in the *wrong* direction. Every individual round of every 2-round run is also below its
+baseline (round-1/round-2 pairs: -0.25/-0.22, -0.22/-0.23, -0.32/-0.23), so this is not a
+single-round transient. Waiting time corroborates independently: $0.20$s zero-shot against
+$0.50$--$0.59$s after adaptation. Round 2 is slightly better than round 1 on two of three seeds ---
+partial recovery back toward the starting point, never reaching it.
+
+### Why this matters: the second reversal, and the biggest one
+
+This is the **same pattern as §102**, on a far larger prior effect. PCFT was confirmed at 6 seeds on
+the indexed head and reverses on the corrected readout. Fine-tuning was confirmed at |diff|/SE
+$72.78$ --- the strongest result anywhere in this document --- and also reverses.
+
+The mechanism is straightforward once stated: on the indexed head the zero-shot policy was
+gridlocked at $-8664$, so almost any adaptation on target data was an improvement, and what §66-§70
+measured was the size of the *deficit*, not the value of adaptation. On the phase-relational head
+the zero-shot policy is already at $-0.10$, better than `max_pressure`'s $-0.34$ and close to the
+floor of $0.0$. There is no deficit left to recover, and a short burst on synthetic demand can only
+move a near-optimal policy away from its optimum. §70's random-init control already pointed here
+--- it found the benefit was "training on the target topology helps", not "pre-training transfers"
+--- and this closes the argument: once pre-training actually transfers, target adaptation stops
+helping and starts hurting.
+
+**Two confirmed reversals now anchor the floor-effect claim rather than one**, and the second is
+the corpus's largest effect. That is a materially stronger form of §101's argument than §102 alone.
+
+### Caveats, stated plainly
+- **3 seeds. SCREEN.** Though 0/6 runs improving and |diff|/SE of 5.40/8.89 make the direction
+  unusually clear for this sample size.
+- **Adaptation used synthetic randomised demand**, not real target traffic. An alternative reading
+  is narrower and equally consistent: *adapting to synthetic demand harms a near-optimal policy*,
+  which would not imply anything about adaptation to real target data. Distinguishing them needs a
+  real-demand adaptation arm and has not been run.
+- **Absolute magnitudes are small** ($-0.10 \rightarrow -0.23$) and sit near the reward floor, so
+  this shares §104's saturation caveat --- though unlike §104 the direction here is unanimous.
+- Longer bursts were not tested; §69's dose-response on the indexed head peaked at round 6, so a
+  longer burst on this head is untested rather than ruled out.
+
+### Tooling
+`diagnostics/finetune_on_holdout.py` could not load phase-relational or FRAP checkpoints at all ---
+the third script with that defect after `eval_paper_metrics.py` and `swa_reeval.py`. Fixed, plus a
+`--holdout_config` flag. The first launch then failed six times because the head flags reached the
+two `DQNAgent` call sites but **not** `ParallelFederatedServer`, whose spawned workers build their
+own agents; the main process logged a clean load, which is exactly why the pre-launch check passed.
+`ParallelFederatedServer` still does not accept `phase_dim` --- harmless at the default of 10, but a
+checkpoint trained with another value would be silently mis-built.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
