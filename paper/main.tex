@@ -442,7 +442,9 @@ Table~\ref{tab:config} records the provenance of every result reported here.
 \begin{table}[h]
 \caption{Configuration provenance. Within-study comparisons hold in every row,
 because both arms of each comparison share the configuration; only the final
-column governs comparison with published numbers.}
+column governs comparison with published numbers. \emph{Internal only} marks a
+result at the benchmark's timing that is nonetheless a within-study comparison,
+having no published counterpart.}
 \label{tab:config}
 \centering\footnotesize
 \begin{tabular}{@{}llcc@{}}
@@ -455,6 +457,7 @@ Table~\ref{tab:zeroshot} (budget) & \texttt{c1\_4\_6} & $2$\,s & no \\
 Table~\ref{tab:cologne} & \texttt{rescofull} & $3$\,s & \textbf{yes} \\
 Table~\ref{tab:ingolstadt} & \texttt{rescofull} & $3$\,s & \textbf{yes} \\
 Table~\ref{tab:curriculum} & \texttt{c1\_4\_6} & $2$\,s & no \\
+Table~\ref{tab:finetune} & \texttt{rescofull} & $3$\,s & internal only \\
 Triple demand (\S\ref{sec:programme}-E) & \texttt{dense} & $2$\,s & no \\
 Table~\ref{tab:inventory} & various & $2$\,s & no \\
 \bottomrule

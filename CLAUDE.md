@@ -265,6 +265,18 @@ hurts); in-distribution competitiveness with `max_pressure`; any absolute Ingols
 - `analyse/`: `run_resco_validation.sh`, `run_diversity.sh`, `run_rescofull_frap.sh`,
   `run_budget_sensitivity.sh`, `run_pcft_phase6.sh` — all skip-or-resume, safe to stop and relaunch.
 
+### Paper decision, 2026-09-20: the 2s-yellow results STAY
+
+User's call, asked and answered. Deleting all 2s content would have removed the
+dead-rows control (§98 — the single strongest piece of evidence for the central
+claim), the budget table (§103), the curriculum reversal (§102), the triple-demand
+result (§97) and the entire 30-intervention inventory. They are kept and fenced
+instead: `paper/main.tex`'s Table IV (`tab:config`) records the yellow interval and
+external-comparability of **every** table in the paper, and each 2s table's own
+caption repeats "internal comparison, not to be set against published numbers."
+Rule 2 below is unaffected — fencing is what makes keeping them legitimate, and any
+NEW table must be added to `tab:config` when it is added to the paper.
+
 ### NEXT, in priority order
 
 1. **Re-run §104 on a scenario with headroom.** §104 is saturated (arms differ by 0.008 on a
