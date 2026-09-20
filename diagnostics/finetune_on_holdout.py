@@ -369,6 +369,13 @@ def main():
             dueling=arch["dueling"],
             n_step=args.n_step,
             init_steps_done=init_steps_done,
+            # The server spawns workers that build their OWN agents, so the head
+            # flags must reach it too -- passing them only to the two DQNAgent
+            # call sites above leaves every worker on the default indexed head
+            # and its strict load_state_dict rejects the checkpoint.
+            phase_relational=(arch["head_kind"] == "phase"),
+            frap_head=(arch["head_kind"] == "frap"),
+            frap_phase_pairs=arch["frap_phase_pairs"],
         )
 
     phase1_rounds = min(args.phase1_rounds, args.rounds)
