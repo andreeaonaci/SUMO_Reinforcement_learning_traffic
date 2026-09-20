@@ -863,9 +863,10 @@ Of thirty interventions, twenty-one were null or negative, four inconclusive, an
 five reached threshold. Of those five, three are test-time or evaluation-time
 procedures that do not alter the learned policy---softmax action selection,
 checkpoint averaging, and an ensemble over independently trained models---and a
-fourth, fine-tuning on the target topology, was subsequently matched by a randomly
-initialised control, indicating it measures the value of target-domain data rather
-than of transfer. \textbf{No training-time modification to network architecture,
+fourth, fine-tuning on the target topology, was matched by a randomly initialised
+control and then reversed outright on the corrected readout, indicating it
+measured the size of a representational deficit rather than the value of
+transfer. \textbf{No training-time modification to network architecture,
 learning algorithm, aggregation rule or loss produced a durable improvement.}
 
 This is not the expected outcome of thirty independent hypotheses. Aggregation
@@ -905,7 +906,7 @@ positive, treated next, and a wider-roster experiment whose roster was later fou
 to contain the holdout's own network (artifact~2 below), making its null doubly
 uninterpretable.
 
-\subsection{The strongest positive reverses}
+\subsection{The two strongest positives reverse}
 A progressive curriculum ordering cities by complexity, warming up on the simplest
 and fine-tuning each newly admitted city before folding it into the federated pool,
 had been confirmed at six seeds under the indexed readout ($2.42/3.42$). Re-running
@@ -935,6 +936,50 @@ must have: under the indexed readout it was recovering part of a representationa
 deficit rather than contributing a training-procedure benefit. Applying that
 inference to the remaining twenty-nine rows is the reinterpretation this section
 claims, and it is why those rows are reported rather than discarded.
+
+The same reversal then occurred on the largest effect in the corpus. Fine-tuning
+on the target topology was the single strongest intervention measured under the
+indexed readout ($|\Delta|/\mathrm{SE}=72.78$, Section~\ref{sec:programme}).
+Repeating it on the corrected readout, from the six-seed checkpoints of
+Table~\ref{tab:zeroshot} and at the benchmark's $3$\,s yellow so that adaptation
+and training share a signal timing, inverts it as well.
+
+\begin{table}[h]
+\caption{Adaptation on the target topology, corrected readout, three seeds,
+\texttt{rescofull} holdout at $3$\,s yellow. Higher is better; the zero-shot
+column is each run's own starting checkpoint.}
+\label{tab:finetune}
+\centering\footnotesize
+\begin{tabular}{@{}lrrcc@{}}
+\toprule
+Arm & Reward & $|\Delta|/\mathrm{SE}$ & Seeds improved & Wait (s) \\
+\midrule
+\textbf{Zero-shot} & $\mathbf{-0.103}$ & --- & --- & $\mathbf{0.20}$ \\
+Adapted, $1$ round & $-0.253$ & $5.40$ & $0/3$ & $0.59$ \\
+Adapted, $2$ rounds & $-0.227$ & $8.89$ & $0/3$ & $0.50$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+None of the six runs improves on its own starting point, and every individual
+round of every two-round run is below its baseline, so this is not a transient of
+the first update. The mechanism follows the same logic as the curriculum: under
+the indexed readout the zero-shot policy was gridlocked at $-8664.73$, so nearly
+any adaptation on target data improved it, and what was being measured was the
+size of the representational deficit rather than the value of adaptation. On the
+corrected readout the zero-shot policy already scores $-0.103$---better than max
+pressure---and a short burst on synthetic demand can only displace a near-optimal
+policy. This is the prediction of the randomly initialised control of
+Section~\ref{sec:programme} carried to its conclusion: once pre-training
+genuinely transfers, target adaptation stops helping.
+
+The floor-effect reinterpretation therefore rests on two measured reversals rather
+than one, and the second is the largest effect in the inventory. A narrower
+reading of Table~\ref{tab:finetune} is equally consistent with the data and is not
+excluded here---that adapting to \emph{synthetic} demand harms an already
+near-optimal policy, which would carry no implication for adaptation on real
+target traffic. Distinguishing the two requires a real-demand arm that was not
+run, and three seeds is a screen rather than a confirmation.
 
 % =============================================================================
 \section{Evaluation Artifacts}\label{sec:artifacts}
@@ -1063,7 +1108,7 @@ Progressive curriculum $+$ fine-tune & procedure & \textbf{confirmed} ($2.42/3.4
 Softmax evaluation temperature & test-time & partial recovery & does not alter the policy \\
 Checkpoint averaging (SWA) & test-time & real, not deployable & does not alter the policy \\
 Independent-seed ensemble & test-time & \textbf{confirmed} & does not alter the policy \\
-Fine-tuning on holdout topology & test-time & \textbf{confirmed}, large & random-init control matches it \\
+Fine-tuning on holdout topology & test-time & \textbf{confirmed}, large & \textbf{reverses}, Table~\ref{tab:finetune} \\
 \bottomrule
 \end{tabular}
 \end{table*}
