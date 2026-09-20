@@ -7885,6 +7885,73 @@ own agents; the main process logged a clean load, which is exactly why the pre-l
 `ParallelFederatedServer` still does not accept `phase_dim` --- harmless at the default of 10, but a
 checkpoint trained with another value would be silently mis-built.
 
+## 106. The ensemble SPLITS on the phase-relational head: the vote survives, the
+    weight-average collapses
+
+**2026-09-20.** Third re-test of a prior positive on the corrected readout, after
+§102 (curriculum) and §105 (fine-tuning), both of which reversed. §93 had found that
+over six independently-trained INDEXED checkpoints, a majority vote scored $-8507.91$,
+beating every member (best $-9240.70$) *and* their weight-space average ($-9068.94$).
+Re-run on §100's six phase-relational checkpoints (`environments_rescofull`, 3s yellow,
+`--pad_to_true_holdout`, 30 episodes, `eval_sumo_seed` fixed so the comparison is
+zero-drift). Evaluation only; no training.
+
+| arm | reward | std |
+|---|---:|---:|
+| member, seed 7 (**best**) | **-0.12** | 0.05 |
+| member, seed 11 | -0.13 | 0.05 |
+| member, seed 17 | -0.14 | 0.06 |
+| member, seed 21 | -0.16 | 0.06 |
+| member, seed 3 | -0.19 | 0.06 |
+| member, seed 25 (worst) | -0.29 | 0.08 |
+| *member mean* | *-0.172* | --- |
+| **Majority vote** | **-0.12** | 0.05 |
+| SWA weight-average | **-3.87** | 0.61 |
+
+### Two different answers, and they must be reported separately
+
+**The vote holds up, in a weaker form than §93.** It scores $-0.12$: it does **not**
+beat the best member as it did on the indexed head --- it *ties* it, to the cent ---
+but it beats the member mean by $30\%$ ($0.052$, about $2.20\times$ the member-level
+SE). **This is still worth having, and the reason is selection, not magnitude.** Which
+of the six seeds is best is not knowable without a holdout, and §69/§70 showed
+best-round and best-seed selection in this project is hindsight. The vote delivers
+best-member performance *without requiring the best member to be identified*, from
+checkpoints every multi-seed batch here already produces and discards. It also
+compresses the worst case: the spread over members is $-0.12$ to $-0.29$, and the vote
+lands at the good end of it rather than the middle.
+
+**The weight-average reverses hard, and it is the more interesting half.** SWA scores
+$-3.87$ --- roughly $20\times$ worse than the *worst* individual member, and far
+outside any member's episode-level std. On the indexed head SWA was a clean win. The
+explanation is standard and worth stating because it has a direct bearing on this
+project's own method: six independently seeded runs converge into different loss
+basins, and averaging weights across basins is only meaningful up to permutation
+symmetry. The indexed head tolerated it because its members were degenerate and
+mutually similar --- all gridlocked in much the same way. The phase-relational members
+are genuinely distinct working policies, so the average of their weights is not a
+policy at all.
+
+**This does not implicate FedAvg**, and the distinction should not be lost: FedAvg
+averages clients that were broadcast from a common point at the start of every round,
+so they never leave a shared basin. §106 averages six runs that never shared one. It
+is, however, a sharp reminder that weight-space aggregation depends on that shared
+starting point, which is a property the federated protocol supplies and this test
+deliberately removed.
+
+### Standing
+**Screen, not a confirmation.** One ensemble built from one group of six --- $n=1$ on
+the object being tested, the §70 trap exactly. The $2.20\times$ quoted above is against
+member-level SE, which is the right denominator but still leaves the numerator a single
+sample. A second disjoint seed group is what would settle it, and §93's own next-step
+list already called for that on the indexed head without it ever being run.
+
+**Standing of the three re-tests so far: two reversals (§102, §105), one split (§106).**
+The pattern holds that interventions which recovered a representational deficit stop
+working once the deficit is gone; the vote survives because it never addressed the
+deficit --- it addresses variance across seeds, which the corrected readout reduced
+but did not eliminate ($-0.12$ to $-0.29$ is still a $2.4\times$ spread).
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
