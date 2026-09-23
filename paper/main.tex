@@ -62,8 +62,10 @@ table; parameter count becomes independent of action-space width and no
 per-intersection configuration is required, unlike the phase-pair tables prior
 phase-invariant methods depend upon. Across five configurations at six seeds each
 it exceeds the indexed head by four orders of magnitude zero-shot on an unseen
-network, and attains $21.4$\,s average delay on the RESCO Cologne corridor against
-$22.13$\,s and $23.99$\,s for published IPPO and IDQN. Thirty prior interventions
+network, and attains $21.4$\,s average delay at $91.6\%$ trip completion on the
+RESCO Cologne corridor against $22.13$\,s and $23.99$\,s for published IPPO and
+IDQN, whose completion rates are unreported and whose margin therefore cannot be
+adjudicated. Thirty prior interventions
 are inventoried; twenty-one are null, and the two strongest positives reverse once
 the readout is corrected, establishing that the corpus measured a representational
 floor.
@@ -78,7 +80,8 @@ action representation, benchmark methodology
 \section{Introduction}
 
 Reinforcement learning controllers for traffic signals reliably outperform
-fixed-time and actuated control on the network they were trained on. Deployment,
+fixed-time and actuated control on the network they were trained
+on~\cite{intellilight,presslight,colight}. Deployment,
 however, is economically interesting only if a controller trained on a handful of
 instrumented intersections can be installed where it has never been. That
 capability---zero-shot transfer across intersection \emph{topology}, as distinct
@@ -163,14 +166,28 @@ capability rather than a performance claim, and is treated as such throughout.
 \subsection{Transfer and generalization}
 MetaLight~\cite{metalight} adapts to a new intersection by meta-learning, which
 presumes a few gradient steps on the target are available; the setting here is
-strictly zero-shot. Inductive graph formulations~\cite{igrl} and
+strictly zero-shot. X-Light~\cite{xlight} learns across cities with a hierarchical
+transformer, and inductive graph formulations~\cite{igrl} and
 TransferLight~\cite{transferlight} target deployment on unseen networks, the
 latter crediting domain randomization over randomly generated road networks.
+
+Concurrent with this work, Braun~\cite{graphiface} scores individual movements
+with a shared graph network and converts those scores into each junction's
+variable-sized phase set through a deterministic incidence matrix, so that
+parameter shapes are likewise independent of junction action count. The
+convergence is notable because the constructions were arrived at separately and
+differ in almost every particular---a policy-gradient learner over a movement
+graph there against a value-based per-phase descriptor here---while agreeing that
+the action interface, not the learner, is what must be made topology-independent.
+That work reports sensitivity to a signal-coverage distribution shift, which is
+independent corroboration of the coverage account this paper gives for FRAP in
+Section~\ref{sec:results}-D.
+
 Neither the phase-invariant readout, nor zero-shot cross-topology transfer, nor
-the federated setting is claimed as novel here; what is claimed is the control of
-Section~\ref{sec:control}, which asks a question about the indexed readout that
-these works had no occasion to ask, since each replaced it rather than
-characterising it.
+the federated setting is claimed as novel here. What is claimed is the control of
+Section~\ref{sec:control}, which asks a question about the \emph{indexed} readout
+that none of these works had occasion to ask, each having replaced it rather than
+characterised it---so the cost of retaining it remained unmeasured.
 
 \subsection{Federated and curriculum training}
 Aggregation follows FedAvg~\cite{fedavg}; FedProx~\cite{fedprox} and a
@@ -586,7 +603,12 @@ than peak quality.
 are means over completed vehicles only and must be read with that column, since a
 controller that strands traffic reports a better delay. The benchmark reports no
 throughput for its own methods, which is why those rows are blank and why the
-margin over them cannot be adjudicated.}
+margin over them cannot be adjudicated. \emph{The \texttt{ingolstadt7} figures
+carry a further qualification:} the network vendored here omits one green phase
+present in the benchmark's copy at one of its seven intersections
+(Section~\ref{sec:artifacts}, artifact~5), so its absolute values are not strictly
+comparable with published \texttt{ingolstadt7} numbers. All controllers in this
+table share that network, so the internal ordering is unaffected.}
 \label{tab:indist}
 \centering\footnotesize
 \begin{tabular}{@{}lrrr@{}}
@@ -956,7 +978,7 @@ SIGKDD}, 2019.
 cooperation for traffic signal control,'' in \emph{Proc. CIKM}, 2019.
 \bibitem{survey} H.~Wei, G.~Zheng, V.~Gayah, and Z.~Li, ``Recent advances in
 reinforcement learning for traffic signal control: a survey of models and
-evaluation,'' \emph{ACM SIGKDD Explorations Newsletter}, vol.~22, no.~2, 2021.
+evaluation,'' \emph{ACM SIGKDD Explorations Newsletter}, 2021.
 \bibitem{frap} G.~Zheng \emph{et al.}, ``Learning phase competition for traffic
 signal control,'' in \emph{Proc. CIKM}, 2019.
 \bibitem{mplight} C.~Chen \emph{et al.}, ``Toward a thousand lights: decentralized
@@ -970,15 +992,23 @@ meta-reinforcement learning for traffic signal control,'' in \emph{Proc. AAAI},
 2020.
 \bibitem{igrl} F.-X.~Devailly, D.~Larocque, and L.~Charlin, ``IG-RL: inductive
 graph reinforcement learning for massive-scale traffic signal control,''
-\emph{IEEE Trans. Intell. Transp. Syst.}, vol.~23, no.~7, 2022.
-\bibitem{transferlight} J.~Harnischmacher \emph{et al.}, ``TransferLight:
-zero-shot traffic signal control on any road-network,'' arXiv:2412.09719, 2024.
-\bibitem{hfrl} ``Federated hierarchical reinforcement learning for adaptive
-traffic signal control,'' arXiv:2504.05553, 2025.
+\emph{IEEE Trans. Intell. Transp. Syst.}, 2021.
+\bibitem{transferlight} J.~Schmidt, F.~Dreyer, S.~A.~Hashimi, and S.~Stober,
+``TransferLight: zero-shot traffic signal control on any road-network,'' in
+\emph{Proc. AAAI Workshop on AI for Urban Planning (MALTA)}, 2025;
+arXiv:2412.09719.
+\bibitem{graphiface} B.~Braun, ``A graph-based control interface for traffic
+signals on heterogeneous road networks,'' arXiv:2607.21831, 2026.
+\bibitem{xlight} H.~Jiang \emph{et al.}, ``X-Light: cross-city traffic signal
+control using transformer on transformer as meta multi-agent reinforcement
+learner,'' in \emph{Proc. IJCAI}, 2024.
+\bibitem{hfrl} Y.~Fu, L.~Zhong, Z.~Li, and X.~Di, ``Federated hierarchical
+reinforcement learning for adaptive traffic signal control,'' arXiv:2504.05553,
+2025.
 \bibitem{resco} J.~Ault and G.~Sharon, ``Reinforcement learning benchmarks for
 traffic signal control,'' in \emph{Proc. NeurIPS Datasets and Benchmarks}, 2021.
 \bibitem{varaiya} P.~Varaiya, ``Max pressure control of a network of signalized
-intersections,'' \emph{Transportation Research Part C}, vol.~36, 2013.
+intersections,'' \emph{Transportation Research Part C}, 2013.
 \bibitem{sumo} P.~A.~Lopez \emph{et al.}, ``Microscopic traffic simulation using
 SUMO,'' in \emph{Proc. IEEE ITSC}, 2018.
 

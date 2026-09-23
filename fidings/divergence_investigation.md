@@ -7952,6 +7952,84 @@ working once the deficit is gone; the vote survives because it never addressed t
 deficit --- it addresses variance across seeds, which the corrected readout reduced
 but did not eliminate ($-0.12$ to $-0.29$ is still a $2.4\times$ spread).
 
+## 107. Pre-submission audit of the paper: four defects found, all fixed
+
+**2026-09-23.** Systematic audit of `paper/main.tex` against the raw run data, the
+claim ledger and this project's two standing rules. Four real defects, listed worst
+first. None was a wrong measurement; all four were the paper saying something the
+evidence did not support, or not saying something it had to.
+
+### 1. A fabricated citation
+
+`TransferLight` was attributed to "J. Harnischmacher et al." **No such author.** The
+correct authors are J.~Schmidt, F.~Dreyer, S.~A.~Hashimi and S.~Stober (AAAI MALTA
+workshop 2025; arXiv:2412.09719), verified against the arXiv listing. The entry was
+written from memory during the conference pass. `hfrl` had **no authors at all** and
+is Y.~Fu, L.~Zhong, Z.~Li and X.~Di. Volume and issue numbers that could not be
+verified were dropped from three further entries rather than guessed --- an
+incomplete-but-true citation beats a precise-but-wrong one.
+
+**Rule going forward: a citation written from memory is a draft, not a reference.**
+Verify authors and venue before the bibliography is considered done.
+
+### 2. Rule 1 violated in the abstract
+
+The abstract read "attains 21.4 s average delay ... against 22.13 s and 23.99 s for
+published IPPO and IDQN" with **no completion rate beside it**. That is precisely the
+rule §100b exists to enforce, in the most-read paragraph of the paper, where delay is
+computed over arrived vehicles only and our completion on that scenario is 91.6%
+against `max_pressure`'s 98.6%. Now reads "21.4 s average delay at 91.6% trip
+completion ... whose completion rates are unreported and whose margin therefore
+cannot be adjudicated."
+
+### 3. The Ingolstadt disclosure was too far from the number
+
+§101b's missing-green-phase finding appeared only in the artifacts section, several
+pages after the table carrying the Ingolstadt figures. The ledger requires the
+disclosure to accompany *any* absolute Ingolstadt number. It is now in the table
+caption itself, with the note that all controllers share the defective net so the
+internal ordering is unaffected.
+
+### 4. Concurrent work, unknown to us until the audit
+
+**Braun, "A graph-based control interface for traffic signals on heterogeneous road
+networks," arXiv:2607.21831, July 2026.** A shared graph network scores individual
+movements; each junction converts those scores into its own variable-sized legal
+phase set through a deterministic incidence matrix, so parameter shapes are
+independent of junction action count. **That is the same structural commitment as
+the phase-relational readout, arrived at independently, two months before this
+audit.** It does not scoop the contribution --- the constructions differ in almost
+every particular (policy gradient over a movement graph there, value-based per-phase
+descriptor here) and it contains no counterpart to §98's dead-row control --- but a
+paper on this topic that does not cite it looks negligent. Now cited and
+distinguished in Related Work.
+
+Its reported **sensitivity to a signal-coverage distribution shift is independent
+corroboration of §103b's coverage account for FRAP**, which this project had flagged
+as well-supported but unproven. Also added: X-Light (IJCAI 2024), cross-city TSC,
+previously missing.
+
+### What the audit did NOT find: the numbers are sound
+
+Of 80 result-shaped numbers in the paper, 79 appear in this document. The single
+exception, the `y3` indexed final-round mean of $-9705.49$, was **re-derived from the
+six raw `federated_history.json` files and is correct** --- it had simply never been
+written down, the same §100 process gap as before. Recording it here now, with the
+whole arm:
+
+| `environments_y3`, 6 seeds | best | final |
+|---|---:|---:|
+| indexed | $-9411.88$ | $-9705.49$ |
+| phase-relational | $\mathbf{-0.16}$ | $\mathbf{-0.20}$ |
+| \|diff\|/SE | 47.23 | 39.34 |
+
+The headline `rescofull` table was re-derived the same way as a spot check and
+reproduces exactly ($-0.13$/$-0.16$ against $-8525.72$/$-8965.09$, 23.63/30.93). Both
+arms additionally carry **`is_true_holdout=True` on all twelve runs**, so §25's
+silent-fallback artifact did not touch the paper's central result. Per-seed
+phase-relational best rounds: $-0.16, -0.10, -0.12, -0.10, -0.12, -0.16$ --- no seed
+carries the mean.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
