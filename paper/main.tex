@@ -32,6 +32,19 @@
   arfail/.style={ar, draw=fail, line width=0.9pt},
 }
 
+% Let LaTeX pack floats with text more aggressively. This paper is float-heavy
+% (7 tables, 3 figures, a full-width inventory) and the defaults reserve more of
+% each page for text than is needed, which strands floats on pages of their own.
+\renewcommand{\topfraction}{0.92}
+\renewcommand{\bottomfraction}{0.85}
+\renewcommand{\textfraction}{0.07}
+\renewcommand{\floatpagefraction}{0.80}
+\renewcommand{\dbltopfraction}{0.92}
+\renewcommand{\dblfloatpagefraction}{0.80}
+\setcounter{topnumber}{3}
+\setcounter{bottomnumber}{2}
+\setcounter{totalnumber}{4}
+
 \begin{document}
 
 \title{Phase-Relational $Q$-Learning: Configuration-Free\\
@@ -47,7 +60,7 @@ A single reinforcement learning policy controlling intersections of differing
 geometry must emit a fixed-width action vector, and the prevailing construction
 assigns output row $k$ to phase index $k$, padding to a common maximum and masking
 the remainder. This paper shows the convention is not a neutral encoding but the
-binding constraint on cross-topology generalization: because phase orderings are
+binding constraint on cross-topology generalisation: because phase orderings are
 authored independently per network, row $k$ accumulates gradients from
 semantically unrelated movements, index~1 denoting a protected left turn in two of
 the benchmark networks used here and a through movement in the other two. A
@@ -72,7 +85,7 @@ floor.
 \end{abstract}
 
 \begin{IEEEkeywords}
-traffic signal control, federated reinforcement learning, generalization,
+traffic signal control, federated reinforcement learning, generalisation,
 action representation, benchmark methodology
 \end{IEEEkeywords}
 
@@ -163,13 +176,13 @@ all. The descriptor of Section~\ref{sec:method}-B is derived from the simulator'
 connection table at run time, which is what distinguishes it. That difference is a
 capability rather than a performance claim, and is treated as such throughout.
 
-\subsection{Transfer and generalization}
+\subsection{Transfer and generalisation}
 MetaLight~\cite{metalight} adapts to a new intersection by meta-learning, which
 presumes a few gradient steps on the target are available; the setting here is
 strictly zero-shot. X-Light~\cite{xlight} learns across cities with a hierarchical
 transformer, and inductive graph formulations~\cite{igrl} and
 TransferLight~\cite{transferlight} target deployment on unseen networks, the
-latter crediting domain randomization over randomly generated road networks.
+latter crediting domain randomisation over randomly generated road networks.
 
 Concurrent with this work, Braun~\cite{graphiface} scores individual movements
 with a shared graph network and converts those scores into each junction's
@@ -289,7 +302,8 @@ never receives a city identifier.
 \node[sft, anchor=north west, text width=84mm] at (0,-48)
   {\textbf{Observation}\\[2pt]
    $o_i=\big(\texttt{own}_{117},\;\texttt{nbr}_{8\times3},\;
-   \texttt{nbrmask}_{8},\;\texttt{hop}_{8},\;m_{i,A_{\max}},\;
+   \texttt{nbrmask}_{8},$\\[1pt]
+   $\hspace{6mm}\texttt{hop}_{8},\;m_{i,A_{\max}},\;
    \textcolor{acc}{\Phi_{i,\,A_{\max}\times10}}\big)$};
 \draw[ar] (19,-17) -- (19,-30);
 \draw[ar] (64,-17) -- (64,-30);
@@ -407,17 +421,17 @@ corridors and one is a synthetic arterial grid, so the roster spans both the
 regular and the irregular case.
 
 \begin{table}[h]
-\caption{Networks. $A$ is the green-phase count; where it varies within a network
-the range is given. \emph{Departed} is the number of vehicles whose departure falls
-inside the evaluation window, counted from the route file---the denominator for
-every \emph{arrived} figure reported later. Movement coverage is the fraction of
+\caption{Networks. \emph{Sig.} is the signal count and $A$ the green-phase count,
+given as a range where it varies within a network. \emph{Dep.} is the number of
+vehicles departing inside the evaluation window, counted from the route file---the
+denominator for every completion rate reported later. \emph{Cov.} is the fraction of
 movements possessing a downstream lane inside the modelled area, used in
 Section~\ref{sec:results}-D.}
 \label{tab:networks}
-\centering\footnotesize
+\centering\scriptsize\setlength{\tabcolsep}{4pt}
 \begin{tabular}{@{}llrrrr@{}}
 \toprule
-Network & Role & Signals & $A$ & Departed & Coverage \\
+Network & Role & Sig. & $A$ & Dep. & Cov. \\
 \midrule
 \texttt{arterial4x4} & train & $16$ & $5$ & $2484$ & $75\%$ \\
 \texttt{cologne3} & train & $3$ & $3$--$4$ & $2856$ & $33\%$ \\
@@ -550,7 +564,7 @@ so both may be set beside published work; the $20$-round budget block runs at
 $2$\,s yellow and is an internal comparison only (Table~\ref{tab:config}). Six
 seeds throughout; $|\Delta|/\mathrm{SE}$ is best\,/\,final against readout~B.}
 \label{tab:zeroshot}
-\centering\footnotesize
+\centering\scriptsize\setlength{\tabcolsep}{4pt}
 \begin{tabular}{@{}llrrc@{}}
 \toprule
 Roster & Readout & Best & Final & $|\Delta|/\mathrm{SE}$ \\
@@ -719,7 +733,7 @@ collapses every generated junction to two phases regardless of geometry, and at
 single-lane width it does not signalise junctions at all---and a third defect
 surfaced later: the roster contained a training city whose network file was
 identical to the holdout's (artifact~2), so the experiment did not measure
-cross-topology generalization at all. The null cannot be relied on in either
+cross-topology generalisation at all. The null cannot be relied on in either
 direction, and a corrected repetition on the phase-relational readout was
 inconclusive because the holdout was saturated.
 
@@ -793,7 +807,7 @@ EMA gradient-alignment weights & null & floor & Distributional QR-DQN~\cite{qrdq
 Learning-velocity novelty & null & floor & Evolution strategies & inconclusive & floor \\
 Gradient-survival weighting & null & floor & Second-order MAML~\cite{maml} & negative & floor \\
 Clustered FedAvg by action width & null & floor & \multicolumn{3}{@{}l}{\emph{Loss shaping and state}} \\
-Server momentum & negative w/ duelling & floor & $Q$-entropy regularization & split, unresolved & floor \\
+Server momentum & negative w/ duelling & floor & $Q$-entropy regularisation & split, unresolved & floor \\
 FedProx proximal term~\cite{fedprox} & no measurable effect & floor & Conservative $Q$-learning~\cite{cql} & $2.35\rightarrow1.05$ at six & floor \\
 Reptile meta-aggregation~\cite{reptile} & null ($0.82$) & floor & Ad hoc reward shaping & inconclusive & floor \\
 No federation & null ($1.78$) & floor & Pressure-normalised reward & null & floor \\
@@ -840,7 +854,7 @@ entirely, which is statistically indistinguishable from federated training
 ($1.78/1.43$). Since the object being averaged is a readout that cannot express a
 transferable policy, no averaging rule over it can recover one.
 \emph{Architecture} (eleven entries) spans capacity, depth, attention width,
-normalization, recurrence, topology conditioning, bootstrapped heads and low-rank
+normalisation, recurrence, topology conditioning, bootstrapped heads and low-rank
 adapters; the instructive pair is a differential learning rate slowing the trunk,
 negative at $2.15/1.99$, against a zero-initialised low-rank adapter on a normally
 trained trunk, null at $0.38/0.28$. Starving the representation hurts, adding
@@ -948,7 +962,7 @@ MPLight as published.
 \section{Conclusion}
 
 Positional indexing of a shared $Q$-head is the binding constraint on
-cross-topology generalization in this setting. The claim rests on a control that
+cross-topology generalisation in this setting. The claim rests on a control that
 eliminates the untrained-row explanation, on persistence of the separation under a
 fourfold budget increase, on independent reproduction through a published
 phase-invariant readout, and on reversal of the two strongest prior interventions
