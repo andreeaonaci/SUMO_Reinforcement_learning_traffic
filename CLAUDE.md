@@ -196,13 +196,47 @@ which had gone stale):
   implemented and tested* FedProx proximal term, `DQNAgent.mu` — see next bullet — which is real
   and unaffected by this deletion.
 
-## RESUME HERE (as of 2026-09-20 14:30 — check this is still current before trusting it)
+## RESUME HERE (as of 2026-09-23 21:00 — check this is still current before trusting it)
 
-### Nothing is running. Nothing is queued. The machine was shut down cleanly.
+### ONE BATCH IS RUNNING. It is resumable — do not restart it from scratch.
+
+```bash
+EVAL_BASE=environments_dense SEEDS="3 7 11" ROUNDS=10 bash analyse/run_diversity.sh
+```
+
+Launched 2026-09-23 19:41. **§104 re-run on a scenario with headroom** — the one
+open item that costs the paper a claim, since Limitations currently concedes a
+failed measurement. Only the evaluation scenario changed (`--eval_base_dir
+environments_dense`, §97's triple-demand grid4x4, ~10x dynamic range, verified off
+ceiling and floor); both training rosters are identical to §104, so it is a clean
+single-variable change. Verified at launch: `city_5_holdout` with
+`is_true_holdout=True`, no §25 fallback, no roster/holdout net collision, 20 GB free,
+no orphan workers. Expect ~8-10 h for all three seed pairs at `MAX_CONCURRENT=2`.
+**Do not raise that concurrency unattended** — the script header explains why.
+Skip-or-resume: relaunching the command above continues wherever it stopped.
 
 Everything below is committed and pushed to `origin/next_phases`. **The main checkout may be
 behind — `git pull` first.** All work since 2026-09-09 lives in the worktree branch
 `worktree-rescofull-writeup`, already merged into `origin/next_phases`.
+
+### READ FIRST: concurrent work exists, found 2026-09-23
+
+**Braun, "A graph-based control interface for traffic signals on heterogeneous road
+networks," arXiv:2607.21831, July 2026.** A shared graph network scores individual
+movements; each junction converts those scores into its own variable-sized legal
+phase set through a deterministic incidence matrix, so parameter shapes are
+independent of junction action count. **That is the same structural commitment as
+`--phase_relational`, reached independently, two months before we found it.**
+
+It does not scoop the contribution — different learner (policy gradient over a
+movement graph vs. value-based per-phase descriptor), different construction, and
+**no counterpart to §98's dead-row control**, which is what actually carries this
+paper. But any submission on this topic that omits it looks negligent. Cited and
+distinguished in Related Work as of `paper/main.tex`. Its reported sensitivity to a
+**signal-coverage distribution shift independently corroborates §103b's coverage
+account for FRAP**, which was flagged here as well-supported but unproven.
+
+Also added and previously missing: X-Light (IJCAI 2024, cross-city TSC).
 
 ### THE HEADLINE, in one paragraph
 
@@ -227,6 +261,7 @@ scenario, and it is not a novel architecture — see the claim ledger.
 | 104 | training-topology diversity: **no measurable effect, but the test is SATURATED** — do not cite as a clean null | 3 seeds |
 | 105 | **fine-tuning REVERSES on the phase-relational head** — 0/6 runs beat their own zero-shot (5.40/8.89). The corpus's LARGEST prior effect (72.78 on indexed) | 3 seeds, screen |
 | 106 | ensemble **SPLITS**: majority vote ties its best member and beats the member mean (2.20 SE); SWA weight-average **collapses** to -3.87 | 1 group of 6, screen |
+| 107 | **pre-submission audit: a FABRICATED citation, rule 1 broken in the abstract, and the concurrent work above.** Numbers themselves verified sound | re-derived from raw |
 
 ### The claim ledger — what can and cannot be said
 
@@ -254,7 +289,12 @@ hurts); in-distribution competitiveness with `max_pressure`; any absolute Ingols
 1. **Never report trip time or delay without `arrived` beside it.** `eval_paper_metrics.py`
    computes both over ARRIVED vehicles only, so stranding traffic *improves* them. This produced a
    wrong headline once already (§100b).
-2. **Never quote a number from `environments_c1_4_6` against RESCO.** That roster still carries
+2. **A citation written from memory is a draft, not a reference.** §107 caught
+   `TransferLight` attributed to an author who does not exist, `hfrl` with no authors
+   at all, and two more with wrong author order — all written from memory in one
+   pass. Verify authors and venue against the source before a bibliography is done,
+   and drop volume/issue numbers you cannot verify rather than guessing.
+3. **Never quote a number from `environments_c1_4_6` against RESCO.** That roster still carries
    §99's three mismatches. Only `environments_rescofull` is RESCO-exact. This is the error that
    retracted §59.
 
@@ -301,9 +341,12 @@ NEW table must be added to `tab:config` when it is added to the paper.
 
 ### NEXT, in priority order
 
-1. **Re-run §104 on a scenario with headroom.** §104 is saturated (arms differ by 0.008 on a
-   0.0-floor scale). §97's congestion holdout has 10x the dynamic range and is already verified off
-   ceiling and floor. `analyse/run_diversity.sh` needs only `--eval_base_dir` pointed at it.
+1. ~~Re-run §104 on a scenario with headroom.~~ **RUNNING NOW** — see the box at the
+   top. When it lands: write it up as §108, and if it resolves either way, replace the
+   Limitations sentence in `paper/main.tex` that currently concedes a failed
+   measurement ("inconclusive because the holdout was saturated"). It needs a
+   Table~IV provenance row if it reaches the paper — `environments_dense` is 2 s
+   yellow, so internal comparison only.
 2. ~~Re-test §93's ensemble on the phase-relational head.~~ **DONE 2026-09-20, §106 — it SPLITS.**
    The majority vote survives but weaker than §93 (ties its best member at -0.12, beats the member
    mean by 2.20x member-level SE; its value is *selection* — best-member performance without
