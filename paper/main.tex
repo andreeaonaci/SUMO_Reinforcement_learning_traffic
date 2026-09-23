@@ -78,8 +78,8 @@ it exceeds the indexed head by four orders of magnitude zero-shot on an unseen
 network, and attains $21.4$\,s average delay at $91.6\%$ trip completion on the
 RESCO Cologne corridor against $22.13$\,s and $23.99$\,s for published IPPO and
 IDQN, whose completion rates are unreported and whose margin therefore cannot be
-adjudicated. Thirty prior interventions
-are inventoried; twenty-one are null, and the two strongest positives reverse once
+adjudicated. Forty-one prior interventions
+are inventoried; thirty-two are null, and the two strongest positives reverse once
 the readout is corrected, establishing that the corpus measured a representational
 floor.
 \end{abstract}
@@ -134,7 +134,7 @@ The contributions here are of a different kind.
       hand-authored per-signal movement tables FRAP and MPLight require before
       they can be applied at all.
 \item \textbf{A reinterpretation of a body of negative results}
-      (Section~\ref{sec:inventory}): thirty interventions previously evaluated in
+      (Section~\ref{sec:inventory}): forty-one interventions previously evaluated in
       this setting, with the two strongest re-run on the corrected readout to show
       the corpus was measuring a floor.
 \item \textbf{Six evaluation artifacts} (Section~\ref{sec:artifacts}), each of
@@ -787,7 +787,7 @@ tested last because it was the assumption least visible as an assumption---it is
 inherited from single-scenario practice, where it is harmless.
 
 \begin{table*}[t]
-\caption{Complete inventory of the thirty interventions evaluated under the
+\caption{Complete inventory of the forty-one interventions evaluated under the
 positionally indexed readout, with the verdict recorded at the time and its status
 after the control of Section~\ref{sec:control}. Verdicts use the study's own
 criterion ($|\Delta|/\mathrm{SE}\ge2$ at six seeds; three-seed outcomes are
@@ -831,18 +831,18 @@ Differential trunk learning rate & negative ($2.15$) & floor & Checkpoint averag
 
 \section{The Intervention Corpus}\label{sec:inventory}
 
-Before the readout was identified as the constraint, thirty interventions were
+Before the readout was identified as the constraint, forty-one interventions were
 evaluated under the indexed readout on the same rosters and the same criterion.
 Table~\ref{tab:inventory} is the complete inventory, presented not as a record of
 effort but as evidence: the shape of the distribution is the argument.
 
-Twenty-one were null or negative, four inconclusive, and five reached threshold.
+Thirty-two were null or negative, four inconclusive, and five reached threshold.
 Of those five, three are test-time procedures that do not alter the learned
 policy, and a fourth---fine-tuning on the target topology---was matched by a
 randomly initialised control and then reversed outright on the corrected readout.
 \textbf{No training-time modification to network architecture, learning algorithm,
 aggregation rule or loss produced a durable improvement.} This is not the expected
-outcome of thirty independent hypotheses: aggregation rules, architectural
+outcome of forty-one independent hypotheses: aggregation rules, architectural
 capacity, algorithm family and loss shaping are largely orthogonal mechanisms, and
 that all return null on the same task is characteristic of a shared constraint
 upstream of all of them.

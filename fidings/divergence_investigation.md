@@ -8009,6 +8009,28 @@ corroboration of §103b's coverage account for FRAP**, which this project had fl
 as well-supported but unproven. Also added: X-Light (IJCAI 2024), cross-city TSC,
 previously missing.
 
+### Addendum: the inventory count in the paper was wrong, and it understated us
+
+The paper said "thirty interventions ... twenty-one null or negative." **The table it
+calls "the complete inventory" has 42 data rows.** Counted directly from the table
+source: 1 reference condition (plain FedAvg) + **41 interventions**, of which **32
+null or negative**, 4 inconclusive and 5 at threshold ($32+4+5=41$). By category:
+aggregation 10 (incl. the reference), architecture 11, algorithm 5, loss 5, state 1,
+procedure 5, data 1, test-time 4 --- which already summed to 42 in the paper's own
+category paragraph while the headline said thirty, so the two halves of the section
+disagreed with each other.
+
+"Thirty" appears to be a stale early estimate that stopped tracking the table as it
+grew. Corrected throughout the paper (abstract, contribution 3, table caption, section
+opening, bucket counts, and the "thirty independent hypotheses" argument). **Note this
+makes the floor-effect argument stronger, not weaker** --- 41 orthogonal interventions
+returning null is a sharper distribution than 30.
+
+**Do not confuse this with the claim ledger's "~20 prior interventions were floor
+effects."** That refers specifically to the §73-§95 corpus; the paper's 41 spans the
+whole project. Both are right at their own scope, and the ledger wording should say
+which scope it means.
+
 ### What the audit did NOT find: the numbers are sound
 
 Of 80 result-shaped numbers in the paper, 79 appear in this document. The single
