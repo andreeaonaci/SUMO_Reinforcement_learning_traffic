@@ -412,7 +412,7 @@ the range is given. \emph{Departed} is the number of vehicles whose departure fa
 inside the evaluation window, counted from the route file---the denominator for
 every \emph{arrived} figure reported later. Movement coverage is the fraction of
 movements possessing a downstream lane inside the modelled area, used in
-Section~\ref{sec:results}-E.}
+Section~\ref{sec:results}-D.}
 \label{tab:networks}
 \centering\footnotesize
 \begin{tabular}{@{}llrrrr@{}}
@@ -603,12 +603,11 @@ than peak quality.
 are means over completed vehicles only and must be read with that column, since a
 controller that strands traffic reports a better delay. The benchmark reports no
 throughput for its own methods, which is why those rows are blank and why the
-margin over them cannot be adjudicated. \emph{The \texttt{ingolstadt7} figures
-carry a further qualification:} the network vendored here omits one green phase
-present in the benchmark's copy at one of its seven intersections
-(Section~\ref{sec:artifacts}, artifact~5), so its absolute values are not strictly
-comparable with published \texttt{ingolstadt7} numbers. All controllers in this
-table share that network, so the internal ordering is unaffected.}
+margin over them cannot be adjudicated. The \texttt{ingolstadt7} network vendored
+here omits one green phase present in the benchmark's copy at one of its seven
+intersections (Section~\ref{sec:artifacts}, artifact~5), so its absolute values
+are not strictly comparable with published \texttt{ingolstadt7} figures; all
+controllers here share that network, so the internal ordering is unaffected.}
 \label{tab:indist}
 \centering\footnotesize
 \begin{tabular}{@{}lrrr@{}}
@@ -884,9 +883,9 @@ Curriculum, as proposed & $-2.239$ & $-2.894$ & $6/6$ \\
 
 The same reversal then occurred on the largest effect in the corpus. Fine-tuning
 on the target topology ($|\Delta|/\mathrm{SE}=72.78$, Section~\ref{sec:programme}-B)
-was repeated on the corrected readout from the checkpoints of
-Table~\ref{tab:zeroshot}, at the benchmark's $3$\,s yellow so adaptation and
-training share a signal timing. Zero-shot scores $-0.103$; one round of adaptation
+was repeated on the corrected readout from the \texttt{rescofull} checkpoints of
+Table~\ref{tab:zeroshot}, adaptation running at the benchmark's $3$\,s yellow so
+that it and training share a signal timing. Zero-shot scores $-0.103$; one round of adaptation
 gives $-0.253$ and two rounds $-0.227$, at $|\Delta|/\mathrm{SE}$ of $5.40$ and
 $8.89$ in the \emph{wrong} direction, with $0$ of $6$ runs improving on their own
 starting point and every individual round below its baseline. Mean waiting time
