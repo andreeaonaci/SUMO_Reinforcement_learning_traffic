@@ -38,8 +38,26 @@ cd "$(dirname "$0")/.."
 export SUMO_HOME=${SUMO_HOME:-/usr/share/sumo}
 export PYTHONPATH="$SUMO_HOME/tools:$PYTHONPATH"
 
-OUT=results/diversity
-RUNS=results/diversity_runs
+# EVAL_BASE selects the holdout the aggregate is scored on, WITHOUT touching the
+# training rosters -- so it is a clean single-variable change from sec 104.
+#   unset                  sec 104's original holdout. SATURATED: the two arms
+#                          differed by 0.008 on a 0.0-floor scale, so the test
+#                          could not have resolved an effect if one existed.
+#   environments_dense     sec 97's triple-demand grid4x4: ~10x the dynamic range
+#                          and already verified off both ceiling and floor (fixed
+#                          time degrades 62x, max pressure doubles its own wait).
+# Both arms share it, so the 2 s yellow of that roster cancels -- internal
+# comparison only, per the paper's provenance table.
+EVAL_BASE="${EVAL_BASE:-}"
+SUFFIX=""
+EVAL_FLAG=""
+if [ -n "$EVAL_BASE" ]; then
+  SUFFIX="_$(basename "$EVAL_BASE" | sed 's/^environments_//')"
+  EVAL_FLAG="--eval_base_dir $EVAL_BASE"
+fi
+
+OUT=results/diversity$SUFFIX
+RUNS=results/diversity_runs$SUFFIX
 mkdir -p $OUT $RUNS
 DRIVER=$OUT/driver.log
 # 7-city runs need ~6GB each (~1.5 + 0.65/city); 2 concurrent fits 23GB with the
@@ -86,7 +104,7 @@ PY
 
   log "starting $tag ($base_dir)"
   ( python -m experiments.federated_training --parallel \
-      --base_dir "$base_dir" --pad_to_true_holdout --phase_relational \
+      --base_dir "$base_dir" $EVAL_FLAG --pad_to_true_holdout --phase_relational \
       --rounds "$ROUNDS" --local_episodes 2 --eval_every 1 --eval_episodes 5 \
       --lr 3e-4 --lr_decay 0.97 --min_lr 1e-5 --q_entropy_weight 0.05 \
       --seed "$seed" $resume >> "$OUT/$tag.log" 2>&1
@@ -95,7 +113,7 @@ PY
     log "finished $tag exit=$rc" ) &
 }
 
-log "diversity batch starting: seeds=$SEEDS rounds=$ROUNDS arms=base,div"
+log "diversity batch starting: seeds=$SEEDS rounds=$ROUNDS arms=base,div eval=${EVAL_BASE:-default}"
 for SEED in $SEEDS; do
   throttle; run_arm base "$SEED"
   throttle; run_arm div  "$SEED"
