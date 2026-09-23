@@ -196,7 +196,7 @@ which had gone stale):
   implemented and tested* FedProx proximal term, `DQNAgent.mu` — see next bullet — which is real
   and unaffected by this deletion.
 
-## RESUME HERE (as of 2026-09-16 02:10 — check this is still current before trusting it)
+## RESUME HERE (as of 2026-09-20 14:30 — check this is still current before trusting it)
 
 ### Nothing is running. Nothing is queued. The machine was shut down cleanly.
 
@@ -225,6 +225,8 @@ scenario, and it is not a novel architecture — see the claim ledger.
 | 103 | **budget objection DEAD** (indexed still 4 orders behind at 20 rounds, 5.57/13.32, 6/6). **FRAP works** (independent confirmation of §98). **Phase beats FRAP on best-round** (4.06, 6/6) *while FRAP held the oracle config* | 6 seeds |
 | 103b | RESCO validation in literature metrics, three readouts, done correctly | 6 seeds |
 | 104 | training-topology diversity: **no measurable effect, but the test is SATURATED** — do not cite as a clean null | 3 seeds |
+| 105 | **fine-tuning REVERSES on the phase-relational head** — 0/6 runs beat their own zero-shot (5.40/8.89). The corpus's LARGEST prior effect (72.78 on indexed) | 3 seeds, screen |
+| 106 | ensemble **SPLITS**: majority vote ties its best member and beats the member mean (2.20 SE); SWA weight-average **collapses** to -3.87 | 1 group of 6, screen |
 
 ### The claim ledger — what can and cannot be said
 
@@ -233,7 +235,8 @@ dead-rows control: indexed still gridlocks with every usable row fully trained);
 beats `max_pressure` zero-shot, 6 seeds × 5 configurations; the gap survives 2.5-4x budget (§103);
 the gap holds in-distribution too, *while arriving more traffic*, so the true gap is wider (§103b);
 phase-relational is far more stable (per-seed delay 19.7-23.0 vs indexed's 25.7-232.2); ~20 prior
-interventions were floor effects — **now a measurement, not an inference** (§102); six evaluation
+interventions were floor effects — **now TWO measurements, not an inference** (§102 curriculum,
+§105 fine-tuning — and §105 was the largest effect in the entire corpus); six evaluation
 artifacts, each of which produced a plausible wrong number (§25, §95a, §95b, §99, §100b, §101b).
 
 **CAN claim with the caveat in the same sentence:** "we require no per-intersection configuration
@@ -265,6 +268,25 @@ hurts); in-distribution competitiveness with `max_pressure`; any absolute Ingols
 - `analyse/`: `run_resco_validation.sh`, `run_diversity.sh`, `run_rescofull_frap.sh`,
   `run_budget_sensitivity.sh`, `run_pcft_phase6.sh` — all skip-or-resume, safe to stop and relaunch.
 
+### THE PAPER EXISTS — `paper/main.tex`, and it is the current deliverable
+
+A complete IEEEtran draft, 10 pages, compiles clean (`pdflatex` twice, no undefined refs).
+Title: *Phase-Relational Q-Learning: Configuration-Free Traffic Signal Control Across
+Heterogeneous Intersection Topologies*. It carries the full experimental programme, three TikZ
+system diagrams, the setup/provenance tables, the RESCO in-distribution comparisons, the
+30-intervention inventory, the evaluation-artifact section and the limitations. **Do not start a
+new paper file** — extend this one.
+
+Structural rules it already follows, which must be preserved:
+- **Table IV (`tab:config`) is the provenance table.** Every results table in the paper has a row
+  giving its roster, yellow interval and whether it may be set beside published numbers. **A new
+  table is not finished until it has a Table IV row.** The column takes three values: yes, no, and
+  *internal only* (benchmark timing, but a within-study comparison with no published counterpart).
+- Only Tables II, V and VI are ever set against published figures. Everything else is fenced in its
+  own caption as an internal comparison.
+- Every delay/trip-time figure is accompanied by a completion percentage against the departure
+  total, because the metric is computed over arrived vehicles only (rule 1 below).
+
 ### Paper decision, 2026-09-20: the 2s-yellow results STAY
 
 User's call, asked and answered. Deleting all 2s content would have removed the
@@ -282,11 +304,16 @@ NEW table must be added to `tab:config` when it is added to the paper.
 1. **Re-run §104 on a scenario with headroom.** §104 is saturated (arms differ by 0.008 on a
    0.0-floor scale). §97's congestion holdout has 10x the dynamic range and is already verified off
    ceiling and floor. `analyse/run_diversity.sh` needs only `--eval_base_dir` pointed at it.
-2. **Re-test §93's ensemble on the phase-relational head.** `diagnostics/swa_reeval.py` was fixed
-   to support it (it previously inferred `action_dim` from `head.4.weight`, which neither the
-   phase nor FRAP head has). §93's ensemble WON on the indexed head; ensembling directly targets
-   the volatility that is the remaining weakness, and the 6 checkpoints already exist — **near-zero
-   compute.** Start here if compute is tight.
+2. ~~Re-test §93's ensemble on the phase-relational head.~~ **DONE 2026-09-20, §106 — it SPLITS.**
+   The majority vote survives but weaker than §93 (ties its best member at -0.12, beats the member
+   mean by 2.20x member-level SE; its value is *selection* — best-member performance without
+   needing to know which seed is best). The SWA weight-average **reverses hard**: -3.87, an order of
+   magnitude below the *worst* member, because independently seeded runs sit in different loss
+   basins and parameter averaging is only defined up to permutation symmetry. **This does NOT
+   implicate FedAvg** (its clients are broadcast from a common point each round and never leave a
+   shared basin) — say so explicitly anywhere §106 is cited, or a reader takes it as an indictment
+   of the method. Screen: one group of six, the §70 trap. **Still open: replicate on a disjoint seed
+   group** — §93 called for exactly this and it has never been run.
 3. **The paper needs no new compute.** §101's positioning decision stands: write the mechanism +
    evaluation-artifacts paper, with phase-relational as constructive validation rather than the
    novelty claim. Do NOT chase a performance claim against TransferLight.
