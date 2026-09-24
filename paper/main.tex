@@ -497,6 +497,7 @@ Table~\ref{tab:indist} (in-distribution) & \texttt{rescofull} & $3$\,s & \textbf
 Table~\ref{tab:curriculum} (curriculum) & \texttt{c1\_4\_6} & $2$\,s & no \\
 Adaptation (\S\ref{sec:inventory}-A) & \texttt{rescofull} & $3$\,s & internal only \\
 Triple demand (\S\ref{sec:programme}-C) & \texttt{dense} & $2$\,s & no \\
+Diversity (\S\ref{sec:programme}-B) & \texttt{divwide}/\texttt{dense} & $2$\,s & no \\
 Table~\ref{tab:inventory} (corpus) & various & $2$\,s & no \\
 \bottomrule
 \end{tabular}
@@ -734,8 +735,18 @@ single-lane width it does not signalise junctions at all---and a third defect
 surfaced later: the roster contained a training city whose network file was
 identical to the holdout's (artifact~2), so the experiment did not measure
 cross-topology generalisation at all. The null cannot be relied on in either
-direction, and a corrected repetition on the phase-relational readout was
-inconclusive because the holdout was saturated.
+direction. Repeating it on the corrected readout returns a null that \emph{is}
+interpretable, because the evaluation scenario was changed to one with headroom
+(the triple-demand holdout of Section~\ref{sec:programme}-C) while both training
+rosters were left untouched. Over three seeds the arms are indistinguishable on
+every measure---best round $-0.267$ against $-0.267$ ($0.03$), final $-0.417$
+against $-0.388$ ($0.48$), mean $-0.418$ against $-0.485$ ($1.28$)---and the
+direction is not consistent across measures. The scenario has demonstrable
+resolving power: the sixty round-evaluations span a range of $1.082$, and the
+smallest difference this design could have called significant is $0.041$, under
+$4\%$ of that range. Both arms also beat max pressure on this scenario while
+sitting well off the zero ceiling, so it is neither saturated nor floored. Three
+seeds makes this a screen rather than a confirmation.
 
 \emph{Test-time adaptation.} Fine-tuning on \emph{synthetic} randomised demand over
 the holdout topology---never the evaluation route file---was the corpus's largest
@@ -952,10 +963,11 @@ Section~\ref{sec:inventory}. No comparison against a contemporary zero-shot meth
 has been performed, so competitiveness with the recent state of the art is
 unestablished; TransferLight~\cite{transferlight} is the obvious comparator and
 uses overlapping scenarios. Evaluation is confined to one simulator and four
-networks, and training budgets are short relative to published practice. An
-attempt to establish whether training-topology diversity improves robustness was
-inconclusive because the holdout was saturated, and is reported as a failed
-measurement rather than a null. The FRAP arm is evaluated at a five-round
+networks, and training budgets are short relative to published practice. The
+finding that training-topology diversity does not measurably help
+(Section~\ref{sec:programme}-B) rests on three seeds and is a screen rather than a
+confirmation, although the design's resolving power was measured rather than
+assumed. The FRAP arm is evaluated at a five-round
 checkpoint and its in-distribution figures should not be read as characterising
 MPLight as published.
 

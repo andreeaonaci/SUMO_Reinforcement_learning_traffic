@@ -198,7 +198,7 @@ which had gone stale):
 
 ## RESUME HERE (as of 2026-09-23 21:00 — check this is still current before trusting it)
 
-### ONE BATCH IS RUNNING. It is resumable — do not restart it from scratch.
+### Nothing is running. The §108 batch finished cleanly overnight (all 6 runs exit=0).
 
 ```bash
 EVAL_BASE=environments_dense SEEDS="3 7 11" ROUNDS=10 bash analyse/run_diversity.sh
@@ -262,6 +262,7 @@ scenario, and it is not a novel architecture — see the claim ledger.
 | 105 | **fine-tuning REVERSES on the phase-relational head** — 0/6 runs beat their own zero-shot (5.40/8.89). The corpus's LARGEST prior effect (72.78 on indexed) | 3 seeds, screen |
 | 106 | ensemble **SPLITS**: majority vote ties its best member and beats the member mean (2.20 SE); SWA weight-average **collapses** to -3.87 | 1 group of 6, screen |
 | 107 | **pre-submission audit: a FABRICATED citation, rule 1 broken in the abstract, and the concurrent work above.** Numbers themselves verified sound | re-derived from raw |
+| 108 | **training-topology diversity: a REAL null.** §104's saturation fixed by re-running on the congestion holdout — 0.03/0.48/1.28, direction inconsistent, and the design's power MEASURED (detectable effect 0.041 vs a 1.082 dynamic range) | 3 seeds, powered screen |
 
 ### The claim ledger — what can and cannot be said
 
@@ -341,12 +342,14 @@ NEW table must be added to `tab:config` when it is added to the paper.
 
 ### NEXT, in priority order
 
-1. ~~Re-run §104 on a scenario with headroom.~~ **RUNNING NOW** — see the box at the
-   top. When it lands: write it up as §108, and if it resolves either way, replace the
-   Limitations sentence in `paper/main.tex` that currently concedes a failed
-   measurement ("inconclusive because the holdout was saturated"). It needs a
-   Table~IV provenance row if it reaches the paper — `environments_dense` is 2 s
-   yellow, so internal comparison only.
+1. ~~Re-run §104 on a scenario with headroom.~~ **DONE 2026-09-24, §108 — a real null.**
+   All six runs exit=0. Arms indistinguishable on all three measures (0.03/0.48/1.28)
+   with inconsistent direction, and unlike §104 the power is *measured*: detectable
+   effect 0.041 against a dynamic range of 1.082, so ~4% of the range. Paper updated
+   (Limitations no longer concedes a failed measurement; provenance row added).
+   **Still only 3 seeds — a powered screen, not a confirmation.** Escalating to 6
+   seeds is cheap (`SEEDS="3 7 11 17 21 25"`, ~1.25 h per seed-pair) and is the single
+   easiest upgrade left.
 2. ~~Re-test §93's ensemble on the phase-relational head.~~ **DONE 2026-09-20, §106 — it SPLITS.**
    The majority vote survives but weaker than §93 (ties its best member at -0.12, beats the member
    mean by 2.20x member-level SE; its value is *selection* — best-member performance without

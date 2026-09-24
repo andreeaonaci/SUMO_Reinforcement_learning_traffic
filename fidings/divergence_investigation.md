@@ -8052,6 +8052,64 @@ silent-fallback artifact did not touch the paper's central result. Per-seed
 phase-relational best rounds: $-0.16, -0.10, -0.12, -0.10, -0.12, -0.16$ --- no seed
 carries the mean.
 
+## 108. Training-topology diversity: a REAL null this time — §104's saturation is fixed
+
+**2026-09-24.** §104 tested whether adding synthetic irregular grids to the training
+roster helps the phase-relational head, and returned a null that **could not be
+believed**: the two arms differed by 0.008 on a scale whose floor is 0.0, so the test
+had no power to detect an effect if one existed. CLAUDE.md flagged it as
+not-citable-as-a-null, and the paper's Limitations conceded a failed measurement.
+
+Re-run with **only the evaluation scenario changed** (`--eval_base_dir
+environments_dense`, §97's triple-demand `grid4x4`): identical training rosters,
+identical seeds, identical budget, so this is a single-variable change from §104 and
+not a new experiment. Both arms verified on `city_5_holdout` with
+`is_true_holdout=True` --- no §25 fallback. 3 seeds, 10 rounds, all six runs exit=0.
+
+| measure | base (3 cities) | div (3 + 4 synthetic) | \|diff\|/SE | div better |
+|---|---:|---:|---:|---|
+| best round | $-0.267$ | $-0.267$ | **0.03** | 1/3 |
+| final round | $-0.417$ | $-0.388$ | **0.48** | 1/3 |
+| mean | $-0.418$ | $-0.485$ | **1.28** | **0/3** |
+
+**Null on all three measures, and the direction is not even consistent** --- `div`
+nominally ahead on final, nominally behind on best and mean, base ahead on the
+measure with the largest statistic. Per-seed best rounds ($-0.250\rightarrow-0.254$,
+$-0.292\rightarrow-0.238$, $-0.258\rightarrow-0.310$) scatter in both directions.
+
+### Why this null is believable and §104's was not
+
+**The scenario now has power, and it is measurable rather than asserted.** Across all
+60 round-evaluations the rewards span $-1.320$ to $-0.238$, **a dynamic range of
+1.082 --- 135x the 0.008 that separated §104's arms.** Working from the observed
+between-seed spreads, the smallest difference this design could have called
+significant at the project's $\ge2$ bar is about **0.041 on best-round, i.e.\ under
+4% of the scenario's dynamic range.** An effect of any practical size would have been
+seen. It was not.
+
+Corroborating that the scenario is doing work: §97's reference points on it are
+`max_pressure` $-0.640$ and `fixed_time` $-170.51$, and **both arms here beat
+`max_pressure`** on best-round and mean while sitting far off the $0.0$ ceiling.
+Neither ceiling nor floor.
+
+### Standing and consequence
+
+**Screen, not a confirmation --- 3 seeds**, per this project's own rule, and the rule
+exists because five interventions here produced clean unanimous 3-seed results that
+reversed at six. But it is a *powered* screen, which §104 was not, and all three
+measures agree. Escalating to 6 seeds is the obvious next step and would upgrade it.
+
+**Consequence for the paper:** the Limitations sentence conceding a failed measurement
+can be replaced with a reported null. **`environments_dense` is 2 s yellow**, so this
+is an internal comparison only and needs its own row in the provenance table.
+
+**Consequence for the project:** this is the third independent line pointing at the
+same conclusion --- §70's random-init control, §71's roster diversity under the
+indexed readout, and now §108 under the corrected readout with verified power. Adding
+training-topology diversity does not measurably improve cross-topology generalisation
+here. **The §71 null was doubly uninterpretable** (indexed readout, plus the
+holdout-leak of §95a); this one carries neither defect.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
