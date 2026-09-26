@@ -8,6 +8,7 @@
 \usepackage{cite}
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx}
+\graphicspath{{./}{paper/}}  % compiles from the repo root or from paper/
 \usepackage{booktabs}
 \usepackage{multirow}
 \usepackage{xcolor}
@@ -17,8 +18,8 @@
 
 \definecolor{acc}{HTML}{A85A0A}
 \definecolor{accbg}{HTML}{F6E9D6}
-\definecolor{fail}{HTML}{8F2F2F}
-\definecolor{failbg}{HTML}{F5E0E0}
+\definecolor{fail}{HTML}{7A2E6E}
+\definecolor{failbg}{HTML}{F1E4EE}
 \definecolor{soft}{HTML}{EDEFF1}
 
 \tikzset{
@@ -495,6 +496,7 @@ Table~\ref{tab:control} (dead-row control) & \texttt{ctrl\_norows} & $2$\,s & no
 Table~\ref{tab:zeroshot}, upper block & \texttt{y3}, \texttt{rescofull} & $3$\,s & \textbf{yes} \\
 Table~\ref{tab:zeroshot}, lower block & \texttt{c1\_4\_6} & $2$\,s & no \\
 Table~\ref{tab:indist} (in-distribution) & \texttt{rescofull} & $3$\,s & \textbf{yes} \\
+Fig.~\ref{fig:zeroshot} (per round) & \texttt{rescofull} & $3$\,s & \textbf{yes} \\
 Table~\ref{tab:curriculum} (curriculum) & \texttt{c1\_4\_6} & $2$\,s & no \\
 Adaptation (\S\ref{sec:inventory}-A) & \texttt{rescofull} & $3$\,s & internal only \\
 Triple demand (\S\ref{sec:programme}-C) & \texttt{dense} & $2$\,s & no \\
@@ -504,7 +506,8 @@ Table~\ref{tab:inventory} (corpus) & various & $2$\,s & no \\
 \end{tabular}
 \end{table}
 
-Only Tables~\ref{tab:zeroshot} and \ref{tab:indist} are
+Only Tables~\ref{tab:zeroshot} and \ref{tab:indist}, and Fig.~\ref{fig:zeroshot}
+which plots the former per round, are
 set against published figures anywhere in this paper; every other table compares
 arms sharing a configuration, where the timing difference cancels exactly.
 
@@ -599,7 +602,20 @@ $1473$ departed trips against max pressure's $99.2\%$, with mean waiting time of
 $0.26$\,s against $2.83$\,s. The indexed readout's failure, by contrast, is
 gridlock rather than a poor score: it completes $16$--$20\%$ of departed traffic
 with mean waiting times near thirty minutes, which is what the four orders of
-magnitude in Table~\ref{tab:zeroshot} mean physically.
+magnitude in Table~\ref{tab:zeroshot} mean physically. Fig.~\ref{fig:zeroshot}
+shows that neither picture is a transient of the final round.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig_zeroshot.pdf}
+\caption{Zero-shot holdout cost ($-$reward, log scale) after each training round on
+the benchmark-exact roster (\texttt{rescofull}, $3$\,s yellow): mean over six
+seeds, with the band spanning the best and worst seed. Rule-based references are
+measured on the same holdout and are deterministic. Every phase-relational seed is
+below max pressure at every round, while the indexed readout gridlocks throughout.
+Values in Table~\ref{tab:zeroshot}.}
+\label{fig:zeroshot}
+\end{figure}
 Table~\ref{tab:zeroshot} then addresses budget, at $2$\,s yellow and as an internal
 comparison only.
 
