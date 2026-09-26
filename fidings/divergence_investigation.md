@@ -8110,6 +8110,56 @@ training-topology diversity does not measurably improve cross-topology generalis
 here. **The §71 null was doubly uninterpretable** (indexed readout, plus the
 holdout-leak of §95a); this one carries neither defect.
 
+## 108b. §108 escalated to 6 seeds: CONFIRMED — training-topology diversity does not help
+
+**2026-09-26.** Seeds 17/21/25 finished 2026-09-24 15:33, all six runs exit=0, every
+run on `city_5_holdout` with `is_true_holdout=True`. Identical protocol to §108.
+
+| measure | base (3 cities) | div (3 + 4 synthetic) | \|diff\|/SE | max over drop-one | div better |
+|---|---:|---:|---:|---:|---|
+| best round | $-0.283$ | $-0.297$ | **0.58** | 1.77 | 2/6 |
+| final round | $-0.402$ | $-0.411$ | **0.20** | 1.30 | 2/6 |
+| mean | $-0.417$ | $-0.470$ | **1.60** | **2.22** | **1/6** |
+
+Per-seed best, base $\rightarrow$ div: s3 $-0.250\rightarrow-0.254$, s7
+$-0.292\rightarrow-0.238$, s11 $-0.258\rightarrow-0.310$, s17 $-0.374\rightarrow-0.324$,
+s21 $-0.250\rightarrow-0.358$, s25 $-0.276\rightarrow-0.300$.
+
+### Verdict
+
+**"Diversity helps" is confirmed null.** No measure favours it, at most 2 of 6 seeds
+do on any measure, and at 6 seeds the direction has *stabilised* against it --- `div`
+is nominally worse on all three measures, where at 3 seeds (§108) the direction was
+inconsistent. Detectable effect ($2\times$SE) is 0.049 on best-round, 0.066 on mean
+--- about 4.5--6% of the scenario's 1.082 dynamic range --- so any effect of
+practical size would have shown.
+
+**"Diversity hurts" is NOT established, and must not be claimed.** Mean reward is at
+1.60. It crosses 2 in exactly one family of drop-one variants: removing **seed 17
+from the base arm** (base's single worst seed, mean $-0.495$) gives 2.02 (dropped from
+both arms) / 2.22 (base only). A result that exists only when one arm's worst seed is
+removed is precisely the fragility the drop-one guard is there to catch. The honest
+statement: *no benefit; a weak, non-robust hint of harm on mean reward that does not
+reach threshold.*
+
+**Plausible reading, untested:** the diverse roster adds four synthetic irregular
+grids with 2--4-phase junctions to a holdout that is an 8-phase regular grid. More
+training mass on geometry *unlike* the target could dilute rather than help. That
+would predict harm scaling with how unlike the target the added cities are --- not
+tested, and only worth testing if someone wants to claim harm.
+
+### Consequences
+
+- **Paper:** the diversity paragraph moves from "three seeds, a screen" to a
+  six-seed confirmation, and its "direction is not consistent" sentence is now false
+  and is replaced. Limitations drops the screen caveat and keeps the real scope
+  limit: this tests *topological* diversity from synthetic grids, not demand-pattern
+  diversity.
+- **Claim ledger:** "training-topology diversity does not measurably improve
+  cross-topology transfer" is now a **fully supported** claim, the first time in this
+  project that question has had an interpretable answer (§71 was doubly
+  uninterpretable, §104 saturated, §108 underpowered in seeds).
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit

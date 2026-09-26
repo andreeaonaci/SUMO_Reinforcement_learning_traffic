@@ -738,15 +738,17 @@ cross-topology generalisation at all. The null cannot be relied on in either
 direction. Repeating it on the corrected readout returns a null that \emph{is}
 interpretable, because the evaluation scenario was changed to one with headroom
 (the triple-demand holdout of Section~\ref{sec:programme}-C) while both training
-rosters were left untouched. Over three seeds the arms are indistinguishable on
-every measure---best round $-0.267$ against $-0.267$ ($0.03$), final $-0.417$
-against $-0.388$ ($0.48$), mean $-0.418$ against $-0.485$ ($1.28$)---and the
-direction is not consistent across measures. The scenario has demonstrable
-resolving power: the sixty round-evaluations span a range of $1.082$, and the
-smallest difference this design could have called significant is $0.041$, under
-$4\%$ of that range. Both arms also beat max pressure on this scenario while
-sitting well off the zero ceiling, so it is neither saturated nor floored. Three
-seeds makes this a screen rather than a confirmation.
+rosters were left untouched. Over six seeds no measure favours the diverse
+roster---best round $-0.283$ against $-0.297$ ($0.58$), final $-0.402$ against
+$-0.411$ ($0.20$), mean $-0.417$ against $-0.470$ ($1.60$), with at most two of six
+seeds favouring it on any measure. The scenario has demonstrable resolving power:
+the round-evaluations span a range of $1.082$, and the smallest difference this
+design could have called significant is $0.049$ on best round, under $5\%$ of that
+range. Both arms also beat max pressure on this scenario while sitting well off
+the zero ceiling, so it is neither saturated nor floored. The diverse roster is
+nominally \emph{worse} on all three measures, but that does not reach threshold,
+crossing it only when the baseline arm's single worst seed is removed, and is not
+claimed.
 
 \emph{Test-time adaptation.} Fine-tuning on \emph{synthetic} randomised demand over
 the holdout topology---never the evaluation route file---was the corpus's largest
@@ -964,10 +966,9 @@ has been performed, so competitiveness with the recent state of the art is
 unestablished; TransferLight~\cite{transferlight} is the obvious comparator and
 uses overlapping scenarios. Evaluation is confined to one simulator and four
 networks, and training budgets are short relative to published practice. The
-finding that training-topology diversity does not measurably help
-(Section~\ref{sec:programme}-B) rests on three seeds and is a screen rather than a
-confirmation, although the design's resolving power was measured rather than
-assumed. The FRAP arm is evaluated at a five-round
+diversity null of Section~\ref{sec:programme}-B concerns \emph{topological}
+diversity from synthetic irregular grids; diversity in demand patterns was not
+tested. The FRAP arm is evaluated at a five-round
 checkpoint and its in-distribution figures should not be read as characterising
 MPLight as published.
 

@@ -32,7 +32,13 @@ declare -A CKPT=(
   [3]="$MAIN/run_2026_09_09-01_29_50_1483406/global_round_005.pth"
   [7]="$MAIN/run_2026_09_09-01_29_50_1483410/global_round_005.pth"
   [11]="$MAIN/run_2026_09_09-01_29_50_1483409/global_round_005.pth"
+  # the other three sec 100 seeds -- seed labels verified per run from each
+  # training.log's args dict, not inferred from launch order
+  [17]="$MAIN/run_2026_09_09-02_09_28_1491576/global_round_005.pth"
+  [21]="$MAIN/run_2026_09_09-02_09_32_1491628/global_round_005.pth"
+  [25]="$MAIN/run_2026_09_09-02_09_34_1491714/global_round_005.pth"
 )
+SEEDS="${SEEDS:-3 7 11}"
 
 log() { echo "=== [$(date '+%F %T')] $* ===" >> $DRIVER; }
 throttle() { while [ "$(jobs -rp | wc -l)" -ge "$MAX_CONCURRENT" ]; do sleep 20; done; }
@@ -61,8 +67,8 @@ run_one() {   # rounds, seed
     log "finished $tag exit=$rc" ) &
 }
 
-log "finetune dose batch: rounds={1,2} x seeds={3,7,11}, holdout=$HOLDOUT"
-for SEED in 3 7 11; do
+log "finetune dose batch: rounds={1,2} x seeds={$SEEDS}, holdout=$HOLDOUT"
+for SEED in $SEEDS; do
   throttle; run_one 1 "$SEED"
   throttle; run_one 2 "$SEED"
 done

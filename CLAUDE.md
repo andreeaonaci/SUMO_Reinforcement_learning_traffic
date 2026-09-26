@@ -196,24 +196,13 @@ which had gone stale):
   implemented and tested* FedProx proximal term, `DQNAgent.mu` — see next bullet — which is real
   and unaffected by this deletion.
 
-## RESUME HERE (as of 2026-09-23 21:00 — check this is still current before trusting it)
+## RESUME HERE (as of 2026-09-26 — check this is still current before trusting it)
 
-### Nothing is running. The §108 batch finished cleanly overnight (all 6 runs exit=0).
+### Check `analyse/run_finetune_dose.sh`'s driver log before assuming nothing runs
 
-```bash
-EVAL_BASE=environments_dense SEEDS="3 7 11" ROUNDS=10 bash analyse/run_diversity.sh
-```
-
-Launched 2026-09-23 19:41. **§104 re-run on a scenario with headroom** — the one
-open item that costs the paper a claim, since Limitations currently concedes a
-failed measurement. Only the evaluation scenario changed (`--eval_base_dir
-environments_dense`, §97's triple-demand grid4x4, ~10x dynamic range, verified off
-ceiling and floor); both training rosters are identical to §104, so it is a clean
-single-variable change. Verified at launch: `city_5_holdout` with
-`is_true_holdout=True`, no §25 fallback, no roster/holdout net collision, 20 GB free,
-no orphan workers. Expect ~8-10 h for all three seed pairs at `MAX_CONCURRENT=2`.
-**Do not raise that concurrency unattended** — the script header explains why.
-Skip-or-resume: relaunching the command above continues wherever it stopped.
+§108 is finished and confirmed at 6 seeds (§108b). If a §105 six-seed escalation was
+launched, its state is in `results/finetune_dose/driver.log`; the script is
+skip-or-resume, so relaunching it continues rather than repeats.
 
 Everything below is committed and pushed to `origin/next_phases`. **The main checkout may be
 behind — `git pull` first.** All work since 2026-09-09 lives in the worktree branch
@@ -262,7 +251,7 @@ scenario, and it is not a novel architecture — see the claim ledger.
 | 105 | **fine-tuning REVERSES on the phase-relational head** — 0/6 runs beat their own zero-shot (5.40/8.89). The corpus's LARGEST prior effect (72.78 on indexed) | 3 seeds, screen |
 | 106 | ensemble **SPLITS**: majority vote ties its best member and beats the member mean (2.20 SE); SWA weight-average **collapses** to -3.87 | 1 group of 6, screen |
 | 107 | **pre-submission audit: a FABRICATED citation, rule 1 broken in the abstract, and the concurrent work above.** Numbers themselves verified sound | re-derived from raw |
-| 108 | **training-topology diversity: a REAL null.** §104's saturation fixed by re-running on the congestion holdout — 0.03/0.48/1.28, direction inconsistent, and the design's power MEASURED (detectable effect 0.041 vs a 1.082 dynamic range) | 3 seeds, powered screen |
+| 108 | **training-topology diversity does NOT help — CONFIRMED (§108b).** §104's saturation fixed on the congestion holdout; 0.58/0.20/1.60, div nominally *worse* on all three, ≤2/6 seeds favour it; detectable effect 0.049 vs a 1.082 range. "Hurts" is NOT claimable (crosses 2 only if base's worst seed is dropped) | **6 seeds** |
 
 ### The claim ledger — what can and cannot be said
 
@@ -285,7 +274,7 @@ aggregation (HFRL 2025); PCFT as a contribution (ICCV 2023 owns client curricula
 hurts); in-distribution competitiveness with `max_pressure`; any absolute Ingolstadt number without
 §101b's missing-phase disclosure.
 
-### Two rules that must survive
+### Three rules that must survive
 
 1. **Never report trip time or delay without `arrived` beside it.** `eval_paper_metrics.py`
    computes both over ARRIVED vehicles only, so stranding traffic *improves* them. This produced a
@@ -311,20 +300,23 @@ hurts); in-distribution competitiveness with `max_pressure`; any absolute Ingols
 
 ### THE PAPER EXISTS — `paper/main.tex`, and it is the current deliverable
 
-A complete IEEEtran draft, 10 pages, compiles clean (`pdflatex` twice, no undefined refs).
+A complete IEEEtran draft, 9 pages (page 9 ~85% full), 31 verified references, compiles
+clean (`pdflatex` twice, no undefined refs).
 Title: *Phase-Relational Q-Learning: Configuration-Free Traffic Signal Control Across
 Heterogeneous Intersection Topologies*. It carries the full experimental programme, three TikZ
 system diagrams, the setup/provenance tables, the RESCO in-distribution comparisons, the
-30-intervention inventory, the evaluation-artifact section and the limitations. **Do not start a
+41-intervention inventory (the prose once said "thirty"; §107 addendum), the
+evaluation-artifact section and the limitations. **Do not start a
 new paper file** — extend this one.
 
 Structural rules it already follows, which must be preserved:
-- **Table IV (`tab:config`) is the provenance table.** Every results table in the paper has a row
-  giving its roster, yellow interval and whether it may be set beside published numbers. **A new
-  table is not finished until it has a Table IV row.** The column takes three values: yes, no, and
-  *internal only* (benchmark timing, but a within-study comparison with no published counterpart).
-- Only Tables II, V and VI are ever set against published figures. Everything else is fenced in its
-  own caption as an internal comparison.
+- **`tab:config` is the provenance table** (refer to it by label — its number moved when tables
+  were merged). Every results table has a row giving its roster, yellow interval and whether it may
+  be set beside published numbers. **A new table is not finished until it has a `tab:config`
+  row.** The column takes three values: yes, no, and *internal only* (benchmark timing, but a
+  within-study comparison with no published counterpart).
+- Only `tab:zeroshot` (its upper, 3 s block) and `tab:indist` are ever set against published
+  figures. Everything else is fenced in its own caption as an internal comparison.
 - Every delay/trip-time figure is accompanied by a completion percentage against the departure
   total, because the metric is computed over arrived vehicles only (rule 1 below).
 
@@ -337,19 +329,13 @@ result (§97) and the entire 30-intervention inventory. They are kept and fenced
 instead: `paper/main.tex`'s Table IV (`tab:config`) records the yellow interval and
 external-comparability of **every** table in the paper, and each 2s table's own
 caption repeats "internal comparison, not to be set against published numbers."
-Rule 2 below is unaffected — fencing is what makes keeping them legitimate, and any
+Rule 3 above is unaffected — fencing is what makes keeping them legitimate, and any
 NEW table must be added to `tab:config` when it is added to the paper.
 
 ### NEXT, in priority order
 
-1. ~~Re-run §104 on a scenario with headroom.~~ **DONE 2026-09-24, §108 — a real null.**
-   All six runs exit=0. Arms indistinguishable on all three measures (0.03/0.48/1.28)
-   with inconsistent direction, and unlike §104 the power is *measured*: detectable
-   effect 0.041 against a dynamic range of 1.082, so ~4% of the range. Paper updated
-   (Limitations no longer concedes a failed measurement; provenance row added).
-   **Still only 3 seeds — a powered screen, not a confirmation.** Escalating to 6
-   seeds is cheap (`SEEDS="3 7 11 17 21 25"`, ~1.25 h per seed-pair) and is the single
-   easiest upgrade left.
+1. ~~Re-run §104 on a scenario with headroom.~~ **DONE and CONFIRMED at 6 seeds, §108/§108b.**
+   Diversity does not help (0.58/0.20/1.60, ≤2/6 seeds). Paper updated to the 6-seed numbers.
 2. ~~Re-test §93's ensemble on the phase-relational head.~~ **DONE 2026-09-20, §106 — it SPLITS.**
    The majority vote survives but weaker than §93 (ties its best member at -0.12, beats the member
    mean by 2.20x member-level SE; its value is *selection* — best-member performance without
@@ -369,265 +355,16 @@ NEW table must be added to `tab:config` when it is added to the paper.
 
 ---
 
-## SUPERSEDED (kept for detail) — RESUME HERE as of 2026-09-09
-
-### FIRST: there is a half-finished batch. One command restarts it.
-
-```bash
-SEEDS="17 21 25" bash analyse/run_pcft_phase6.sh
-```
-
-Machine was shut down mid-batch on 2026-09-09. **Everything is checkpointed — nothing needs
-re-running from scratch.** The script skips what is complete, resumes what is partial, starts what
-has not begun. Full state table and caveats: `fidings/divergence_investigation.md` §102c.
-Complete: `fedavg` seeds 3/7/11/17, `pcftC`/`pcftR` seeds 3/7/11/17. Partial: seed 21 (`pcftC` 5/9
-steps, `pcftR` 4/9, `fedavg` 3/8 rounds). Not started: seed 25. Verified at shutdown: no orphan
-`spawn_main` workers, no stray SUMO, RAM released.
-
-### What that batch is testing, and why it matters
-
-**§102 — does PCFT still help once the action readout is fixed?** §87 confirmed PCFT at 6 seeds on
-the INDEXED head. On the phase-relational head it **reverses**: at 4 complete seeds plain FedAvg
-beats both PCFT arms 4/4 on both measures (best-round means: FedAvg **-0.088**, PCFT-complexity
--2.905, PCFT-reverse -0.223), and the curriculum itself is a null with REVERSE order nominally
-ahead. That is **direct evidence for the floor-effect claim below** rather than an inference — the
-one intervention in the §73-§95 corpus that cleared the bar stops helping once the representation
-is fixed. Not final: 4 of 6 seeds, and seed 21's three runs will be resumed rather than run
-straight through (resume restores weights but not replay buffers/optimizer/epsilon — §102b).
-
-### Everything else from 2026-09-09, in one place
-
-- **§100 / §100b** — phase-relational CONFIRMED at 6 seeds on the fully RESCO-exact roster
-  (|diff|/SE 23.63/30.93/53.82, 6/6 seeds). **But in-distribution it does NOT beat `max_pressure`**:
-  throughput-corrected it ties on Cologne (21.6 vs 22.4 delay) and loses on Ingolstadt (35.6 vs
-  26.6). The raw Cologne mean of 21.2 is a survivorship artifact — `eval_paper_metrics.py` computes
-  delay over ARRIVED vehicles only. **Never quote trip time or delay from that script without
-  `arrived` beside it.**
-- **§101 — prior-art review. Read before writing anything.** The phase-invariant head, per-phase
-  pressure, any-number-of-phases, zero-shot cross-topology transfer, federated TSC and clustered
-  aggregation are ALL anticipated (FRAP'19, MPLight'20, AttendLight'20, MuJAM'22, TransferLight'24,
-  HFRL'25). **What survives: MPLight/FRAP cannot be applied to an unseen intersection until a human
-  authors its `phase_pairs` and `pair_to_act_map`** (RESCO's own docs; cologne3's is three
-  hand-written dicts). Ours derives that automatically. PCFT's skeleton is ICCV 2023's "Client
-  Curriculum". **Positioning decision: write the mechanism + evaluation-artifacts paper, not a
-  performance paper. Do not chase TransferLight.**
-- **§101b — a FOURTH RESCO mismatch.** Our vendored `ingolstadt7` is **missing a green phase** RESCO
-  has (6 phases/3 green vs 7/4) at one of its seven intersections. Internal results unaffected (all
-  controllers share the net); **external Ingolstadt comparisons are affected**, including §100b's
-  Ingolstadt row where we lose. arterial4x4 and grid4x4 are identical to RESCO's; cologne3 and
-  ingolstadt7 also have 5 junctions renamed by a netedit re-save (cosmetic, auto-resolved).
-- **§102b — resume support.** `federated_training` already had `--resume`. **PCFT had none and no
-  checkpointing at all**; it now checkpoints after each of its 9 steps and refuses to resume into a
-  differing step plan. Both verified by actually killing runs. Neither restores replay buffers,
-  optimizer momentum or epsilon counters, so **a resumed run is not bit-identical** — disclose which
-  runs were resumed.
-
-### The claim ledger (what can and cannot be said) — §101, §102
-
-**Can claim:** the action representation is the binding constraint (§98's control: indexed head
-still gridlocks at -9028.88 with every usable row fully trained, vs -9296.84 with dead rows);
-phase-relational beats `max_pressure` zero-shot, 6 seeds x 4 configurations; ~20 prior
-interventions were floor effects (now supported by §102's direct evidence); five evaluation
-artifacts; few-seed screens are unreliable here. **Cannot claim:** better than SOTA (no learned
-baseline run); novel architecture; novel zero-shot transfer; novel federated TSC; PCFT as a
-contribution; in-distribution competitiveness.
-
-### Optional, supporting only
-
-The FRAP/MPLight port (§101) is half-built: config extraction, signal re-identification, action
-alignment and validation are **done and committed** (`configs/resco_frap/phase_pairs.json`
-validates clean on all four cities). The FRAP module, movement-demand extractor and `--frap_head`
-plumbing are **not written**. It would convert "we need no per-intersection configuration" from a
-capability claim into a parity claim.
-
 ---
 
-## SUPERSEDED (kept for detail) — RESUME HERE as of 2026-09-09 (earlier same day)
+## Strategic context (2026-08-27/29) — preserved because `fidings/` does NOT cover it
 
-**READ THIS BLOCK ONLY. Everything below it, including the 2026-09-07 block, is superseded on
-framing** — those results are still factually correct as measured, but they were all measured on an
-action readout now known to be the actual problem. Full detail:
-`fidings/divergence_investigation.md` §95-§100; compressed: `fidings/project_knowledge_summary.md`
-section 7; paper-facing: `fidings/paper_results_summary.md` section A0.
-
-**THE CROSS-TOPOLOGY GAP WAS THE ACTION REPRESENTATION, and it is now largely closed.** The shared
-Q-head indexed actions positionally (row k = phase k), so row k is trained on contradictory targets
-across cities — index 1 is a protected left on arterial4x4/grid4x4 and a through movement on
-ingolstadt7/cologne3. A fully-trained row therefore carries no transferable meaning.
-`--phase_relational` replaces positional indexing with a phase-relational readout, and **zero-shot
-on an unseen holdout topology it beats `max_pressure`** — the first time anything in this project
-has. **Confirmed at 6 seeds, 6/6 seeds on every measure, on four distinct configurations:**
-
-| configuration | § | phase-relational | indexed | \|diff\|/SE best/final/mean | drop-1 floor |
-|---|---|---:|---:|---|---:|
-| grid4x4 8-phase, light demand | 96 | -0.16 | -9296.84 | 6-seed confirmed | — |
-| grid4x4 at 3x demand | 97 | -0.32 | -17952.96 | 46.31 / 50.59 / 64.80 | 38.62 |
-| 3x3Grid2lanes 4-phase, no untrained rows | 98 | -1.41 | -9028.88 | 25.79 / 24.29 / 96.67 | 20.25 |
-| RESCO-exact timing, standard roster | 99 | -0.16 | -9411.88 | 47.23 / 39.34 / 57.49 | 32.77 |
-| fully RESCO-exact roster (`environments_rescofull`) | 100 | -0.13 | -8525.72 | 23.63 / 30.93 / 53.82 | 20.24 |
-
-**§98 is the control that makes this a representation finding rather than a bug fix.** §95b found
-that on unseen-topology rosters 37.5% of the holdout's action space is scored by Q-head rows no
-training city ever exercised. §98 removed that defect entirely (holdout phase count ≤ training
-maximum, so every usable row is fully trained) and **the indexed head still gridlocked at -9028.88,
-indistinguishable from the -9296.84 it scored WITH dead rows.** The defect was not the cause.
-
-**CONSEQUENCE FOR THE WHOLE PRIOR RECORD: the ~20 interventions of §73-§95 were evaluated on a
-readout that cannot express a transferable policy regardless of how it is optimised.** Their nulls
-are floor effects, not evidence that algorithm / capacity / aggregation / curriculum don't matter.
-Do not cite them as "X doesn't help" without the qualification "under the indexed readout."
-Re-running that corpus on the phase-relational head is open; PCFT (§87) is the first candidate.
-
-**§99 — a measurement error that invalidates external comparisons only.** This project had never run
-RESCO's scenario configuration: `*_shifted` route files, wrong evaluation windows (cologne3 at
-06:31-07:31 vs. RESCO's 07:00-08:00), and `yellow_time=2` against RESCO's 3, which at a 5s action
-interval gave every controller in every experiment here **50% more usable green per phase change
-than the benchmark being quoted**. **§59's "~4.4x behind published IDQN" claim is RETRACTED.** Every
-*relative* result is unaffected (both arms always shared the configuration). `environments_resco/`
-(RESCO-exact cologne3/ingolstadt7), `environments_y3/` (standard roster at yellow=3) and
-`environments_rescofull/` (all three training cities fully RESCO-exact) now exist;
-`diagnostics/eval_paper_metrics.py --city` does in-distribution evaluation in the literature's
-metrics. **Metric caveat: only Avg. Delay and Avg. Trip Time reconcile with RESCO — this project's
-`wait` and `queue` do NOT, in both directions. Never put wait or queue in a table beside RESCO's.**
-
-**§100b — THE IN-DISTRIBUTION RESULT, and it is the necessary counterweight to the table above.**
-The literature-metric evaluation of §100's checkpoints on RESCO's own Cologne and Ingolstadt
-(`results/rf2_*.log`, done 10:22 on 2026-09-09) shows **the holdout margin does NOT reproduce
-in-distribution.** Corrected for throughput, phase-relational **ties** `max_pressure` on Cologne
-(Avg. Delay 21.6 vs 22.4) and is **clearly behind** on Ingolstadt (35.6 vs 26.6). The raw
-6-checkpoint Cologne mean of 21.2 is a **survivorship artifact** and must not be quoted:
-`diagnostics/eval_paper_metrics.py` computes delay and trip time over *arrived* vehicles only, and
-two seeds stranded 12-38% of traffic, so stranding flatters the metric. **RULE: never report trip
-time or delay from that script without `arrived` beside it.**
-
-This does not retract §96-§100 — those are **zero-shot on an unseen topology**, a different and
-harder claim, and both arms share the scenario so the confound cancels. Two new facts from §100b:
-(1) the phase-relational head is also much better *in-distribution* than the indexed head (Cologne
-21.2 vs 54.3, Ingolstadt 35.6 vs 69.0), so the action representation was costing in-distribution
-performance too, not only transfer — not predicted by §95-§98; (2) phase-relational is still
-unstable in-distribution (2 of 6 Cologne seeds strand traffic), so the representation fix did **not**
-fix the retention/lock-in problem of §32-§53.
-
-**The honest one-line framing: zero-shot cross-topology, this beats `max_pressure`; in-distribution,
-it does not.** Claim the first, not the second.
-
-**Process rule reinforced 2026-09-09 (§100's process note):** commit `a5ff771`'s message described
-the §97/§99 6-seed confirmations in full, but the commit touched only four config.yaml files — none
-of those numbers reached the fidings log, and a cold session would have re-run finished batches. **A
-result is not recorded until it is in `fidings/divergence_investigation.md`.**
-
----
-
-## SUPERSEDED (kept for detail) — RESUME HERE as of 2026-09-07
-
-**SUPERSEDES the 2026-08-29 update below for anything about current experimental status** (that
-update's strategic/publishability verdict, further down, is still valid background — just stale on
-specifics). Everything from 2026-09-05 through 2026-09-07 (a multi-day session) is summarized here;
-full detail is in `fidings/divergence_investigation.md` §78-92 and the compressed
-`fidings/project_knowledge_summary.md`. Read this block first if picking this project back up cold.
-
-**The item 20-25 queue (genuinely-different-paradigm levers, user-requested) is fully closed.**
-Six items plus two ad-hoc additions (TC-FedAvg, item 24's protocol re-test) — exactly ONE confirmed
-real: **item 22, potential-based reward shaping using `max_pressure`'s own signal** (|diff|/SE ~2.5,
-6 seeds, both measures). Everything else: item 20 (replay-buffer reset) null, item 21 (SWA/ensemble
-of same-run checkpoints) real-but-not-deployable, item 23 (recurrent/GRUCell) inconclusive, item 24
-(`--fedavg_blend`, already existed) confirmed null, item 25 (evolution strategies) inconclusive/
-underpowered, TC-FedAvg (bespoke topology-conditioned FiLM) promising at 3 seeds then null at 6.
-
-**CRITICAL BUG found and fixed, §88: `HoldoutEvaluator`'s internal RNG-reset was leaking into
-subsequent TRAINING** in any single-process script that interleaves `agent.train()` and
-`evaluator.evaluate()` calls in one process (`sequential_training.py`, `progressive_curriculum_
-fedavg.py`, `evolution_strategies.py` — NOT the real `--parallel` pipeline, which trains in isolated
-subprocesses eval never touches). Fixed by making `evaluate()`/`evaluate_controller()` save/restore
-the full Python/NumPy/PyTorch global RNG state around themselves. This required re-verifying
-**sequential (non-federated) curriculum training**, which is now **CONFIRMED real at 6-seed rigor**
-but at smaller magnitude than first (buggy) measurement: |diff|/SE 1.92-2.26 (final), 3.87-4.22
-(best-checkpoint) — the second confirmed positive result of the session. A separate "3x training
-budget" escalation claim did NOT survive re-verification (complete reversal) and should not be cited.
-
-**Self-Anchoring Training** (`--anchor_revert`, a bespoke Q-gap-triggered partial weight-reversion
-mechanism, built for this project's own diagnosed retention bottleneck): inconclusive at 6-seed
-rigor (|diff|/SE 1.53/0.90) even after fixing an under-sensitive default threshold.
-
-**Four pre-registered "significantly improve" candidates (§91), all now resolved, zero confirmed:**
-- **CQL** (`--cql_weight`): unanimous, clean 3-seed screen (2.35/2.80) that **reversed hard at 6
-  seeds** (1.05/1.14, one seed flipped -14%) — the clearest demonstration this session that even a
-  perfectly clean 3-seed result isn't sufficient evidence.
-- **QR-DQN** (`--algo qrdqn`, distributional RL): closed **negative** at 3 seeds (1.69/1.13, wrong
-  direction) — never showed promise, no 6-seed escalation warranted.
-- **Proper MAML** (`federated/maml.py`, genuine second-order meta-gradient via
-  `torch.func.functional_call`+`create_graph=True`, NOT a repeat of item 24's first-order proxy):
-  closed **negative** at n=1 seed — monotonic decline into a fully stable `std=0.00` confident
-  lock-in (rounds 3/4/5 byte-identical). A later `/simplify` pass found and fixed a real bug in this
-  same script (fake "sample-count weighting" that was actually a constant) — didn't change the
-  verdict.
-- **Independent-seed ensemble** (`diagnostics/swa_reeval.py`): took ~13 hours, partially usable.
-  SWA weight-average of 6 independent checkpoints scored **-9068.94**, beating every individual
-  checkpoint's own mean — a small, real-looking effect. The actual **majority-vote ensemble crashed
-  on every episode** (a real bug: `EnsemblePolicy.act()` was missing the `ts_id` param
-  `HoldoutEvaluator` always passes, which cascaded into a second crash via an incomplete
-  all-episodes-failed fallback dict). **DONE 2026-09-08, §93 — the re-run landed and the
-  majority-vote ensemble WINS: -8507.91, beating all 6 individual members (best -9240.70, +7.93%)
-  AND the SWA average (-9068.94, +6.19%).** The individual and SWA arms **reproduced exactly, to the
-  cent**, which proves both that the right checkpoint set was recovered and that eval is fully
-  deterministic given `eval_sumo_seed` — so this is a zero-drift comparison. **Mechanism measured
-  directly: the ensemble's episode-level std is 422.02 vs. 23.79-204.08 for members and 40.49 for
-  SWA — the ensemble is demonstrably NOT locked while its own inputs partly are.** Weight-averaging
-  blends locked members in; vote-space combination outvotes them. **Unlike §79's same-run version
-  this is deployable** (no hindsight window selection — just train N seeds, which this project
-  already does, and reuse the 5 models every multi-seed batch currently discards). **Caveats that
-  stand: n=1 ensemble from n=1 group of six — NOT confirmed at this project's multi-seed bar (the
-  |diff|/SE of 9.35 is an episode-level statistic, the §70 trap); and -8507.91 is still ~25,000x
-  worse than `max_pressure`.** Next: replicate on a disjoint seed group; ensemble the *fine-tuned*
-  checkpoints (§66-69) where members are far better and volatile.
-
-**Progressive Curriculum FedAvg (PCFT) — user-proposed (order training cities simplest-to-complex,
-warm up solo, then focus-fine-tune + FedAvg-pool each new city), now CONFIRMED at full 6-seed
-rigor, and unlike CQL/TC-FedAvg it got STRONGER, not weaker, from 3 to 6 seeds:**
-
-| measure | 3-seed \|diff\|/SE | 6-seed \|diff\|/SE |
-|---|---:|---:|
-| final round vs. baseline best-ever round | 2.40 | **2.42** |
-| best-ever round vs. baseline best-ever round | 3.03 | **3.42** |
-| mean vs. baseline mean | 2.39 | **2.70** |
-
-5 of 6 seeds positive on every measure. **This is the THIRD confirmed positive result of the whole
-investigation** (with item 22 and sequential training), and by two of three measures the strongest.
-Two caveats NOT retracted by the confirmation: (1) **budget/mechanism confound** — PCFT's curriculum
-embeds the already-confirmed per-city focus/fine-tune mechanism at every step, so this may be
-re-confirming fine-tuning helps rather than proving curriculum ORDERING specifically is the active
-ingredient; no ablation isolating the two has been run; (2) within-run volatility remains enormous
-(one seed swung >4x across its last three rounds). Full numbers: §87.
-
-**Three architecture-level ideas targeting the confident-lock-in RETENTION mechanism directly
-(as opposed to representation capacity, already shown resistant via the base architecture,
-TC-FedAvg, and §71's wider training roster) — all proposed, implemented, tested, and closed within
-one live conversation with the user, all null or negative:**
-- **`--bounded_q`/`--q_bound_scale`**: hard `tanh` ceiling on the Q-head's cross-action spread
-  (architectural, not a loss-level preference like `--q_entropy_weight`/`--cql_weight`). 3-seed:
-  clean null (0.22/0.07).
-- **`--trunk_lr_scale`**: differential optimizer LR, trunk (representation layers) slower than the
-  Q-head. 3-seed: real **negative** result, unanimous (2.15/1.99) — likely a starvation effect,
-  since the trunk is still random-init early on and needs full-speed learning, not protection.
-- **`--lora_adapter`/`--lora_rank`**: zero-initialized low-rank residual ADDED on top of a fully-
-  normally-trained trunk (pure extra capacity, not a reallocation — the direct fix for
-  `trunk_lr_scale`'s starvation diagnosis). 3-seed: clean null (0.38/0.28). Its first smoke test
-  caught a real pre-existing wiring bug (the `--parallel` path's `global_model` template was missing
-  several flags including this one, only breaking now because `lora_adapter` is the first of them
-  to actually change the network's parameter set) — fixed.
-
-**Net picture as of now:** the confident-lock-in/retention mechanism has resisted every lever aimed
-at it directly this session — loss-level (q_entropy_weight, CQL, distributional RL), post-hoc
-(self-anchoring), and architectural (bounded spread, slow trunk, added low-rank capacity) — while
-fine-tuning on real target-city data (§66-70) remains the only reliably-working mitigation, and it
-works precisely by sidestepping the zero-shot generalization requirement rather than fixing it. Two
-things confirmed as real, replicated, modest wins despite that (item 22, sequential training), plus
-now PCFT as a third, currently the strongest of the three but with its own mechanism only partly
-disentangled. **Open, not yet acted on:** ~~re-run the ensemble majority-vote fix~~ **DONE
-2026-09-08, §93 — a real win, see the bullet above**; consider an
-ablation isolating PCFT's curriculum-ordering effect from its embedded fine-tune steps; whatever
-architecture/training idea the user proposes next — none of `bounded_q`/`trunk_lr_scale`/
-`lora_adapter` are being tuned further per direct instruction to move on rather than sweep values.
+The historical RESUME HERE blocks through 2026-09-07 were removed from this file on
+2026-09-26; their §-numbered experimental detail lives in
+`fidings/divergence_investigation.md` (§1–§108), which is the source of truth. The one
+thing that was *not* mirrored there is reproduced verbatim below — it is the
+publishability / don't-start-over discussion, and a check against `fidings/` confirmed
+the "start over" verdict and its reasoning appear nowhere else.
 
 **STRATEGIC CONTEXT from the 2026-08-27/29 session (paper-worthiness discussion + the
 clustered-federation decision rule) — read this first, it's not captured anywhere else and won't
@@ -685,434 +422,7 @@ vs. starting over in a fresh repo. Answers given, for continuity if this thread 
   `fidings/divergence_investigation.md`) is the durable record if the session itself doesn't
   survive; the training compute itself is not at risk from sleep either way.
 
-**DONE, 2026-08-31: the clustered-federation pilot pair (launched 2026-08-29 07:01, §65) finished
-— null result, closes out this lever.** Two single-seed (seed 3) 63-round `environments_c1_4_6`
-runs: `fedavg` baseline (`results/run_2026_08_29-07_01_27_1193341`, best -4294.87/round 39,
-mean(21-63) -6479.05) vs. genuinely-functional `clustered_fedavg` (post-§65 fix,
-`results/run_2026_08_29-07_01_27_1193340`, best -4218.43/round 30, mean(21-63) -6866.61) — a wash,
-clustered marginally ahead on best-round (+1.8%) and marginally behind on mean(21-63) (-6%), both
-small relative to either run's own round-to-round std (1200-1750), no computable |diff|/SE
-(single seed each side) but no consistent direction either — does not clear the agreed bar even
-informally. **Per the 2026-08-29 decision rule: this is the stopping signal for training/
-aggregation-time interventions on the cross-topology gap** — see §65's final update in the fidings
-doc for the full write-up and the now-fully-exhausted list (federation strategy, architecture,
-extra features, reward shaping, clustering — all null or negative).
+---
 
-**NEXT (in progress as of 2026-08-31, "prio next step #2" from that day's bottleneck discussion,
-queued ahead of #1/a more diverse training roster): fine-tune-on-holdout.** A different *category*
-of lever (test-time/few-shot adaptation, not training/aggregation-time, so not covered by the
-stopping rule above) — take a trained checkpoint, fine-tune briefly on SYNTHETIC randomized
-traffic (SUMO `randomTrips.py`) on the holdout topology itself (never the real eval route file),
-then evaluate on the real holdout traffic as usual. Implemented and smoke-tested:
-`diagnostics/finetune_on_holdout.py` (auto-detects checkpoint architecture from tensor shapes,
-robust to the own_dim 115->117 pressure-feature boundary) +
-`diagnostics/generate_random_routes.py` (wraps `randomTrips.py`). Also found and fixed a resource
-leak while checking room to run this in parallel: ~11 orphaned worker processes from past
-finished runs (dating back to Aug 27) were still alive, holding ~9GB RAM — daemon multiprocessing
-workers don't get cleaned up if their parent `federated_training` process is killed/crashes
-instead of exiting normally (confirmed this happened to the clustered run's *first* launch attempt,
-restarted ~03:45 2026-08-31 after a crash — the earlier "RUNNING RIGHT NOW" text above didn't know
-this at the time). Killed via plain SIGTERM, no issue (results/checkpoints are saved every round
-regardless). Worth a `ps aux | grep spawn_main` sanity check at the start of any future session if
-RAM looks unexpectedly tight.
-
-**DONE, 2026-09-01: the fine-tune-on-holdout test's 30-episode confirmatory re-eval (queued
-above) is in — real benefit CONFIRMED, more decisively than the 5-episode screen suggested.**
-Zero-shot checkpoint: mean_reward=-8664.73, **std=0.00 across all 30 episodes** — a perfect,
-byte-identical confident lock-in (§34's mechanism, the cleanest instance yet). Fine-tuned round-5
-checkpoint: mean_reward=-1092.10, std=636.86 — not locked at all, and every single one of its 30
-episodes beats zero-shot's constant value (worst case still 3.3x better). Magnitude shrank under
-more rigorous eval (20.9x at 5 episodes → 7.9x at 30, matching §33's "screens are optimistic"
-pattern) but the direction holds robustly. Still ~400-3200x off `fixed_time`/`max_pressure` in
-absolute terms — real, worth having, not close to sufficient alone (same reading as §59-61/§66).
-**Full write-up: fidings/divergence_investigation.md §67.**
-
-**Per this decision, the wider-roster-retrain contingency below does NOT trigger — this was a
-confirmed benefit, not a null.** Following §66/§67's own next-steps ordering instead: multi-seed
-replication of the fine-tune protocol against the same zero-shot starting checkpoint. Launched
-2026-09-01, seeds 7/11/17 (`results/finetune_holdout_fedavg_c146_round063_seed{7,11,17}/`,
-`--rounds 5 --local_episodes 2 --n_variants 5`, same protocol as the original seed-3 run).
-
-**DONE: multi-seed replication (seeds 3/7/11/17) confirms the benefit decisively — |diff|/SE=72.78
-(best-of-5-rounds) / 32.18 (round-5-only, unbiased) against zero-shot's -8664.73, both more than
-an order of magnitude past this project's ≥2 bar.** Every round of every seed beats zero-shot by
-at least 3.9x. This does NOT fit the "single-seed doesn't replicate" pattern seen everywhere else
-in this document — it's the strongest, most cleanly confirmed positive result here. Still ~20-3200x
-off `fixed_time`/`max_pressure` in absolute terms even at the single best data point across all 20
-seed×round combinations — a real, well-replicated, citable finding, not "solved." Full write-up:
-fidings/divergence_investigation.md §68.
-
-**DONE, 2026-09-01: fine-tune-duration dose-response curve, 4 seeds (3/7/11/17) x 7 rounds each.**
-Per user request, prioritized "fixed baseline, vary fine-tune duration" — same `fedavg` round_063
-checkpoint throughout. **Caveat discovered while checking it: NOT a clean single-variable curve** —
-`compute_eps_decay` sizes the exploration schedule from `--rounds`, so a 7-round run's early rounds
-use a different (slower) schedule than the standalone 5-round runs in §66/§68; confirmed directly
-(seed-3 rounds 1-5 here don't match §66's original 5-round run at all). The 4 seeds in this batch
-ARE comparable to each other (same schedule), just not round-for-round to §66/§68.
-
-**Result: round 6 has the best mean reward across seeds (-146.96), clearly better than any round-5
-number — the effect had not plateaued at 5 rounds.** best-of-7 per seed |diff|/SE=192.54 (even
-past §68's 5-round 72.78); unbiased round-7-only |diff|/SE=28.03. **Two seeds hit remarkably
-close to baseline at their peak** — seed 7 round 6: -1.24 (vs `max_pressure`'s -0.34,
-`fixed_time`'s -2.73); seed 11 round 7: -4.31 — the closest this document has ever gotten to
-rule-based-controller parity. **But it's not stable: seed 7 relapsed from -1.24 to -1335.14 the
-very next round** — the same confident-lock-in volatility (§32-34/§51-52) showing up inside this
-lever too, not just in from-scratch training. Updated framing: fine-tuning can reach near-baseline
-performance, proving the gap isn't fundamentally unclosable, but doesn't fix the underlying
-instability — "best-round-so-far," not "final round," is probably the right checkpoint-selection
-rule here, same as federated training elsewhere in this document. Full write-up: fidings
-§69.
-
-**CRITICAL, 2026-09-01 — §70, read this before citing §66-69 as support for the foundation-model
-premise: the control those sections were missing came back against us.** Added `--random_init` to
-`diagnostics/finetune_on_holdout.py` (infers architecture from the checkpoint, then discards its
-weights — exactly-matched control, pretrained-vs-random is the only variable) and ran it against
-the pretrained arm with identical settings (round_039 start, 8 rounds, two-phase LR, seed 3).
-**At matched 30-episode rigor the random-init control BEAT the federated-pretrained arm: -406.85
-vs -693.84 (1.71x).** Directional, not established — single training seed per arm, and the
-|diff|/SE=2.15 computable from those 30 episodes is the WRONG statistic (it measures
-episode-level variance within one checkpoint, not the training-seed variance that actually
-dominates here — §69 saw one seed swing -1.24 → -1335 in a round). **Multi-seed replication of
-both arms is now the single highest-value experiment left.**
-
-Two side findings from the same run, both independently useful: **(1) the federated model's FINAL
-checkpoint (round 63, zero-shot -8668.31) is worse on the true holdout than a randomly initialized
-network (-7689.59)** — training past round 39 drove it below random, a concrete instance of the
-confident-lock-in thread and further justification for best-round-not-final-round selection;
-**(2) the two-phase LR schedule did NOT fix the volatility** — both arms degraded through phase 2
-despite a 5x LR cut, which is decent evidence the instability isn't a step-size problem. Does not
-retract §66-69 (fine-tuning genuinely helps vs. zero-shot); it changes the interpretation to
-"training on the target topology helps," not "federated pre-training transfers." Full write-up:
-fidings §70.
-
-**DONE 2026-09-02, §71 — the wider-roster contingency was run and came back NULL, which together
-with §70 closes off "the training data isn't diverse enough" as an explanation.** Built
-`diagnostics/generate_grid_cities.py` (netgenerate a perfect lattice → delete a fraction of
-interior traffic-light nodes + their edges → netconvert rebuild, so junctions around each hole
-become 3-way/dead-end) and generated 8 irregular-grid cities: 116 intersections, action-count
-spread {2: 8, 3: 42, 4: 66}, with within-city mixing. `environments_wide/` = those 8 + the 6 real
-RESCO training cities = **14 training cities** (vs. the 3-city comparison roster's 26
-intersections). Two gotchas measured and encoded as script defaults, either of which would have
-silently invalidated the test: SUMO's default `--tls.layout opposites` collapses every junction to
-2 actions regardless of shape (so varied geometry would still have given an action-space
-monoculture — `incoming` makes phase count follow junction degree), and at `--lanes 1` netconvert
-doesn't signalize junctions at all. Holdout resolution verified as a real `city_5_holdout`
-(`is_true_holdout=True`), not a §25-style silent fallback.
-
-**Result (identical protocol/seed/budget to §65's 3-city `fedavg` baseline; stopped at round 58/63
-by user request, matched rounds-21-58 window on both sides, n=38 each): mean -6304.85 (wide) vs
--6110.73 (narrow), |diff|/SE = 0.60 — a clean null, narrow nominally ahead.** The wide roster did
-take the best-ever true-holdout round in this document (-3451.49 at round 41, vs the narrow
-roster's -4294.87, ~20% better), but that's one round out of 58 in a run swinging -3451 to -9588 —
-the "reachable but not retained" pattern of §51/§52/§69, so weak evidence of a better basin against
-a mean that didn't move. **Conclusion: 3 → 14 cities (26 → 116 intersections, uniform → mixed
-2/3/4-way) produced no mean improvement in cross-topology generalization. Two independent lines
-(§70's random-init control, §71's roster diversity) now point at the same thing — the binding
-constraint is the algorithm's failure to retain/transfer, not the training data.** That's the
-sharpest form of this project's central negative result and the right axis for the paper. Full
-write-up: fidings §71. Caveats: single seed (directional, though a |diff|/SE of 0.60 needs a large
-seed effect to reach 2), synthetic grids so this tests topological — not demand-pattern —
-diversity.
-
-**§64: the no-federation-vs-federated comparison at the extended (63-round) budget is done —
-still no significant difference (|diff|/SE 1.78 best-round, 1.43 mean), extending §49/§50's
-20-round-budget finding to the new budget point.** 3-seed (scoped down from 5, see §60's addendum),
-so directional not confirmatory, but consistent with the now-twice-replicated conclusion that
-federation itself isn't a meaningful driver of this project's instability or generalization
-problems, at either budget tested. Raw numbers lean slightly toward no-federation being *worse*,
-not better, though not significantly.
-
-**§62/§63, 2026-08-28 — the pressure-feature pilot (this session's main event) is complete, and
-the result is negative on this seed, not positive.** §62 confirmed `max_pressure`'s exact input
-signal (outgoing-lane pressure/density) was structurally absent from the DQN's observation
-entirely (not just underused) and added it (`own_dim` 115→117). The first pilot attempt was
-confounded (missing `--lr_decay`/`--min_lr`, defaulted to no LR decay at all) and was killed and
-redone correctly — see §62 for that correction. **The corrected pilot (seed 3, matching §60/§61's
-exact protocol) finished all 63 rounds: best round -3844.45 vs. baseline's -327.10, mean(21-63)
--5115.78 vs. baseline's -2906.42 — worse on both measures, not better.** Read with real caution in
-both directions (§63): single seed, and not even a perfectly matched pair at the same nominal seed
-since `own_dim` changing shifts the whole downstream RNG stream (weight init, replay order) —
-some unknown fraction of this could be that rather than the feature itself. **Not a confirmed
-refutation, but also not the win hoped for. Open decision, not yet made: multi-seed replication of
-this specific feature, or move on to the other discussed levers (clustered federation — code
-already exists via `ClusteredFedAvgStrategy`, cheapest to try; few-shot calibration on the target
-city before eval; a wider/more diverse training roster).**
-
-**MAJOR CORRECTION AND FOLLOW-UP, §58-§61, 2026-08-27/28 — read this before trusting any "trained
-DQN loses to baselines by 3-4 orders of magnitude" statement anywhere in this file or the fidings
-doc (§43 onward).** Prompted by a paper-readiness check: pulled RESCO's actual published numbers
-(Ault & Sharon, NeurIPS 2021 D&B) for the exact scenario this project's `city_4` config is drawn
-from (confirmed identical: cologne3 = RESCO's "Cologne Corridor"). Found two confounds never
-previously checked: (1) **training budget** — RESCO's own IDQN/MPLight need ~100 episodes to
-converge; this document's standard runs use only 40 episodes/city; (2) **evaluation protocol** —
-RESCO is always in-distribution; every "loses catastrophically" claim in this document (§43
-onward) is under true cross-city holdout, a harder task RESCO never attempts.
-
-**§59 controlled for both, in-distribution, single-city:** best checkpoint reaches
-reward=-2.01/waiting_time=37.4s — 6.2x better than `fixed_time` (230.6s), within 1.4x of
-`max_pressure` (27.3s), ~4.4x off RESCO's own published number. **Nearly closes the gap — this
-confound was almost the whole story in-distribution.**
-
-**§60/§61 then tested the same extended budget (round 20→63 via `--resume`) on the actual
-true-holdout protocol (federated, 2-city, 5 seeds) — the answer is more nuanced, and this is the
-current standing picture: more budget DOES significantly improve the true-holdout gap too
-(|diff|/SE 2.38 best-round, 2.43 mean, both clear this project's ≥2 bar) — round-20 best-round mean
--5278.1 → round-63 -2285.2 — but the remaining gap to `max_pressure` is still ~6700-17700x, nothing
-like §59's near-closure.** **Conclusion: the two comparisons this document runs are NOT
-interchangeable.** In-distribution, the gap was almost entirely a training-budget/protocol
-artifact. True-holdout, budget helps substantially but the cross-topology generalization penalty is
-real, large, and budget-resistant — this validates rather than undermines the project's actual
-research premise (generalizing one policy across different topologies is genuinely hard), it just
-means §43-§57's "3-4 orders of magnitude, full stop" framing was conflating two effects (fixable
-undertraining + a real generalization gap) without separating them.
-
-**This does not invalidate the confident-lock-in mechanism work (§32-34/§51-53) or the reward-clip/
-switching-behavior ruling-outs (§56/§57)** — §60/§61's own extended run still shows massive
-round-to-round volatility (a >900x swing within one seed) — **but it does mean "DQN fundamentally
-fails at this" is wrong, replaced by "DQN generalizes badly across topologies, and that gap shrinks
-with more training but doesn't come close to closing at 1.25x RESCO's budget."** That's the
-strongest current framing for a paper: not a negative result about DQN traffic control, but a
-characterized (mechanism: §32-57; budget-sensitivity: §58-61) generalization gap, still open on
-magnitude and on whether it asymptotes short of competitive performance.
-
-**Concrete next steps, in order:** (1) the no-federation-at-63-rounds batch now running — does
-federation itself still not matter at this budget, extending §49/§50's 20-round finding; (2) the
-pending robust re-eval of §61's standout checkpoint; (3) 5-seed replication of §59's single-city
-in-distribution result (still only single-seed); (4) a real budget-vs-performance curve (more than
-2 points) before extrapolating how much training would be needed to close the true-holdout gap, or
-whether it asymptotes short; (5) revisit whether the 2026-08-26 decision to hold Phase 2 should
-still stand, now that the reason for the baseline gap is characterized very differently than when
-that decision was made.
-
-**The mechanism-hunt history (§51-§57) is still factually correct and not wasted work — it's real,
-reproducible properties of this training setup — but should be read as "what's wrong with this
-project's training dynamics/instability," a genuine complementary thread, not as "why does DQN lose
-to baselines," which turned out to be a training-budget/eval-protocol/generalization-gap question,
-not purely a mechanism one.** §51/§52/§53 narrowed the instability mechanism; §54/§55 tested
-`--q_entropy_weight` (split result); §56 found the std<50 lock-in screen has substantial false
-negatives on both arms (corrected z drops 2.71→2.24); §57 ruled out reward-clip saturation and
-characterized a persistent, compounding per-tick deficit present from round 1 of training. These
-remain useful, verified findings — just not, as it turns out, the primary explanation for why this
-project's true-holdout numbers looked so much worse than RESCO's in-distribution ones.
-
-Phase 1 is complete at all three roster sizes (2/3/7-city, 5 seeds each). Read
-`fidings/divergence_investigation.md` in full before doing anything non-trivial here — it's long
-(64 sections as of this writeup) but every number is re-derivable and the reasoning matters. Short
-version, newest first:
-
-- **NEW, §54: implemented and piloted `--q_entropy_weight`, the first training-time intervention
-  targeting §34's confident-lock-in mechanism directly.** New loss term in
-  `agents/dqn.py::DQNAgent.optimize()` (`loss -= q_entropy_weight * mean_batch_entropy(softmax(Q))`,
-  0.0 = exact no-op) rewards the online network for not collapsing into the high-Q-gap state §53
-  characterized, acting *during* training rather than only at eval time. Single-seed pilot (seed 3,
-  3 weight values, `results/q_entropy_pilot_s3.log`, all exit=0) vs. the known qew=0 baseline
-  (best=-2855.95, mean=-6624.90, 1/20 rounds confirmed-locked per §50): `qew=0.001` gave
-  best=-2183.01, mean=-5462.07, **0/20 rounds with std<50**; `qew=0.05` gave best=-1591.34,
-  mean=-5206.92, **0/20 rounds with std<50**; `qew=0.01` (middle value) was worse on both counts,
-  non-monotonic result, likely single-seed noise. **Two of three weight values beat baseline on
-  both reward measures AND avoided the low-std lock-in signal entirely — the first training-time
-  lever tested anywhere in this document that shows both simultaneously.** **Read with the same
-  standing caution as every other single-seed result here (§11→§12, §30→§31, §46→§47): promising,
-  not proven.** Not yet validated at multi-seed rigor — that's the concrete next step.
-- **§53: the §51/§52 escape round shows §34's exact "confident lock-in vs. low-confidence
-  escape" signature, now confirmed at the whole-training-round level, not just within one
-  checkpoint's episodes.** Zero new compute — the 5-episode training-time eval already recorded
-  per-round Q-gaps and action counts. Round 13 (the -126.10 escape) has mean Q-gap 0.14, **30-50x
-  lower** than every neighboring round (3.8-7.2), and the most balanced action usage (dominant-action
-  fraction 0.378 vs. 0.63-0.71 for the fully-bad rounds) — round 14 (partial relapse, -4071) sits at
-  intermediate confidence before round 15 fully relapses back to high-confidence, catastrophic-reward
-  territory. **This independently replicates §34's mechanism** (established there within one fixed
-  checkpoint across 30 SUMO seeds) **at a completely different axis of variation** (same SUMO-seed
-  protocol, weights varying round-to-round instead) — strong convergent evidence this
-  confidence/lock-in relationship is a real, general property of this training setup, not an
-  artifact of how it was measured. Sharpens the open question from "does uncertainty help escape"
-  (now confirmed twice) to **"why doesn't training preferentially find and stay in low-Q-gap
-  regions"** — suggests a new untested lever: a training-time confidence-regularization / Q-value
-  entropy penalty (distinct from §34's already-tested eval-time softmax idea), not yet implemented
-  anywhere in this codebase.
-- **§52: the §51 outlier checkpoint is a genuine isolated escape reached by an ordinary-sized
-  gradient step, not a stable basin — and a fair (matched-n, per-model) best-of-100 comparison finds
-  both no-federation models beat the federated model's best-ever round.** Weight-space L2 diff
-  against immediate neighbors (`city_1_round_011.pth`-`_015.pth`) shows the step producing the
-  round-13 spike (L2=2.76) is unremarkable in size — same magnitude as every neighboring step
-  (1.80-2.97) — yet the reward trajectory goes -7486 → **-126.10** → -4071 → -8501, a sharp one-round
-  spike immediately relapsing. **A good policy is reachable by ordinary gradient steps here, it just
-  isn't retained** — explains why "just train longer" doesn't help (§28: more chances to pass
-  through a good region, not more chances to stay there). Separately: best-of-100 (5 seeds × 20
-  rounds, matched sample size on all three sides, not the pooled comparison §49 already flagged as
-  confounded) gives `city_1`-alone -126.10, `city_4`-alone -1698.66, **federated -2855.95** — both
-  independent models beat the federated model's best-ever round on equal footing. **Read with real
-  caution**: this is a max/extreme-value statistic (not a mean, doesn't admit the |diff|/SE
-  convention used elsewhere), dominated by the single round-13 spike, one run's worth of evidence —
-  matches this project's standing "single-seed story doesn't replicate" pattern (§11→§12, §30→§31,
-  §46→§47) closely enough that it needs a multi-seed matched-pair replication (same seed, federated
-  vs. no-federation, best-of-20 head to head) before trusting the direction. **Not yet done:**
-  action-distribution/Q-gap inspection of the round-13 checkpoint itself.
-- **§51: escaping the confident lock-in mostly does NOT close the baseline gap — locked vs.
-  not-locked rounds differ by only ~29% on mean reward (-9364 vs -6660), both still 2400-3500x worse
-  than baselines.** Zero new compute — reused existing §45/§49 data, bucketed all 300 model-rounds
-  (federated + no-federation) by 5-episode std as a locked/not-locked proxy. **Confirms the lock-in
-  (§32-34/§48-50) is a real but secondary failure mode layered on a larger, still-unexplained
-  deficiency** — consistent with §26's older "not a collapsed policy, residual end-of-episode
-  congestion" finding. **One striking exception found by sorting all 300 rounds by reward: exactly
-  one checkpoint** (`nofed seed5 city_1 round13`, the same one §50 used as its confirmed-not-locked
-  negative control) **lands anywhere near baseline territory** — reward -126.1 (5-ep), waiting_time
-  71.96 vs. `max_pressure`'s 2.91 (25x worse, not 2500x), 94.6% of baseline throughput. Every other
-  one of the 300 rounds is worse than -1200. **Next concrete step, not yet done:** diff this
-  checkpoint's weights against its immediate neighbors (`city_1_round_012.pth`/`_014.pth`) and
-  inspect its action distribution/Q-gaps to see whether it's a real, findable "good" region of
-  weight space or a fragile one-off fluke (n=1 caveat — see §51 for full caveats).
-- **§50 closes out §49's open question: aggregation does NOT measurably change the
-  confident-lock-in's frequency.** Built the matched lock-in-rate count §49 called for: same
-  5-episode `std_reward<50` screen applied identically to both the federated 5-seed run (§45, 100
-  model-rounds) and the no-federation 5-seed run (§49, 200 model-rounds) — 7 and 13 candidates
-  respectively, already close before any confirmation (7% vs. 6.5%). Confirmed every candidate with
-  a real 30-episode `diagnostics/reeval_checkpoint.py --pad_to_true_holdout` run rather than trusting
-  the cheap screen: **7/7 federated candidates and 12/13 no-federation candidates showed the genuine
-  confident-lock-in signature** (rewards collapsing onto ≤12 distinct values across 30 different SUMO
-  seeds; the one exception, no-federation seed 5 `city_1` round 13, showed 21 distinct values spanning
-  -321 to -4809 — a clean negative control proving the classification isn't just rubber-stamping
-  everything). **Resulting rate: federated 7/100 model-rounds (7.0%) vs. no-federation 12/200
-  model-rounds (6.0%), |diff|/SE = 0.34** — far below this project's ≥2 bar, no statistically
-  supportable difference. Combined with §49, this closes §28's original question as far as this
-  roster size can take it: the lock-in is a property of DQN training against this SUMO
-  reward/action-space setup, and federated aggregation neither causes it nor changes how often it
-  happens. Caveat: a floor, not a census — only the std<50-screened candidates were confirmed, though
-  the screen was applied identically to both sides and every confirmed case had 30-episode std well
-  under the screen's threshold. Raw data + reusable batch driver:
-  `results/lockin_rate_reeval_2026_08_26/`, `analyse/run_lockin_reeval_batch.sh`.
-- **§49 corrects §48: the confident-lock-in failure mode is NOT aggregation-specific —
-  independent, never-aggregated single-city training shows the exact same signature.** §48's
-  single-seed pilot found no near-zero-std round under `--no_federation` and tentatively read that
-  as "aggregation causes the lock-in." Extending to 5 seeds (`environments_c1_4`,
-  `--pad_to_true_holdout`, `--dueling --n_step 3`, `--no_federation`,
-  `results/no_federation_c1_4_5seed.log`, all exit=0) found the same absence *by the same shallow
-  5-episode-std screen* (lowest std 5.64 across 200 model-round evals) — **but a 30-episode
-  `diagnostics/reeval_checkpoint.py --pad_to_true_holdout` check (flag added to that script, it
-  never had one) on the single lowest-std round found the exact confident-lock-in signature from
-  §33/§34: 30 different SUMO seeds collapsing to two near-identical reward values (-9584.47/-9587.6,
-  spread of 3.13 out of ~9586), the same round also part of a 5-round tightly-clustered streak
-  (rounds 1-5, city_4 seed 5) before a genuine escape at round 6.** **Corrected conclusion: a
-  5-episode std is not a reliable enough screen to rule lock-in out (§33 already said this; this is
-  now direct proof), and the lock-in itself looks like a fundamental property of DQN training
-  against this SUMO setup that federated aggregation inherits rather than causes** — reframes §28's
-  original question away from "why does aggregation cause this" toward "why does this training
-  setup produce confidently-locked degenerate policies at all, federated or not." Raw reward itself
-  (apples-to-apples, one model per seed) was not significantly different from federated either way
-  (\|diff\|/SE 1.72/0.98 best-round, 1.00/1.28 mean, both under this project's ≥2 bar — a naive
-  pooled-both-models comparison gives a misleadingly significant 2.33, a sample-size confound from
-  no-federation getting 2x the "shots" per seed, not a real effect). ~~Still open: whether
-  aggregation changes the lock-in's frequency/severity even though it isn't the root cause~~ —
-  **measured, see §50 above: no measurable difference (|diff|/SE = 0.34).**
-- **§47 corrects §46: the `--dueling --n_step 3` architecture recommendation's edge over plain
-  FedAvg does NOT hold up at 5-seed rigor under true-holdout eval — |diff|/SE = 0.63 (best-round),
-  0.56 (mean), both far below this project's ≥2 bar.** §46's single-seed (seed 3) finding that
-  dueling+n_step clearly beat the baseline was itself a case of the standing "single-seed story
-  doesn't replicate" pattern (§11→§12, §30→§31) — plain FedAvg's own seed 5 (best -3396.76) beat
-  three of dueling+n_step's five seeds. **`--dueling --n_step 3` remains the best guess (it's still
-  what §15/§19 validated for the in-distribution eval, a separate and still-true claim), but is NOT
-  a confirmed win under true-holdout evaluation.** No architecture or aggregation-strategy
-  comparison currently has a statistically supportable non-trivial baseline to build on, and none
-  come close to `fixed_time`/`max_pressure` regardless (§45) — **this is a stronger reason than §46
-  gave not to scale Phase 2 yet.**
-
-- **CRITICAL, confirmed at full 5-seed rigor 2026-08-19: the 2-city "best-round beats baselines"
-  claim (§21, §29) does not survive a genuine holdout — it was entirely an artifact of evaluating
-  in-distribution (§43, confirmed §45).** Merged in `debugging_andreea`'s `--pad_to_true_holdout`
-  flag (widens a reduced roster's Q-head so it can actually be evaluated on `city_5_holdout`
-  instead of always falling back to `city_1`, one of its own training cities). 5-seed true-holdout
-  2-city result: best-round mean -5278.1 (std 2335.2) vs. `max_pressure`'s -0.34 and `fixed_time`'s
-  -2.73 — **|diff|/SE = 5.05 (best-round), 13.79 (mean reward)**, the cleanest, most decisive
-  result in the whole investigation, every single seed's best round 3-4 orders of magnitude worse
-  than either baseline. A 3-city pilot lands in the same range — adding a third training city
-  doesn't help. **Every "2-city best-round beats baselines" statement anywhere in this file or in
-  the fidings doc's §21/§29 (and the neighbor-attention thread §30/§31, which also evaluated on
-  `city_1`) is superseded, not just caveated — correction notes added to those sections.** At every
-  roster size and every seed now tested with a true holdout (2-city, 3-city pilot, 7-city since
-  §24), the trained DQN loses decisively to both rule-based baselines, full stop. Two other new
-  capabilities merged in the same commit: `--reward_shaping_wait_weight`/
-  `--reward_shaping_stopped_weight` (training-only reward shaping, targets the 7-city
-  queue-draining gap from §26/§28) — first pilot (1 seed, conservative weight) looked worse than
-  the unshaped baseline, inconclusive rather than a rejection (§44) — and 6 real bugs fixed in
-  `sumo_rl/nacrl/` (separate algorithm, "training never actually happened" was the worst one) plus
-  one more found and fixed live (`SumoEnvironmentPZ.__init__` reading action/observation spaces
-  before the env had ever been reset) — NACRL itself is still blocked on this sandbox missing the
-  `pettingzoo` dependency (network too throttled to install it as of this writeup).
-- **The "why does the trained DQN lose to rule-based baselines" investigation (2026-08-15 to
-  2026-08-18, §30-§42) narrowed the mechanism a lot without fully resolving it.** Chain of
-  elimination, each ruling out a candidate cause: weight-divergence/gradient-conflict between
-  cities doesn't predict a round's crash (§32); the crashes are real, reproducible policy failures
-  that survive 6x more eval episodes, not measurement noise (§33); crashed rounds are genuinely
-  **confidently-locked degenerate policies** — byte-identical rewards across different SUMO seeds,
-  `min_gap` (Q-value confidence) correlating -0.884 with reward within the one checkpoint with real
-  gap variance — the network gets *sure* of a bad repeating action, and rare low-confidence moments
-  are what let it escape (§34). A literature check against RESCO (the benchmark this project's city
-  configs are drawn from, fetched and read directly) confirmed this project's pure-argmax-at-eval
-  convention matches the field standard (§35) — the failure mode isn't a project-specific mistake.
-  Two fixes were built and tested: **softmax(Q/0.2) at eval time recovers near-optimal episodes
-  from a checkpoint pure argmax never once escaped**, but only partially (§36); **a short
-  training-time exploration-reset burst durably fixed a moderately-locked checkpoint but not a
-  severely-locked one** (§39/§40), and **turning that into a standing `--epsilon_reset_every N`
-  training flag is a clean null across all 5 seeds of the standard 2-city config** (§41/§42,
-  |diff|/SE ≈ 0.1-0.2) — not worth enabling by default, useful only as a targeted repair once a
-  locked round is detected. A `pressure_norm` reward function was added and tested as an
-  alternative to the default `diff-waiting-time` (§37/§38, single seed) — didn't help, and the same
-  degenerate-lock-in signature reproduced under it too, evidence the lock-in isn't specific to the
-  default reward design. **`agents/dqn.py`'s `_epsilon_action`/`act_batch` still only implement
-  epsilon-greedy — the actual `federated/parallel_server.py`-level root cause of *why* aggregation
-  produces this lock-in (§28's original question) is still open.** New reusable diagnostics from
-  this stretch: `diagnostics/weight_divergence.py`, `diagnostics/reeval_checkpoint.py` (supports
-  `--temperature` for softmax eval), `diagnostics/recovery_finetune.py`.
-- **Also from this stretch: the 2-city masked-head/neighbor-attention ablation reversed on more
-  seeds (§30→§31) — a cautionary, not a settled, result.** Single-seed found clean-comm attention
-  (C) beating both rule-based baselines on every measure and mean-pooling (D) badly underperforming
-  no-neighbor-info (B); on 5 seeds neither claim survived (B/C/D pairwise indistinguishable on
-  best-round, |diff|/SE ≤ 0.73) — another instance of this project's standing pattern (§11→§12 was
-  the first) where a good single-seed story doesn't reproduce. The `--disable_head_fix` /
-  `--disable_neighbor_attention` code split itself (decoupling aggregation-time masked-head
-  averaging from network-time attention-vs-pooling, previously conflated) is real and committed.
-- **Current best-known training config, unchanged: `--dueling --n_step 3`.** Validated on 5 seeds,
-  2-city roster (§21): mean reward -2030.4 (std 515.0), no seed-outlier failure mode. Do not use
-  `--fedprox_mu` (§14, no effect) or `--server_momentum` with `--dueling` (§18, net-negative — a
-  hard CLI check blocks this). `--pseudo_grad_clip`/`--eval_ema_decay` implemented but unconvincing
-  (§19). `--epsilon_reset_every` (new, §41/§42) is implemented and safe (0 = exact no-op) but a
-  clean null in aggregate — don't turn it on as a default, it's a targeted-repair tool only.
-- **Phase 1's masked-head ablation across roster sizes (§20/§23), still the standing read:**
-  mean-reward benefit shrinks monotonically with roster size, gone by 7 cities (|diff|/SE: 3.42 →
-  0.71 → 0.23); best-round benefit real at every size but also shrinking in relative terms.
-- **`fixed_time`/`max_pressure` rule-based baselines beat the trained DQN at every roster size now
-  checked with a true holdout — 7-city since §24-§29/§32-§34, 2-city since §43.** The old "2-city
-  best-round *does* beat both baselines" framing (§21/§29) only ever held on the `city_1`
-  in-distribution fallback — see the §43 bullet above. Both roster sizes: DQN loses on mean and
-  best-round once evaluated correctly.
-- **NEXT ACTION — decision (1) below is now largely answered; decision (2) is still open:**
-  (1) "does the trained DQN beat rule-based control" — **no, at any roster size, once evaluated on
-  a true holdout (§43).** The mechanism behind the underlying instability is well-characterized
-  (confidently-locked degenerate policy, §34) and several fixes were tested (softmax eval §36,
-  recovery-finetune §39/§40, periodic-reset §41/§42, pressure reward §37/§38) but none is a clean,
-  general win; §28's original framing ("why does federated aggregation itself produce this
-  lock-in") is now superseded by §49/§50 — the lock-in isn't aggregation-specific, no-federation
-  training shows the identical signature, and §50 confirmed aggregation doesn't even change its
-  frequency (|diff|/SE = 0.34) — so the open mechanism question is now just: why does this
-  training setup (federated or not) produce confidently-locked degenerate policies at all — this
-  is now a mechanism question with no known federated/no-federation lever left to pull, not an
-  aggregation-specific one. Newly open sub-question from §43: does
-  `--reward_shaping_wait_weight` (§44, one inconclusive pilot so far) or a properly validated
-  `--pad_to_true_holdout`-corrected multi-seed sweep change this picture at all, or is the gap
-  simply too large for any tested intervention to close. (2) Phase 1's own decision-gate
-  outcome is still mixed (2-city clean pass on the now-superseded in-distribution numbers, 7-city
-  null mean-reward result) — per the plan's own instruction not to guess on an ambiguous gate, this
-  needs a user call before scaling Phase 2 compute, and arguably needs re-litigating given §43.
-- `analyse/run_concurrent_batch.sh` is the **default** way to run any multi-run batch (see
-  "Common commands" above). §22 measured ~1.5x wall-clock speedup at `MAX_CONCURRENT=3` on
-  2-city runs (each concurrent run individually slows ~60%, contention worsens over a run's
-  duration). §23 found 7-city runs handle `MAX_CONCURRENT=2` fine despite §22's more conservative
-  `MAX_CONCURRENT=1` assumption for that roster size (measured via `top`/`ps`: city workers are
-  bursty, not steadily CPU-bound; RAM, not CPU, was the binding constraint at ~9GB/15.8GB with 2
-  concurrent 7-city jobs) — don't assume `MAX_CONCURRENT=1` is required for 7-city, but watch RAM
-  headroom if pushing higher. Depends on the `run_dir` PID-suffix fix in
-  `experiments/federated_training.py::main()` (§22) — without it, concurrent launches within the
-  same wall-clock second silently corrupt each other's output directories. **Host sleep during a
-  long batch (§30, §42) freezes but does not kill a running job** — it resumes cleanly from
-  wherever it left off once the machine wakes (confirmed twice now, hours-long gaps both times);
-  don't assume a large wall-clock gap in a training log means the run needs restarting.
+*Removed 2026-09-26: three `SUPERSEDED (kept for detail)` blocks, 57,569 chars. Recover
+them from git history (`git show HEAD:CLAUDE.md`) or read `fidings/divergence_investigation.md`.*
