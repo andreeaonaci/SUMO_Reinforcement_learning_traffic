@@ -5,3 +5,5 @@
 *.fdb_latexmk
 *.fls
 *.synctex.gz
+# figures are source assets the paper needs to compile -- track them
+!figures/*.pdf
