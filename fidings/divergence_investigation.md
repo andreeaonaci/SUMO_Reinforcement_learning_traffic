@@ -8160,6 +8160,96 @@ tested, and only worth testing if someone wants to claim harm.
   project that question has had an interpretable answer (§71 was doubly
   uninterpretable, §104 saturated, §108 underpowered in seeds).
 
+## 109. Rule-based references on the 3 s holdout: "beats max_pressure zero-shot" is now MEASURED at benchmark timing
+
+**2026-09-26.** Every `max_pressure` / `fixed_time` holdout number in this study had been
+measured on the **2 s** holdout. The paper's 3 s zero-shot block (`y3`, `rescofull`)
+compared the readouts only against each other, and the claim ledger's "phase-relational
+beats `max_pressure` zero-shot, 6 seeds × 5 configurations" was therefore **unmeasured at
+the benchmark's own signal timing** for the two configurations that matter most externally.
+`analyse/run_holdout_baselines.sh`: eval-only, same `HoldoutEvaluator`, 5 episodes, same
+`eval_sumo_seed` as the RL arms, `--pad_to_true_holdout`.
+
+Both runs resolved to `city_5_holdout` with `is_true_holdout=True`, no fallback warning.
+`y3` and `rescofull` share the identical holdout (grid4x4 net, `grid4x4_1.rou.xml`, 3 s
+yellow), so their references coincide, as they must.
+
+| controller (3 s holdout) | reward | std over 5 ep. | mean wait | arrived / 1473 departed |
+|---|---:|---:|---:|---:|
+| `max_pressure` | $-0.380$ | 0.000 | 2.833 s | 1461 (99.2%) |
+| `fixed_time` | $-2.730$ | 0.000 | 6.971 s | 1439 (97.7%) |
+
+Against these, from the six raw `federated_history.json` files of each arm:
+
+| arm | best | final | beats `max_pressure` | one-sample \|diff\|/SE (best / final) | final completion | final wait |
+|---|---:|---:|---|---:|---:|---:|
+| `rescofull` phase-relational | $-0.128$ | $-0.161$ | **6/6 best, 6/6 final** | 26.12 / 9.37 | 98.9% | 0.255 s |
+| `y3` phase-relational | $-0.158$ | $-0.197$ | **6/6 best, 6/6 final** | 15.41 / 11.50 | 98.8% | 0.312 s |
+| `rescofull` indexed | $-8525.72$ | $-8965.09$ | 0/6 | --- | **19.5%** | 1782.8 s |
+| `y3` indexed | $-9411.88$ | $-9705.49$ | 0/6 | --- | **16.4%** | 1816.1 s |
+
+**The ledger claim now holds at benchmark timing, cleanly:** every seed of both
+benchmark-timed rosters beats `max_pressure`, at best *and* final round, **at matched
+throughput** (98.9% vs 99.2% completion --- 5 vehicles) and with ~11x lower mean waiting
+time. The |diff|/SE here is one-sample (the rule-based reference is deterministic, std 0
+across episodes), so it measures seed spread only; the 6/6 count is the more robust
+statement.
+
+**New and worth putting in the paper:** the indexed readout's zero-shot failure is not
+merely a bad reward, it is **gridlock** --- it completes only 16--20% of departed traffic,
+with mean waiting times near 30 minutes. That completion number is what makes "four orders
+of magnitude" physically interpretable.
+
+Note: `fixed_time` gives exactly $-2.73$, the same value previously quoted for the 2 s
+holdout. It replays the network's own signal program, whose yellow durations are fixed in
+the `.net.xml` and not set by our `yellow_time`, so the yellow setting cannot affect it ---
+consistent, not a bug.
+
+## 105b. §105 escalated to 6 seeds: the fine-tune reversal is CONFIRMED
+
+**2026-09-26.** Seeds 17/21/25 from the remaining §100 checkpoints (seed labels verified per
+run from each `training.log` args dict). All 12 runs exit=0.
+
+| arm | zero-shot | adapted | \|diff\|/SE | seeds improved | mean wait (zero-shot → adapted) |
+|---|---:|---:|---:|---|---|
+| 1 round | $-0.123$ | $-0.250$ | **4.44** | **0/6** | 0.29 s → 0.67 s (worse on 6/6) |
+| 2 rounds | $-0.123$ | $-0.205$ | **3.75** | 1/6 | 0.29 s → 0.48 s |
+
+Per seed (zero-shot → 1 round / 2 rounds): s3 $-0.12\rightarrow-0.31/-0.22$, s7
+$-0.07\rightarrow-0.24/-0.23$, s11 $-0.12\rightarrow-0.21/-0.23$, s17
+$-0.08\rightarrow-0.16/-0.20$, s21 $-0.14\rightarrow-0.30/-0.15$, s25
+$-0.21\rightarrow-0.28/-0.20$.
+
+**Confirmed: target adaptation on synthetic demand degrades the phase-relational policy.**
+The screen's "0 of 6 runs improve" becomes 1 of 12 at six seeds --- seed 25's two-round run,
+by $+0.02$, within noise --- and the statement in §105 that every individual round of every
+two-round run sat below its baseline no longer holds for that seed. Both must be corrected
+wherever cited.
+
+**The exception is the most informative data point in the experiment.** Seed 25 has by far
+the worst zero-shot start ($-0.21$). Across the six seeds of the 2-round arm, the correlation
+between zero-shot reward and the change adaptation produces is **$r=-0.91$**: the worse the
+starting policy, the less adaptation hurts, and at the worst start it helps slightly. This is
+the deficit-recovery account of §105 --- adaptation helps in proportion to the deficit there
+is to recover, which under the indexed readout was enormous and under the corrected readout
+is nearly nil --- visible *within* one experiment rather than only across readouts. $n=6$ and
+the 1-round arm shows it only weakly ($r=-0.36$), so: consistent with, not proof of.
+
+### A latent bug found while extracting this, which did NOT contaminate the numbers
+
+`finetune_on_holdout.py` derives its default `--checkpoint_dir` from the checkpoint's
+basename --- `results/finetune_holdout_global_round_005` for **every** §105 run, since all
+six checkpoints are named `global_round_005.pth`, while two runs executed concurrently. The
+directory is read back only on the two-phase path (`phase2_rounds > 0`), which this
+protocol never takes (`--phase1_rounds = --rounds`), and evaluation runs on the in-memory
+model (`ParallelFederatedServer` calls `evaluator.evaluate(self.global_model)`). **So every
+reported number stands; only the checkpoint artifacts and the `training.log` /
+`federated_history.json` saved in that directory are clobbered and must not be used.** The
+per-run stdout logs in `results/finetune_dose/` are separate and are what was parsed. The
+synthetic route variants are also in a shared directory, but were generated on 2026-09-09,
+before either batch, so both batches only read them. Fixed:
+`analyse/run_finetune_dose.sh` now passes a per-run `--checkpoint_dir`.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit

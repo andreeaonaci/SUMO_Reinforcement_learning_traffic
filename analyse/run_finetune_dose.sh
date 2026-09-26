@@ -57,8 +57,11 @@ run_one() {   # rounds, seed
     log "SKIP $tag (already complete)"; return
   fi
   log "starting $tag (rounds=$rounds)"
+  # Per-run checkpoint dir: the script's default is derived from the checkpoint
+  # basename, which is global_round_005.pth for EVERY seed, so concurrent runs
+  # shared one directory (fidings sec 105b -- numbers unaffected, artifacts were).
   ( python diagnostics/finetune_on_holdout.py "$ck" \
-      --holdout_config "$HOLDOUT" \
+      --holdout_config "$HOLDOUT" --checkpoint_dir "$OUT/ckpt_$tag" \
       --rounds "$rounds" --phase1_rounds "$rounds" \
       --local_episodes 2 --n_variants 5 --eval_episodes 10 \
       --seed "$seed" > "$OUT/$tag.log" 2>&1
