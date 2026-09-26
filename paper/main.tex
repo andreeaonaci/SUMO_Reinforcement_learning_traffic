@@ -75,7 +75,8 @@ table; parameter count becomes independent of action-space width and no
 per-intersection configuration is required, unlike the phase-pair tables prior
 phase-invariant methods depend upon. Across five configurations at six seeds each
 it exceeds the indexed head by four orders of magnitude zero-shot on an unseen
-network, and attains $21.4$\,s average delay at $91.6\%$ trip completion on the
+network, where the indexed head gridlocks; at the benchmark's own signal timing it
+also beats max pressure on every seed at matched throughput. It attains $21.4$\,s average delay at $91.6\%$ trip completion on the
 RESCO Cologne corridor against $22.13$\,s and $23.99$\,s for published IPPO and
 IDQN, whose completion rates are unreported and whose margin therefore cannot be
 adjudicated. Forty-one prior interventions
@@ -563,7 +564,9 @@ the ones that may be set beside published work.
 timing and \texttt{rescofull} additionally its route files and evaluation windows,
 so both may be set beside published work; the $20$-round budget block runs at
 $2$\,s yellow and is an internal comparison only (Table~\ref{tab:config}). Six
-seeds throughout; $|\Delta|/\mathrm{SE}$ is best\,/\,final against readout~B.}
+seeds throughout; $|\Delta|/\mathrm{SE}$ is best\,/\,final against readout~B.
+The two $3$\,s rosters share one holdout, on which the rule-based controllers are
+deterministic across evaluation episodes.}
 \label{tab:zeroshot}
 \centering\scriptsize\setlength{\tabcolsep}{4pt}
 \begin{tabular}{@{}llrrc@{}}
@@ -574,7 +577,9 @@ Roster & Readout & Best & Final & $|\Delta|/\mathrm{SE}$ \\
 \texttt{y3} & A. Indexed & $-9411.88$ & $-9705.49$ & \multirow{2}{*}{$47.23 / 39.34$} \\
             & \textbf{B. Phase-rel.} & $\mathbf{-0.16}$ & $\mathbf{-0.20}$ & \\[2pt]
 \texttt{rescofull} & A. Indexed & $-8525.72$ & $-8965.09$ & \multirow{2}{*}{$23.63 / 30.93$} \\
-                   & \textbf{B. Phase-rel.} & $\mathbf{-0.13}$ & $\mathbf{-0.16}$ & \\
+                   & \textbf{B. Phase-rel.} & $\mathbf{-0.13}$ & $\mathbf{-0.16}$ & \\[2pt]
+(shared) & Max pressure & $-0.380$ & $-0.380$ & --- \\
+         & Fixed time & $-2.730$ & $-2.730$ & --- \\
 \midrule
 \multicolumn{5}{@{}l}{\emph{Extended budget ($20$ rounds, $2$\,s yellow)}}\\
 \texttt{c1\_4\_6} & A. Indexed & $-4992.77$ & $-6387.32$ & $5.57 / 13.32$ \\
@@ -587,7 +592,14 @@ Roster & Readout & Best & Final & $|\Delta|/\mathrm{SE}$ \\
 Reducing the usable green per phase change---what moving from a $2$\,s to a $3$\,s
 yellow does at this action interval---does not touch the separation, so the result
 is not an artifact of permissive signal timing. That had to be excluded explicitly,
-every earlier measurement here having used the simulator default.
+every earlier measurement here having used the simulator default. At this timing the
+proposed readout also beats max pressure on every seed of both rosters, at best and
+at final round, and does so at matched throughput: it completes $98.9\%$ of the
+$1473$ departed trips against max pressure's $99.2\%$, with mean waiting time of
+$0.26$\,s against $2.83$\,s. The indexed readout's failure, by contrast, is
+gridlock rather than a poor score: it completes $16$--$20\%$ of departed traffic
+with mean waiting times near thirty minutes, which is what the four orders of
+magnitude in Table~\ref{tab:zeroshot} mean physically.
 Table~\ref{tab:zeroshot} then addresses budget, at $2$\,s yellow and as an internal
 comparison only.
 
@@ -912,11 +924,12 @@ The same reversal then occurred on the largest effect in the corpus. Fine-tuning
 on the target topology ($|\Delta|/\mathrm{SE}=72.78$, Section~\ref{sec:programme}-B)
 was repeated on the corrected readout from the \texttt{rescofull} checkpoints of
 Table~\ref{tab:zeroshot}, adaptation running at the benchmark's $3$\,s yellow so
-that it and training share a signal timing. Zero-shot scores $-0.103$; one round of adaptation
-gives $-0.253$ and two rounds $-0.227$, at $|\Delta|/\mathrm{SE}$ of $5.40$ and
-$8.89$ in the \emph{wrong} direction, with $0$ of $6$ runs improving on their own
-starting point and every individual round below its baseline. Mean waiting time
-corroborates independently, $0.20$\,s zero-shot against $0.50$--$0.59$\,s adapted.
+that it and training share a signal timing. Over six seeds, zero-shot scores
+$-0.123$; one round of adaptation gives $-0.250$ and two rounds $-0.205$, at
+$|\Delta|/\mathrm{SE}$ of $4.44$ and $3.75$ in the \emph{wrong} direction. One of
+twelve runs improves on its own starting point, by $0.02$. Mean waiting time
+corroborates independently, rising from $0.29$\,s zero-shot to $0.67$\,s after one
+round and $0.48$\,s after two.
 
 The mechanism follows the curriculum's logic. Under the indexed readout the
 zero-shot policy was gridlocked at $-8664.73$, so nearly any adaptation improved
@@ -925,11 +938,15 @@ the value of adaptation. On the corrected readout the zero-shot policy already
 beats max pressure, so a short burst on synthetic demand can only displace a
 near-optimal policy---the prediction of the randomly initialised control carried
 to its conclusion: once pre-training genuinely transfers, target adaptation stops
-helping. The floor-effect reinterpretation therefore rests on two measured
+helping. The single improving run supports the same account from inside the
+experiment: it belongs to the seed with the worst zero-shot policy, and across the
+six two-round runs the correlation between zero-shot reward and the change
+adaptation produces is $r=-0.91$---the larger the deficit, the less adaptation
+hurts. The floor-effect reinterpretation therefore rests on two measured
 reversals, the second being the largest effect in the inventory. A narrower
-reading is equally consistent and is not excluded---that adapting to
+reading is equally consistent and is not excluded: that adapting to
 \emph{synthetic} demand harms an already near-optimal policy, carrying no
-implication for real target traffic---and three seeds is a screen.
+implication for real target traffic.
 
 \section{Evaluation Artifacts}\label{sec:artifacts}
 
