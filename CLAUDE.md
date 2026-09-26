@@ -198,11 +198,19 @@ which had gone stale):
 
 ## RESUME HERE (as of 2026-09-26 — check this is still current before trusting it)
 
-### Check `analyse/run_finetune_dose.sh`'s driver log before assuming nothing runs
+### IN PROGRESS: Braun 2026 baseline comparison (started 2026-09-26)
 
-§108 is finished and confirmed at 6 seeds (§108b). If a §105 six-seed escalation was
-launched, its state is in `results/finetune_dose/driver.log`; the script is
-skip-or-resume, so relaunching it continues rather than repeats.
+Run by a separate agent. Braun's code is pinned at commit `ea47985` (the snapshot his paper
+cites), downloaded as a tarball to `/home/deea/external/GNN-Traffic-Signal-Control-ea47985...`
+— **it has no LICENSE file, so it must never be copied into this repo**; adapters import from
+that path. New files land in `baselines/braun/` and `results/braun/`, **uncommitted until
+reviewed**. The design point that governs every comparison: **Braun discards the network's
+signal program and synthesizes phases as every maximal conflict-free movement set**, a
+different (usually larger) action space than RESCO, FRAP, max-pressure-as-we-run-it, or
+`--phase_relational`. So the comparison needs his max-pressure over *his* synthesized phases
+as a control, or learner and action space are confounded. Metrics must be simulator-level
+(delay/trip/completion/wait via `eval_paper_metrics.py`'s computation) — our training reward
+can't be produced by his code. Nothing else is running.
 
 Everything below is committed and pushed to `origin/next_phases`. **The main checkout may be
 behind — `git pull` first.** All work since 2026-09-09 lives in the worktree branch
@@ -251,13 +259,17 @@ scenario, and it is not a novel architecture — see the claim ledger.
 | 105 | **fine-tuning REVERSES on the phase-relational head** — 0/6 runs beat their own zero-shot (5.40/8.89). The corpus's LARGEST prior effect (72.78 on indexed) | 3 seeds, screen |
 | 106 | ensemble **SPLITS**: majority vote ties its best member and beats the member mean (2.20 SE); SWA weight-average **collapses** to -3.87 | 1 group of 6, screen |
 | 107 | **pre-submission audit: a FABRICATED citation, rule 1 broken in the abstract, and the concurrent work above.** Numbers themselves verified sound | re-derived from raw |
+| 105b | **fine-tune reversal CONFIRMED at 6 seeds**: 1 round -0.123→-0.250 (4.44, 0/6); 2 rounds →-0.205 (3.75, 1/6, +0.02). The one improver is the WORST zero-shot seed; r(zero-shot, change) = -0.91 in the 2-round arm — deficit recovery visible inside one experiment | **6 seeds** |
+| 109 | **beats `max_pressure` at 3 s benchmark timing, 6/6 seeds, best AND final, both rosters, at matched throughput** (98.9% vs 99.2%; wait 0.26 s vs 2.83 s). References on the 3 s holdout: mp -0.380, ft -2.730. Previously UNMEASURED at this timing. Indexed completes only 16-20% (gridlock) | **6 seeds** |
 | 108 | **training-topology diversity does NOT help — CONFIRMED (§108b).** §104's saturation fixed on the congestion holdout; 0.58/0.20/1.60, div nominally *worse* on all three, ≤2/6 seeds favour it; detectable effect 0.049 vs a 1.082 range. "Hurts" is NOT claimable (crosses 2 only if base's worst seed is dropped) | **6 seeds** |
 
 ### The claim ledger — what can and cannot be said
 
 **CAN claim (fully supported):** the action representation is the binding constraint (§98's
 dead-rows control: indexed still gridlocks with every usable row fully trained); phase-relational
-beats `max_pressure` zero-shot, 6 seeds × 5 configurations; the gap survives 2.5-4x budget (§103);
+beats `max_pressure` zero-shot, 6 seeds × 5 configurations — **including at the benchmark's 3 s
+timing, 6/6 seeds at matched throughput (§109)**; training-topology diversity does not help
+(§108b); the gap survives 2.5-4x budget (§103);
 the gap holds in-distribution too, *while arriving more traffic*, so the true gap is wider (§103b);
 phase-relational is far more stable (per-seed delay 19.7-23.0 vs indexed's 25.7-232.2); ~20 prior
 interventions were floor effects — **now TWO measurements, not an inference** (§102 curriculum,
@@ -300,8 +312,13 @@ hurts); in-distribution competitiveness with `max_pressure`; any absolute Ingols
 
 ### THE PAPER EXISTS — `paper/main.tex`, and it is the current deliverable
 
-A complete IEEEtran draft, 9 pages (page 9 ~85% full), 31 verified references, compiles
-clean (`pdflatex` twice, no undefined refs).
+A complete IEEEtran draft, **10 pages** since Fig. 4 was added (was 9; venue limit still
+undecided), 31 verified references, compiles clean from the repo root or `paper/`
+(`pdflatex` twice, no undefined refs). **Fig. 4 is the only results plot** — regenerate it with
+`python paper/figures/plot_zeroshot.py` (reads the raw run histories; the figure PDF is tracked
+via a `!figures/*.pdf` exception in `paper/.gitignore`). Identity colours: amber `acc` =
+phase-relational, plum `fail` (#7A2E6E) = indexed, shared by Figs. 1, 3, 4 — the old red failed
+the dataviz normal-vision floor against amber.
 Title: *Phase-Relational Q-Learning: Configuration-Free Traffic Signal Control Across
 Heterogeneous Intersection Topologies*. It carries the full experimental programme, three TikZ
 system diagrams, the setup/provenance tables, the RESCO in-distribution comparisons, the
