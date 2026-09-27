@@ -198,7 +198,9 @@ which had gone stale):
 
 ## RESUME HERE (as of 2026-09-26 — check this is still current before trusting it)
 
-### IN PROGRESS: Braun 2026 baseline comparison — first results in §110 (3 seeds)
+### DONE: Braun 2026 comparison at six seeds (§110, §110b) — nothing is running
+
+Historical note below kept for how it was run.
 
 Remaining queue as of 2026-09-27 17:00: `native` seeds 17/21/25 (ETA ≈ 22:00); `synthfb`
 17/21/25 trained but not yet evaluated. Finish with

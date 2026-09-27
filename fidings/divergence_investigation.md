@@ -8372,6 +8372,29 @@ direction of the effect (2 s is more permissive for every controller) is unchang
 is every within-study comparison. **What is corrected:** the magnitude. Fixed in
 `paper/main.tex` (setup section and artifact 4).
 
+## 110b. Braun at SIX seeds: the comparison is confirmed, and stronger
+
+**2026-09-27.** The queue finished 22:41 (all 12 runs exit=0). Iteration-85 checkpoints of
+seeds 17/21/25 for both arms evaluated with `baselines/braun/run_eval_it85.sh` (same protocol:
+sampled 5 episodes / greedy 1, SUMO seed 12345 grid4x4, 42 elsewhere); 0 errors. Table from
+`baselines/braun/table_it85.py` (per-episode JSON, one pipeline), delay s / completion %:
+
+| controller | grid4x4 (unseen) | cologne3 | ingolstadt7 |
+|---|---|---|---|
+| Braun, own phases, sampled (6) | 294.1 / 94.5 | 86.6 / 96.9 | 84.9 / 95.5 |
+| Braun, own phases, greedy (6) | 135.2 / 96.3 | 99.7 / 91.3 | 68.8 / 51.3 |
+| Braun, RESCO phases, sampled (6) | 188.2 / 96.3 | 59.5 / 93.3 | 66.8 / 96.5 |
+| Braun, RESCO phases, greedy (6) | 271.0 / 39.9 | 152.1 / 72.2 | 47.1 / 70.0 |
+| his max pressure, own phases | 79.2 / 98.4 | 67.7 / 96.7 | 42.4 / 44.1 |
+| his max pressure, RESCO phases | 90.9 / 95.4 | 26.4 / 98.6 | 41.1 / 97.5 |
+| **ours, phase-relational (6)** | **41.4 / 98.8** | **21.4 / 91.2** | **35.3 / 95.4** |
+
+|Δ|/SE on delay vs ours: own phases 46.12 / 11.39 / 12.39; RESCO phases 14.63 / 5.81 / 8.87 (was
+32.1 / 7.45 / 7.70 at three seeds). **§110's conclusions hold at six seeds**: ours beats his
+method on delay everywhere, and his learned policy stays below his own max pressure. Caveats of
+§110 unchanged (throughput is his metric; his own-phase arm is not RESCO-comparable; on cologne3
+he completes more traffic than ours).
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit

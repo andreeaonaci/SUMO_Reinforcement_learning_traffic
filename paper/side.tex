@@ -11,6 +11,8 @@
 \usepackage{booktabs}
 \usepackage{float}
 \usepackage{tabularx}
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+\newcolumntype{P}[1]{>{\raggedright\arraybackslash}p{#1}}
 \usepackage{xcolor}
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta,positioning,calc}
@@ -38,6 +40,8 @@
   aracc/.style={ar, draw=acc, line width=0.8pt},
 }
 
+\renewcommand{\arraystretch}{1.25}
+\raggedbottom
 \newcommand{\nm}{\textit{n.m.}}
 
 \title{\textbf{Phase-Relational \texorpdfstring{$Q$}{Q}-Learning for Traffic Signal
@@ -90,26 +94,24 @@ Avoiding phase indices is not new. Table~\ref{tab:prior} lists the closest work.
 \begin{table}[H]
 \centering\footnotesize
 \setlength{\tabcolsep}{3pt}
-\begin{tabularx}{\columnwidth}{@{}p{18.5mm}X@{}}
-\toprule
-Work & Idea, and relation to ours \\
-\midrule
+\begin{tabularx}{\columnwidth}{|P{18.5mm}|L|}
+\hline
+Work & Idea, and relation to ours \\ \hline
 FRAP (2019) & Scores phases through pairs of competing movements. Needs a hand written table
 mapping each intersection's phases to movements before it can control it. We ported it as a
-baseline. \\
+baseline. \\ \hline
 MPLight (2020) & FRAP with pressure as state and reward, scaled to thousands of signals.
-Needs the same table. \\
+Needs the same table. \\ \hline
 AttendLight (2020) & Attention over lanes and phases, one model for many intersection
-types; generalises when similar configurations appear in training. \\
+types; generalises when similar configurations appear in training. \\ \hline
 TransferLight (2024) & Zero-shot control on unseen road networks, credited to training on
-many random networks. Not yet compared with ours. \\
+many random networks. Not yet compared with ours. \\ \hline
 HFRL (2025) & Federated signal control that clusters intersections before averaging; not
-about unseen topologies. \\
+about unseen topologies. \\ \hline
 Braun (2026) & Concurrent work: a graph network scores movements, and the method builds its
 own phase sets instead of using the network's signal program. We ran its code on our
-networks (Table~\ref{tab:braun}). \\
-RESCO (2021) & Benchmark providing the networks and published baselines we use. \\
-\bottomrule
+networks (Table~\ref{tab:braun}). \\ \hline
+RESCO (2021) & Benchmark providing the networks and published baselines we use. \\ \hline
 \end{tabularx}
 \caption{Closest prior and concurrent work.}
 \label{tab:prior}
@@ -180,19 +182,16 @@ grid4x4 is never used for training.
 
 \begin{table}[H]
 \centering\footnotesize
-\resizebox{\columnwidth}{!}{%
-\begin{tabular}{@{}llrrr@{}}
-\toprule
-Network & Role & Signals & Green phases & Trips in window \\
-\midrule
-arterial4x4 & training & 16 & 5 & 2484 \\
-cologne3 & training & 3 & 3 or 4 & 2856 \\
-ingolstadt7 & training & 7 & 2 or 3 & 3031 \\
-grid4x4 & unseen (test) & 16 & 8 & 1473 \\
-\bottomrule
-\end{tabular}}
-\caption{Networks. ``Trips in window'' is the number of vehicles departing during the
-evaluated hour, used as the denominator for trips completed.}
+\begin{tabular}{|l|l|r|r|r|}
+\hline
+Network & Role & Signals & Phases & Trips \\ \hline
+arterial4x4 & training & 16 & 5 & 2484 \\ \hline
+cologne3 & training & 3 & 3 or 4 & 2856 \\ \hline
+ingolstadt7 & training & 7 & 2 or 3 & 3031 \\ \hline
+grid4x4 & test (unseen) & 16 & 8 & 1473 \\ \hline
+\end{tabular}
+\caption{Networks. ``Phases'' is the number of green phases per intersection; ``Trips'' is the
+number of vehicles departing during the evaluated hour, used as the denominator for trips completed.}
 \label{tab:nets}
 \end{table}
 
@@ -216,22 +215,20 @@ they are always reported together with trips completed.
 \begin{table}[H]
 \centering\footnotesize
 \setlength{\tabcolsep}{3pt}
-\begin{tabularx}{\columnwidth}{@{}p{17mm}Xp{12mm}@{}}
-\toprule
-Metric & Meaning & Better \\
-\midrule
+\begin{tabularx}{\columnwidth}{|P{17mm}|L|P{12mm}|}
+\hline
+Metric & Meaning & Better \\ \hline
 Reward & Training signal: change in accumulated waiting time on each intersection's incoming
 lanes, averaged over the evaluation. Always negative; used to compare controllers on the
-same network, not with other papers. & closer to 0 \\
+same network, not with other papers. & closer to 0 \\ \hline
 Waiting time (s) & Time a vehicle spends nearly stopped (below 0.1\,m/s), mean per arrived
-vehicle. & lower \\
+vehicle. & lower \\ \hline
 Average delay (s) & Time lost compared with driving at free flow speed (includes slow
-driving, not only stops), mean per arrived vehicle. The main RESCO metric. & lower \\
-Trip time (s) & Departure to arrival, mean per arrived vehicle. & lower \\
-Trips completed & Arrived vehicles divided by vehicles departing in the window. & higher \\
+driving, not only stops), mean per arrived vehicle. The main RESCO metric. & lower \\ \hline
+Trip time (s) & Departure to arrival, mean per arrived vehicle. & lower \\ \hline
+Trips completed & Arrived vehicles divided by vehicles departing in the window. & higher \\ \hline
 $|\Delta|/\mathrm{SE}$ & Difference between two means over seeds, divided by its standard
-error. At least 2 counts as significant. & larger is more certain \\
-\bottomrule
+error. At least 2 counts as significant. & larger is more certain \\ \hline
 \end{tabularx}
 \caption{Metrics used in this document.}
 \label{tab:metrics}
@@ -246,13 +243,11 @@ indexed head is fully trained. If untrained rows were the cause, performance sho
 
 \begin{table}[H]
 \centering\footnotesize
-\begin{tabular}{@{}lcr@{}}
-\toprule
-Unseen network, indexed head & Untrained rows & Reward \\
-\midrule
-grid4x4, 8 phases & 37.5\% of actions & $-9296.84$ \\
-4 phase network & none & $-9028.88$ \\
-\bottomrule
+\begin{tabular}{|l|c|r|}
+\hline
+Test network (indexed head) & Untrained rows & Reward \\ \hline
+grid4x4, 8 phases & 37.5\% of actions & $-9296.84$ \\ \hline
+4 phase network & none & $-9028.88$ \\ \hline
 \end{tabular}
 \caption{Control experiment, six seeds. Both conditions gridlock; the difference is within
 seed noise.}
@@ -267,16 +262,14 @@ cheap fixes (a wider head, or a training city with more phases).
 \centering\footnotesize
 \setlength{\tabcolsep}{3pt}
 \resizebox{\columnwidth}{!}{%
-\begin{tabular}{@{}lcrrc@{}}
-\toprule
-Configuration & Yellow & Indexed & Phase-rel. & $|\Delta|/\mathrm{SE}$ \\
- & & (best round) & (best round) & best / final \\
-\midrule
-grid4x4, 3$\times$ demand & 2\,s & $-17952.96$ & $\mathbf{-0.32}$ & 46.31 / 50.59 \\
-4 phase control network & 2\,s & $-9028.88$ & $\mathbf{-1.41}$ & 25.79 / 24.29 \\
-grid4x4, RESCO timing & 3\,s & $-9411.88$ & $\mathbf{-0.16}$ & 47.23 / 39.34 \\
-grid4x4, fully RESCO & 3\,s & $-8525.72$ & $\mathbf{-0.13}$ & 23.63 / 30.93 \\
-\bottomrule
+\begin{tabular}{|l|c|r|r|c|}
+\hline
+Configuration & Yellow & Indexed & Phase-rel. & $|\Delta|/\mathrm{SE}$ \\ \hline
+ & & (best round) & (best round) & best / final \\ \hline
+grid4x4, 3$\times$ demand & 2\,s & $-17952.96$ & $\mathbf{-0.32}$ & 46.31 / 50.59 \\ \hline
+4 phase control network & 2\,s & $-9028.88$ & $\mathbf{-1.41}$ & 25.79 / 24.29 \\ \hline
+grid4x4, RESCO timing & 3\,s & $-9411.88$ & $\mathbf{-0.16}$ & 47.23 / 39.34 \\ \hline
+grid4x4, fully RESCO & 3\,s & $-8525.72$ & $\mathbf{-0.13}$ & 23.63 / 30.93 \\ \hline
 \end{tabular}}
 \caption{Reward on the unseen network, six seeds, all six favouring phase-relational in every
 row. A fifth configuration (light demand) gives the same result. ``Fully RESCO'' also uses
@@ -295,19 +288,17 @@ round. Band: best and worst of six seeds.}
 \begin{table}[H]
 \centering\footnotesize
 \setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}lrrrr@{}}
-\toprule
-Metric & Phase-rel. & Indexed & Max press. & Fixed time \\
-\midrule
-Reward & $\mathbf{-0.161}$ & $-8965.09$ & $-0.380$ & $-2.730$ \\
-Waiting time (s) & \textbf{18.8} & \nm & 22.8 & 65.6 \\
-Average delay (s) & 41.4 & \nm & \textbf{40.2} & 91.2 \\
-Trip time (s) & 153.4 & \nm & \textbf{152.1} & 203.1 \\
-Trips completed & 98.8\% & 19.5\% & \textbf{99.2\%} & 97.7\% \\
-\bottomrule
+\begin{tabular}{|l|r|r|r|r|}
+\hline
+Metric & Ours & Indexed & Max press. & Fixed time \\ \hline
+Reward & $\mathbf{-0.161}$ & $-8965.09$ & $-0.380$ & $-2.730$ \\ \hline
+Waiting time (s) & \textbf{18.8} & \nm & 22.8 & 65.6 \\ \hline
+Average delay (s) & 41.4 & \nm & \textbf{40.2} & 91.2 \\ \hline
+Trip time (s) & 153.4 & \nm & \textbf{152.1} & 203.1 \\ \hline
+Trips completed & 98.8\% & 19.5\% & \textbf{99.2\%} & 97.7\% \\ \hline
 \end{tabular}
 \caption{Unseen network (grid4x4, fully RESCO, 3\,s yellow), final training round.
-Phase-relational: mean of six seeds. Max pressure and fixed time are rule based and
+Ours (phase-relational): mean of six seeds. Max pressure and fixed time are rule based and
 deterministic. \nm: not measured, since the indexed head gridlocks.}
 \label{tab:unseen}
 \end{table}
@@ -322,14 +313,12 @@ trained on a waiting time reward.
 \centering\footnotesize
 \setlength{\tabcolsep}{3pt}
 \resizebox{\columnwidth}{!}{%
-\begin{tabular}{@{}lrrc@{}}
-\toprule
-Readout (20 rounds, 2\,s yellow) & Best & Final & $|\Delta|/\mathrm{SE}$ vs.\ ours \\
-\midrule
-Indexed head & $-4992.77$ & $-6387.32$ & 5.57 / 13.32 \\
-FRAP, with hand written tables & $-0.253$ & $-1.115$ & 4.06 / 1.71 \\
-\textbf{Phase-relational (ours)} & $\mathbf{-0.082}$ & $\mathbf{-0.175}$ & \\
-\bottomrule
+\begin{tabular}{|l|r|r|c|}
+\hline
+Readout (20 rounds, 2\,s yellow) & Best & Final & $|\Delta|/\mathrm{SE}$ vs.\ ours \\ \hline
+Indexed head & $-4992.77$ & $-6387.32$ & 5.57 / 13.32 \\ \hline
+FRAP, with hand written tables & $-0.253$ & $-1.115$ & 4.06 / 1.71 \\ \hline
+\textbf{Phase-relational (ours)} & $\mathbf{-0.082}$ & $\mathbf{-0.175}$ & \\ \hline
 \end{tabular}}
 \caption{Unseen network with 2.5 to 4 times the usual training budget, six seeds. The
 indexed head is still four orders of magnitude behind. FRAP also transfers, confirming the
@@ -343,27 +332,24 @@ final round difference is not significant (1.71).}
 \centering\footnotesize
 \setlength{\tabcolsep}{3pt}
 \resizebox{\columnwidth}{!}{%
-\begin{tabular}{@{}lrrr@{}}
-\toprule
-Controller & Delay (s) & Trip (s) & Completed \\
-\midrule
-\multicolumn{4}{@{}l}{\emph{cologne3}}\\
-\textbf{Phase-relational (ours)} & \textbf{21.4} & 58.9 & 91.6\% \\
-Max pressure & 22.4 & 60.1 & \textbf{98.6\%} \\
-IPPO (RESCO, published) & 22.13 & \textbf{57.45} & not reported \\
-IDQN (RESCO, published) & 23.99 & 59.0 & not reported \\
-Fixed time & 34.6 & 72.4 & 98.4\% \\
-Indexed head & 54.0 & 91.2 & 77.6\% \\
-FRAP & 150.3 & 188.0 & 84.4\% \\
-\midrule
-\multicolumn{4}{@{}l}{\emph{ingolstadt7}}\\
-Max pressure & \textbf{26.6} & \textbf{71.5} & 88.5\% \\
-IDQN (RESCO, published) & 31.19 & not reported & not reported \\
-\textbf{Phase-relational (ours)} & 35.2 & 79.0 & \textbf{95.4\%} \\
-Indexed head & 84.7 & 128.0 & 80.3\% \\
-Fixed time & 92.2 & 136.2 & 93.5\% \\
-FRAP & 93.4 & 137.3 & 88.7\% \\
-\bottomrule
+\begin{tabular}{|l|r|r|r|}
+\hline
+Controller & Delay (s) & Trip (s) & Completed \\ \hline
+\multicolumn{4}{|l|}{\emph{cologne3}}\\ \hline
+\textbf{Phase-relational (ours)} & \textbf{21.4} & 58.9 & 91.6\% \\ \hline
+Max pressure & 22.4 & 60.1 & \textbf{98.6\%} \\ \hline
+IPPO (RESCO, published) & 22.13 & \textbf{57.45} & not reported \\ \hline
+IDQN (RESCO, published) & 23.99 & 59.0 & not reported \\ \hline
+Fixed time & 34.6 & 72.4 & 98.4\% \\ \hline
+Indexed head & 54.0 & 91.2 & 77.6\% \\ \hline
+FRAP & 150.3 & 188.0 & 84.4\% \\ \hline
+\multicolumn{4}{|l|}{\emph{ingolstadt7}}\\ \hline
+Max pressure & \textbf{26.6} & \textbf{71.5} & 88.5\% \\ \hline
+IDQN (RESCO, published) & 31.19 & not reported & not reported \\ \hline
+\textbf{Phase-relational (ours)} & 35.2 & 79.0 & \textbf{95.4\%} \\ \hline
+Indexed head & 84.7 & 128.0 & 80.3\% \\ \hline
+Fixed time & 92.2 & 136.2 & 93.5\% \\ \hline
+FRAP & 93.4 & 137.3 & 88.7\% \\ \hline
 \end{tabular}}
 \caption{Networks used in training, RESCO settings, six seeds. Our policy is trained on
 three networks at once with about one tenth of RESCO's per network budget. Our ingolstadt7
@@ -376,27 +362,30 @@ with lower completion. On ingolstadt7 max pressure is better on delay, although 
 completes the most trips.
 
 \subsection{Comparison with concurrent work}
-\begin{table}[H]
+Table~\ref{tab:braun} runs the released code of the closest concurrent method on the
+same networks and measures it with the same pipeline as our policy.
+
+\begin{table*}[t]
 \centering\footnotesize
-\setlength{\tabcolsep}{2.5pt}
-\resizebox{\columnwidth}{!}{%
-\begin{tabular}{@{}lccc@{}}
-\toprule
-Delay (s) / completed & grid4x4 & cologne3 & ingolstadt7 \\
-\midrule
-Braun, own phases & 293.0 / 94\% & 88.0 / 97\% & 89.0 / 96\% \\
-Braun, RESCO phases & 183.6 / 96\% & 47.8 / 95\% & 61.1 / 97\% \\
-Braun's max press., own ph. & 79.2 / 98\% & 67.7 / 97\% & 42.4 / 44\% \\
-Braun's max press., RESCO ph. & 90.9 / 95\% & 26.4 / 99\% & 41.1 / 98\% \\
-\textbf{Phase-relational (ours)} & \textbf{41.4 / 99\%} & \textbf{21.4 / 91\%} & \textbf{35.3 / 95\%} \\
-\bottomrule
-\end{tabular}}
-\caption{Braun's released code on our networks, measured with the same pipeline, three
-training seeds (six seed runs finishing). ``Own phases'' is his method as published: it
-replaces the signal program with its own phase sets (17 instead of 8 on grid4x4). His
-learned policy is below his own max pressure on every network.}
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{|l|r|r|r|r|r|r|}
+\hline
+ & \multicolumn{2}{c|}{grid4x4 (unseen)} & \multicolumn{2}{c|}{cologne3} & \multicolumn{2}{c|}{ingolstadt7} \\ \hline
+Controller & Delay (s) & Compl. & Delay (s) & Compl. & Delay (s) & Compl. \\ \hline
+Braun, own phases & 294.1 & 94.5\% & 86.6 & 96.9\% & 84.9 & 95.5\% \\ \hline
+Braun, RESCO phases & 188.2 & 96.3\% & 59.5 & 93.3\% & 66.8 & 96.5\% \\ \hline
+Braun's max pressure, own phases & 79.2 & 98.4\% & 67.7 & 96.7\% & 42.4 & 44.1\% \\ \hline
+Braun's max pressure, RESCO phases & 90.9 & 95.4\% & 26.4 & \textbf{98.6\%} & 41.1 & \textbf{97.5\%} \\ \hline
+\textbf{Phase-relational (ours)} & \textbf{41.4} & \textbf{98.8\%} & \textbf{21.4} & 91.2\% & \textbf{35.3} & 95.4\% \\ \hline
+\end{tabular}
+\caption{Braun's released code on our networks, measured with the same pipeline, six
+training seeds per learned arm (sampled actions, his evaluation protocol). Bold marks the
+best value in each column: lowest delay, highest completion. ``Own phases'' is his method as
+published: it replaces the signal program with its own phase sets (17 instead of 8 on
+grid4x4). On delay, ours differs from his method by $|\Delta|/\mathrm{SE}$ 46.1, 11.4 and
+12.4. His learned policy is below his own max pressure on every network.}
 \label{tab:braun}
-\end{table}
+\end{table*}
 
 \subsection{Earlier interventions, revisited}
 Before the cause was found, 41 interventions were tested with the indexed head: other
@@ -408,15 +397,13 @@ readout changes the picture (Table~\ref{tab:revisit}).
 \begin{table}[H]
 \centering\footnotesize
 \setlength{\tabcolsep}{3pt}
-\begin{tabularx}{\columnwidth}{@{}p{21mm}XX@{}}
-\toprule
-Intervention & With indexed head & With phase-relational \\
-\midrule
-Progressive curriculum & helped ($|\Delta|/\mathrm{SE}$ 2.42) & plain averaging better on 6/6 seeds ($-0.088$ vs.\ $-2.239$) \\
-Fine tuning on the unseen network & largest gain ($-8664.73$ to $-1092.10$) & slightly worse ($-0.123$ to $-0.250$, 4.44) \\
-More varied training networks & no effect & no effect (six seeds) \\
-Ensemble of six seeds & beat every member & ties the best member (screen) \\
-\bottomrule
+\begin{tabularx}{\columnwidth}{|P{21mm}|L|L|}
+\hline
+Intervention & With indexed head & With phase-relational \\ \hline
+Progressive curriculum & helped ($|\Delta|/\mathrm{SE}$ 2.42) & plain averaging better on 6/6 seeds ($-0.088$ vs.\ $-2.239$) \\ \hline
+Fine tuning on the unseen network & largest gain ($-8664.73$ to $-1092.10$) & slightly worse ($-0.123$ to $-0.250$, 4.44) \\ \hline
+More varied training networks & no effect & no effect (six seeds) \\ \hline
+Ensemble of six seeds & beat every member & ties the best member (screen) \\ \hline
 \end{tabularx}
 \caption{The same interventions under both readouts. Their earlier effects were largely
 recovering the indexing deficit, not improvements in their own right.}
@@ -451,8 +438,7 @@ The main question of the project is answered: the cause of the transfer failure 
 identified by a control experiment, and the fix is confirmed with six seeds on five
 configurations, at RESCO's settings, and against FRAP and Braun's method.
 \begin{itemize}
-\item \textbf{Running:} Braun's method with six seeds; training finishes today and evaluation
-      follows.
+\item \textbf{Done:} the comparison with Braun's method is complete with six seeds.
 \item \textbf{Next comparisons:} TransferLight on the same networks; more and larger real
       networks.
 \item \textbf{Open technical questions:} a reward that targets delay, since the policy wins on
