@@ -1,6 +1,6 @@
 %% ---------------------------------------------------------------------------
-%%  side.tex -- summary of the work: problem, prior work, method, what was
-%%  tried, results, novelty, status, next steps.  pdflatex side && pdflatex side
+%%  side.tex -- technical introduction to the work: problem, method, setup,
+%%  metrics, results, status.  pdflatex side && pdflatex side
 %%  Every number is taken from paper/main.tex or fidings/divergence_investigation.md.
 %% ---------------------------------------------------------------------------
 \documentclass[10pt,twocolumn,a4paper]{article}
@@ -9,6 +9,7 @@
 \usepackage{graphicx}
 \graphicspath{{./}{paper/}}
 \usepackage{booktabs}
+\usepackage{float}
 \usepackage{tabularx}
 \usepackage{xcolor}
 \usepackage{tikz}
@@ -25,7 +26,6 @@
 
 \definecolor{acc}{HTML}{A85A0A}
 \definecolor{accbg}{HTML}{F6E9D6}
-\definecolor{fail}{HTML}{7A2E6E}
 \definecolor{soft}{HTML}{EDEFF1}
 \definecolor{fed}{HTML}{E8EEF3}
 
@@ -38,9 +38,11 @@
   aracc/.style={ar, draw=acc, line width=0.8pt},
 }
 
-\title{\textbf{Phase-Relational \texorpdfstring{$Q$}{Q}-Learning}\\[3pt]
-\large One traffic light controller for every intersection:\\
-the problem, the work done, the results and the current status}
+\newcommand{\nm}{\textit{n.m.}}
+
+\title{\textbf{Phase-Relational \texorpdfstring{$Q$}{Q}-Learning for Traffic Signal
+Control Across Heterogeneous Intersection Topologies}\\[4pt]
+\large Problem, method and results to date}
 \author{Author Name}
 \date{September 2026}
 
@@ -48,78 +50,65 @@ the problem, the work done, the results and the current status}
 \maketitle
 
 % =============================================================================
-\section{The problem}
-Reinforcement learning can control traffic lights well at the intersection it was
-trained on. A city, however, would want something different: a controller trained
-once on a few intersections that can then be installed at new intersections, in new
-parts of the city, without being trained again. This is called zero-shot transfer
-across intersection topologies.
+\section{Introduction}
+Reinforcement learning controllers for traffic signals perform well on the network they
+were trained on. Our goal is a single shared policy that controls intersections of any
+geometry and transfers \emph{zero-shot} to a road network it has never seen. The policy is
+a DQN trained with federated learning across several cities: each city trains locally, and
+the server averages the weights with FedAvg.
 
-We train one shared neural network for all intersections of several cities, using
-federated learning, so each city trains locally and only model weights are exchanged.
-The goal is that this single network also works on a road network none of the cities
-trained on. For a long time it did not: on unseen networks it caused gridlock. The work
-explains why, fixes it, and tests the fix.
+For a long time this policy failed on unseen networks: it gridlocked them. This document
+summarises why, how we fixed it, and how the fix was tested. In short, the failure comes
+from how actions are indexed in the output layer, not from the learning algorithm, the
+aggregation rule, the model capacity or the training budget.
 
 % =============================================================================
-\section{Why it is hard: the phase numbering problem}
-
-\subsection{Explained simply}
-Imagine several street crossings, each with a panel of buttons that change the lights.
-On the first crossing, button 1 lets cars turn left. On the second crossing, button 1
-lets cars go straight. A robot that learns from both crossings tries to remember
-``button 1 is a good idea when many cars wait'', and becomes confused, because button 1
-does something different in each place. At a new crossing it cannot know what button 1
-does.
-
-A better robot ignores button numbers. Each button carries a label saying what it does,
-for example ``lets 12 waiting cars turn left''. The robot learns to read the labels, and
-the labels mean the same thing at every crossing, including new ones.
-
-\subsection{Stated formally}
-Intersection $i$ has $A_i$ signal phases, and $A_i$ ranges from 2 to 8 in our networks.
-A shared $Q$ network must output a fixed number of values, so the usual design pads the
-output to $A_{\max}$ and masks unused actions:
+\section{The phase indexing problem}
+Intersection $i$ has $A_i$ green phases, from 2 to 8 in our networks. A shared $Q$ network
+needs a fixed output width, so the standard design pads to $A_{\max}$ and masks actions that
+do not exist:
 \[
 Q_\theta(o_i)=W\,h_\theta(o_i)+b,\qquad
 a_i=\arg\max_{k:\,m_i[k]=1} Q_\theta(o_i)[k].
 \]
-Row $W_k$ alone values ``action $k$'' at every intersection. But the order of phases in a
-signal program is chosen by whoever built the network. In the four RESCO benchmark
-networks we use, phase 1 is a protected left turn in two networks and a through movement
-in the other two. Row $W_1$ is trained on contradictory targets and learns nothing that
-carries over to a new network. A second possible cause is that when an unseen network
-has more phases than any training city, some rows are never trained at all. These two
-causes need different fixes, so we tested them separately.
+Row $W_k$ is the only parameter that values ``phase $k$'' at every intersection. The phase
+order inside a SUMO signal program, however, is chosen by whoever built the network. In the
+four RESCO networks we use, phase 1 is a protected left turn in two networks and a through
+movement in the other two. Row $W_1$ is trained on contradictory targets and learns nothing
+that carries over to a new network. Intuitively, the policy learns ``button 1 helps when
+queues are long'', but button 1 does something different at every intersection.
+
+A second candidate explanation is untrained rows: if an unseen network has more phases than
+any training city, some rows never receive gradients. On our standard unseen network this
+concerns 37.5\% of its actions. The two explanations call for different fixes, so we tested
+them separately (Section~\ref{sec:control}).
 
 % =============================================================================
-\section{What already exists}
-Avoiding phase numbers is not a new idea. Table~\ref{tab:prior} lists the closest work
-and how ours relates to it.
+\section{Related work}
+Avoiding phase indices is not new. Table~\ref{tab:prior} lists the closest work.
 
-\begin{table}[ht]
+\begin{table}[H]
 \centering\footnotesize
 \setlength{\tabcolsep}{3pt}
 \begin{tabularx}{\columnwidth}{@{}p{18.5mm}X@{}}
 \toprule
 Work & Idea, and relation to ours \\
 \midrule
-FRAP (2019) & Scores phases through pairs of competing movements. Needs a hand written
-table mapping each intersection's phases to movements before it can control it. We
-ported it and use it as a baseline. \\
-MPLight (2020) & FRAP with pressure as state and reward, scaled to thousands of
-signals. Needs the same table. \\
+FRAP (2019) & Scores phases through pairs of competing movements. Needs a hand written table
+mapping each intersection's phases to movements before it can control it. We ported it as a
+baseline. \\
+MPLight (2020) & FRAP with pressure as state and reward, scaled to thousands of signals.
+Needs the same table. \\
 AttendLight (2020) & Attention over lanes and phases, one model for many intersection
-types; its authors note it generalises when similar configurations appear in
-training. \\
-TransferLight (2024) & Zero-shot control on unseen road networks, credited to training
-on many random networks. Not yet compared with ours. \\
-HFRL (2025) & Federated signal control that clusters intersections before averaging.
-Federated, but not about transfer to unseen topologies. \\
-Braun (2026) & Concurrent work: a graph network scores movements, and the method builds
-its own phase sets in place of the network's signal program. We ran its code on our
-networks (Section~\ref{sec:results}). \\
-RESCO (2021) & The benchmark whose networks and published results we use. \\
+types; generalises when similar configurations appear in training. \\
+TransferLight (2024) & Zero-shot control on unseen road networks, credited to training on
+many random networks. Not yet compared with ours. \\
+HFRL (2025) & Federated signal control that clusters intersections before averaging; not
+about unseen topologies. \\
+Braun (2026) & Concurrent work: a graph network scores movements, and the method builds its
+own phase sets instead of using the network's signal program. We ran its code on our
+networks (Table~\ref{tab:braun}). \\
+RESCO (2021) & Benchmark providing the networks and published baselines we use. \\
 \bottomrule
 \end{tabularx}
 \caption{Closest prior and concurrent work.}
@@ -147,191 +136,329 @@ RESCO (2021) & The benchmark whose networks and published results we use. \\
 \draw[ar] (nenc.east) -- (att.west);
 \draw[ar] (att.east) -- (fus.west);
 \node[new, text width=38mm] (score) at (140,-12) {\textbf{Shared phase scorer} $f_\psi$\\ $Q(a)=f_\psi([\,h_\theta\,\|\,\phi_i(a)\,])$,\\ same weights for every phase};
-\node[box, text width=34mm] (arg) at (140,-30) {Apply the action mask and choose\\ the phase with the highest $Q$};
+\node[box, text width=34mm] (arg) at (140,-30) {Apply the action mask and select\\ the phase with the highest $Q$};
 \draw[aracc] (phi.east) -- (score.west);
 \draw[ar] (fus.south) -- (fus.south |- score.north);
 \draw[aracc] (score.south) -- (arg.north);
-\draw[ar] (arg.south) -- ++(0,-6) -| node[pos=0.25,below,font=\scriptsize]{next green phase, every 5\,s} (sumo.south);
+\draw[ar] (arg.south) -- ++(0,-6) -| node[pos=0.25,below,font=\scriptsize]{selected phase applied; next decision after 5\,s} (sumo.south);
 \node[box, fill=fed, text width=60mm] (fed) at (72,-30) {\textbf{Federated training.} Each city trains
   a copy locally, the server averages the weights (FedAvg), and the result is
   evaluated on a network that no city trained on.};
-\node[font=\scriptsize,gray] at (54,23.5) {observation, same shape everywhere};
+\node[font=\scriptsize,gray] at (54,23.5) {observation, same shape at every intersection};
 \node[font=\scriptsize,gray] at (121,23.5) {shared trunk};
 \end{tikzpicture}
-\caption{The model. Every intersection produces an observation of the same shape, so one
-network serves all of them without knowing which city it is in. The highlighted parts
-are the phase-relational readout: each candidate phase is described by what it does,
-and one shared scorer rates it.}
+\caption{Model overview. Every intersection produces an observation of the same shape, so
+one network serves all of them without a city identifier. The highlighted blocks form the
+phase-relational readout.}
 \label{fig:model}
 \end{figure*}
 
 % =============================================================================
-\section{What we did}
-We replaced the numbered output layer with a scorer that rates each candidate phase from
-a description of what it does (Figure~\ref{fig:model}):
+\section{Method: phase-relational readout}
+We replace the indexed output layer with a scorer that rates each candidate phase from a
+description of what it does (Figure~\ref{fig:model}):
 \[
 Q_\theta(o_i)[a]=f_\psi\big([\,h_\theta(o_i)\,\|\,\phi_i(a)\,]\big),
-\qquad \phi_i(a)\in\mathbb{R}^{10}.
+\qquad \phi_i(a)\in\mathbb{R}^{10},
 \]
-The descriptor $\phi_i(a)$ contains the phase's pressure (incoming minus outgoing queue),
-its queue, waiting time, occupancy and lane count, whether it is currently shown and for
-how long, and the share of its green lanes that go straight, left and right. It is
-computed automatically from the simulator, so a new intersection needs no manual setup.
-The number of parameters no longer depends on the number of phases, so there are no
-untrained rows and no indices whose meaning can conflict. Because the descriptor includes
-per phase pressure, the classic max pressure rule is also inside what the model can
-represent.
+where $f_\psi$ is a three layer MLP shared by all phases. The descriptor $\phi_i(a)$ holds
+the phase's pressure (incoming minus outgoing queue), queue, accumulated waiting time,
+occupancy and lane count, whether it is currently displayed and for how long, and the
+fractions of its green lanes that go straight, left and right. It is derived from SUMO's
+controlled links table, so no intersection needs manual configuration.
 
-Training is federated across three RESCO networks (arterial4x4, cologne3, ingolstadt7),
-and the model is evaluated on grid4x4, which no city trains on. All experiments use the
-SUMO simulator.
+Consequences: the parameter count does not depend on the number of phases, so no rows can
+remain untrained; no index can carry conflicting meanings; the policy applies to any phase
+count; and since $\phi_i(a)$ contains per phase pressure, the max pressure rule lies inside
+the model class, which was not the case for the indexed head.
 
 % =============================================================================
-\section{What we tried along the way}
-The fix came at the end of a long investigation, recorded in a dated lab notebook of 110
-sections.
-\begin{itemize}
-\item \textbf{The symptom.} Trained policies often collapsed into a confident, repetitive
-      behaviour that gave the same reward on 30 different traffic seeds. Removing
-      federation did not change this, so federation was not the cause.
-\item \textbf{Measurement problems.} We found six evaluation errors, each of which had
-      produced a believable but wrong number. For example, the evaluator silently tested on
-      a training city when shapes did not match, and our simulator settings used a 2\,s
-      yellow instead of the benchmark's 3\,s, giving every controller more green time. One
-      earlier claim was withdrawn because of this.
-\item \textbf{41 interventions} that kept the numbered output: other aggregation rules and
-      clustering, larger or different architectures, other algorithms (PPO, QR-DQN, CQL,
-      MAML, evolution strategies), reward shaping, curricula, and fine tuning on the new
-      network. 32 gave nothing or made things worse, 4 were unclear and 5 helped. None fixed
-      the transfer failure.
-\item \textbf{The representation.} We then suspected the numbering itself, tested it
-      against the untrained rows explanation, and introduced the phase-relational readout.
-\end{itemize}
+\section{Experimental setup}
 
-% =============================================================================
-\section{What we achieved}\label{sec:results}
-All results use six random seeds unless stated. A difference counts as significant when
-$|\Delta|/\mathrm{SE}\ge 2$. Delay is computed only over vehicles that arrive, so the share
-of trips completed is always given next to it.
+\paragraph{Networks.} Table~\ref{tab:nets}. Training is federated over three RESCO networks;
+grid4x4 is never used for training.
 
-\paragraph{The cause is the numbering.}
-On a test network where every row of the numbered output is fully trained, the numbered
-output still gridlocks: reward $-9028.88$, against $-9296.84$ when untrained rows are
-present. The difference is within seed noise. This control experiment is the central
-result.
-
-\paragraph{Transfer to an unseen network.}
-The phase-relational readout outperforms the numbered output by four orders of magnitude
-on five different configurations, with all six seeds agreeing ($|\Delta|/\mathrm{SE}$ from
-23.6 to 96.7). Table~\ref{tab:zs} shows the two configurations that use the benchmark's
-own settings.
-
-\begin{table}[ht]
+\begin{table}[H]
 \centering\footnotesize
-\setlength{\tabcolsep}{4pt}
-\begin{tabular}{@{}llrr@{}}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}llrrr@{}}
 \toprule
-Setting & Controller & Reward & Trips done \\
+Network & Role & Signals & Green phases & Trips in window \\
 \midrule
-fully RESCO & Numbered output & $-8965.09$ & 19.5\% \\
-matched & \textbf{Phase-relational} & $\mathbf{-0.16}$ & \textbf{98.9\%} \\
-RESCO & Numbered output & $-9705.49$ & 16.4\% \\
-timing & \textbf{Phase-relational} & $\mathbf{-0.20}$ & \textbf{98.8\%} \\
-same network & Max pressure & $-0.380$ & 99.2\% \\
- & Fixed time & $-2.730$ & 97.7\% \\
+arterial4x4 & training & 16 & 5 & 2484 \\
+cologne3 & training & 3 & 3 or 4 & 2856 \\
+ingolstadt7 & training & 7 & 2 or 3 & 3031 \\
+grid4x4 & unseen (test) & 16 & 8 & 1473 \\
+\bottomrule
+\end{tabular}}
+\caption{Networks. ``Trips in window'' is the number of vehicles departing during the
+evaluated hour, used as the denominator for trips completed.}
+\label{tab:nets}
+\end{table}
+
+\paragraph{Signal timing.} Every 5\,s the controller of each intersection selects which green
+phase should be active. Selecting the current phase keeps it green. Selecting another phase
+inserts a 3\,s yellow and is accepted only if the current phase has held for at least 8\,s
+(the yellow plus a 5\,s minimum green); earlier requests are ignored. The shortest phase is
+therefore 10\,s, with 7\,s of green. The 3\,s yellow is the RESCO benchmark's setting. Some of
+our internal experiments used the simulator default of 2\,s, which gives one extra second of
+green per phase change; those results are compared only with each other, never with
+published numbers.
+
+\paragraph{Training and statistics.} Each configuration is trained with six random seeds
+(3, 7, 11, 17, 21, 25). A result is called confirmed only at six seeds; three seed results are
+called screens.
+
+\paragraph{Metrics.} Table~\ref{tab:metrics}. Delay and trip time are averaged over vehicles
+that arrive, so a controller that strands traffic can look better on them. For that reason
+they are always reported together with trips completed.
+
+\begin{table}[H]
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\columnwidth}{@{}p{17mm}Xp{12mm}@{}}
+\toprule
+Metric & Meaning & Better \\
+\midrule
+Reward & Training signal: change in accumulated waiting time on each intersection's incoming
+lanes, averaged over the evaluation. Always negative; used to compare controllers on the
+same network, not with other papers. & closer to 0 \\
+Waiting time (s) & Time a vehicle spends nearly stopped (below 0.1\,m/s), mean per arrived
+vehicle. & lower \\
+Average delay (s) & Time lost compared with driving at free flow speed (includes slow
+driving, not only stops), mean per arrived vehicle. The main RESCO metric. & lower \\
+Trip time (s) & Departure to arrival, mean per arrived vehicle. & lower \\
+Trips completed & Arrived vehicles divided by vehicles departing in the window. & higher \\
+$|\Delta|/\mathrm{SE}$ & Difference between two means over seeds, divided by its standard
+error. At least 2 counts as significant. & larger is more certain \\
+\bottomrule
+\end{tabularx}
+\caption{Metrics used in this document.}
+\label{tab:metrics}
+\end{table}
+
+% =============================================================================
+\section{Results}
+
+\subsection{The cause is the indexing, not untrained rows}\label{sec:control}
+We built a test network with 4 phases, fewer than the training maximum, so every row of the
+indexed head is fully trained. If untrained rows were the cause, performance should recover.
+
+\begin{table}[H]
+\centering\footnotesize
+\begin{tabular}{@{}lcr@{}}
+\toprule
+Unseen network, indexed head & Untrained rows & Reward \\
+\midrule
+grid4x4, 8 phases & 37.5\% of actions & $-9296.84$ \\
+4 phase network & none & $-9028.88$ \\
 \bottomrule
 \end{tabular}
-\caption{Unseen network (grid4x4), final training round. Higher reward is better. The
-numbered output completes only 16 to 20\% of trips.}
+\caption{Control experiment, six seeds. Both conditions gridlock; the difference is within
+seed noise.}
+\label{tab:control}
+\end{table}
+
+It does not recover. The failure is caused by the indexing itself, which also rules out the
+cheap fixes (a wider head, or a training city with more phases).
+
+\subsection{Zero-shot transfer to an unseen network}
+\begin{table}[H]
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lcrrc@{}}
+\toprule
+Configuration & Yellow & Indexed & Phase-rel. & $|\Delta|/\mathrm{SE}$ \\
+ & & (best round) & (best round) & best / final \\
+\midrule
+grid4x4, 3$\times$ demand & 2\,s & $-17952.96$ & $\mathbf{-0.32}$ & 46.31 / 50.59 \\
+4 phase control network & 2\,s & $-9028.88$ & $\mathbf{-1.41}$ & 25.79 / 24.29 \\
+grid4x4, RESCO timing & 3\,s & $-9411.88$ & $\mathbf{-0.16}$ & 47.23 / 39.34 \\
+grid4x4, fully RESCO & 3\,s & $-8525.72$ & $\mathbf{-0.13}$ & 23.63 / 30.93 \\
+\bottomrule
+\end{tabular}}
+\caption{Reward on the unseen network, six seeds, all six favouring phase-relational in every
+row. A fifth configuration (light demand) gives the same result. ``Fully RESCO'' also uses
+RESCO's route files and evaluation hour.}
 \label{tab:zs}
 \end{table}
 
-\paragraph{Against max pressure,} a strong hand designed controller, on the unseen network:
-lower waiting time on all six seeds (18.8\,s against 22.8\,s), with the same share of trips
-completed (98.8\% against 99.2\%). On average delay the two are tied (41.4\,s against
-40.2\,s).
+\begin{figure}[H]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig_zeroshot.pdf}
+\caption{Unseen network, fully RESCO setting: cost ($-$reward, log scale) after each training
+round. Band: best and worst of six seeds.}
+\label{fig:zs}
+\end{figure}
 
-\paragraph{Against FRAP.} Given its hand written table for every network, FRAP also
-transfers, which confirms the explanation independently. Our readout reaches the same
-level without the table: better on the best round for all six seeds, while the final
-round difference is not significant.
+\begin{table}[H]
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Metric & Phase-rel. & Indexed & Max press. & Fixed time \\
+\midrule
+Reward & $\mathbf{-0.161}$ & $-8965.09$ & $-0.380$ & $-2.730$ \\
+Waiting time (s) & \textbf{18.8} & \nm & 22.8 & 65.6 \\
+Average delay (s) & 41.4 & \nm & \textbf{40.2} & 91.2 \\
+Trip time (s) & 153.4 & \nm & \textbf{152.1} & 203.1 \\
+Trips completed & 98.8\% & 19.5\% & \textbf{99.2\%} & 97.7\% \\
+\bottomrule
+\end{tabular}
+\caption{Unseen network (grid4x4, fully RESCO, 3\,s yellow), final training round.
+Phase-relational: mean of six seeds. Max pressure and fixed time are rule based and
+deterministic. \nm: not measured, since the indexed head gridlocks.}
+\label{tab:unseen}
+\end{table}
 
-\paragraph{On RESCO's Cologne scenario,} trained on three cities at the same time, the
-policy reaches 21.4\,s average delay with 91.6\% of trips completed. Max pressure gives
-22.4\,s at 98.6\%, and RESCO's published learned methods give 22.13\,s (IPPO) and 23.99\,s
-(IDQN), without reported completion rates. We describe this as comparable performance.
-On Ingolstadt, max pressure is better (26.6\,s against 35.2\,s).
+Against max pressure, a strong rule based controller, the phase-relational policy has lower
+waiting time on all six seeds and completes the same share of trips. On average delay the two
+are tied (41.4\,s against 40.2\,s, three of six seeds lower). This is consistent with a policy
+trained on a waiting time reward.
 
-\paragraph{Against the concurrent method (Braun 2026),} run from its released code and
-measured the same way: on the unseen network, 293\,s average delay (94.4\% of trips done)
-against our 41.4\,s (98.8\%). It is also behind ours on Cologne and Ingolstadt. His method
-was designed for throughput and for other networks, so this is a comparison on our
-benchmark only.
+\subsection{Training budget and FRAP}
+\begin{table}[H]
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lrrc@{}}
+\toprule
+Readout (20 rounds, 2\,s yellow) & Best & Final & $|\Delta|/\mathrm{SE}$ vs.\ ours \\
+\midrule
+Indexed head & $-4992.77$ & $-6387.32$ & 5.57 / 13.32 \\
+FRAP, with hand written tables & $-0.253$ & $-1.115$ & 4.06 / 1.71 \\
+\textbf{Phase-relational (ours)} & $\mathbf{-0.082}$ & $\mathbf{-0.175}$ & \\
+\bottomrule
+\end{tabular}}
+\caption{Unseen network with 2.5 to 4 times the usual training budget, six seeds. The
+indexed head is still four orders of magnitude behind. FRAP also transfers, confirming the
+explanation independently; ours is better on the best round for all six seeds, while the
+final round difference is not significant (1.71).}
+\label{tab:budget}
+\end{table}
 
-\paragraph{Earlier results, explained.} We repeated the two strongest of the 41
-interventions with the new readout. Both stopped helping: plain averaging now beats the
-curriculum on all six seeds, and fine tuning on the new network, previously the largest
-gain, now makes the policy slightly worse. This suggests the earlier experiments were
-limited by the numbering, rather than showing that those ideas do not work.
+\subsection{Networks seen in training, against RESCO}
+\begin{table}[H]
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Controller & Delay (s) & Trip (s) & Completed \\
+\midrule
+\multicolumn{4}{@{}l}{\emph{cologne3}}\\
+\textbf{Phase-relational (ours)} & \textbf{21.4} & 58.9 & 91.6\% \\
+Max pressure & 22.4 & 60.1 & \textbf{98.6\%} \\
+IPPO (RESCO, published) & 22.13 & \textbf{57.45} & not reported \\
+IDQN (RESCO, published) & 23.99 & 59.0 & not reported \\
+Fixed time & 34.6 & 72.4 & 98.4\% \\
+Indexed head & 54.0 & 91.2 & 77.6\% \\
+FRAP & 150.3 & 188.0 & 84.4\% \\
+\midrule
+\multicolumn{4}{@{}l}{\emph{ingolstadt7}}\\
+Max pressure & \textbf{26.6} & \textbf{71.5} & 88.5\% \\
+IDQN (RESCO, published) & 31.19 & not reported & not reported \\
+\textbf{Phase-relational (ours)} & 35.2 & 79.0 & \textbf{95.4\%} \\
+Indexed head & 84.7 & 128.0 & 80.3\% \\
+Fixed time & 92.2 & 136.2 & 93.5\% \\
+FRAP & 93.4 & 137.3 & 88.7\% \\
+\bottomrule
+\end{tabular}}
+\caption{Networks used in training, RESCO settings, six seeds. Our policy is trained on
+three networks at once with about one tenth of RESCO's per network budget. Our ingolstadt7
+file lacks one green phase that RESCO's has (1 of 7 intersections).}
+\label{tab:indist}
+\end{table}
+
+On cologne3 the policy is comparable to the published learned methods and to max pressure,
+with lower completion. On ingolstadt7 max pressure is better on delay, although our policy
+completes the most trips.
+
+\subsection{Comparison with concurrent work}
+\begin{table}[H]
+\centering\footnotesize
+\setlength{\tabcolsep}{2.5pt}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Delay (s) / completed & grid4x4 & cologne3 & ingolstadt7 \\
+\midrule
+Braun, own phases & 293.0 / 94\% & 88.0 / 97\% & 89.0 / 96\% \\
+Braun, RESCO phases & 183.6 / 96\% & 47.8 / 95\% & 61.1 / 97\% \\
+Braun's max press., own ph. & 79.2 / 98\% & 67.7 / 97\% & 42.4 / 44\% \\
+Braun's max press., RESCO ph. & 90.9 / 95\% & 26.4 / 99\% & 41.1 / 98\% \\
+\textbf{Phase-relational (ours)} & \textbf{41.4 / 99\%} & \textbf{21.4 / 91\%} & \textbf{35.3 / 95\%} \\
+\bottomrule
+\end{tabular}}
+\caption{Braun's released code on our networks, measured with the same pipeline, three
+training seeds (six seed runs finishing). ``Own phases'' is his method as published: it
+replaces the signal program with its own phase sets (17 instead of 8 on grid4x4). His
+learned policy is below his own max pressure on every network.}
+\label{tab:braun}
+\end{table}
+
+\subsection{Earlier interventions, revisited}
+Before the cause was found, 41 interventions were tested with the indexed head: other
+aggregation rules and clustering, larger architectures, other algorithms (PPO, QR-DQN, CQL,
+MAML, evolution strategies), reward shaping, curricula and fine tuning. 32 had no effect or
+a negative one, 4 were unclear and 5 helped. Repeating the strongest ones with the new
+readout changes the picture (Table~\ref{tab:revisit}).
+
+\begin{table}[H]
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\columnwidth}{@{}p{21mm}XX@{}}
+\toprule
+Intervention & With indexed head & With phase-relational \\
+\midrule
+Progressive curriculum & helped ($|\Delta|/\mathrm{SE}$ 2.42) & plain averaging better on 6/6 seeds ($-0.088$ vs.\ $-2.239$) \\
+Fine tuning on the unseen network & largest gain ($-8664.73$ to $-1092.10$) & slightly worse ($-0.123$ to $-0.250$, 4.44) \\
+More varied training networks & no effect & no effect (six seeds) \\
+Ensemble of six seeds & beat every member & ties the best member (screen) \\
+\bottomrule
+\end{tabularx}
+\caption{The same interventions under both readouts. Their earlier effects were largely
+recovering the indexing deficit, not improvements in their own right.}
+\label{tab:revisit}
+\end{table}
+
+\subsection{Evaluation pitfalls found along the way}
+Six measurement problems each produced a plausible but wrong number: an evaluator that
+silently tested on a training city; a training city sharing the test network's file;
+untrained output rows; scenario settings differing from RESCO (route files, evaluation hour,
+yellow interval); a green phase missing from a network file; and delay computed only over
+arrived vehicles. Each was found and corrected, and the results above use the corrected
+setup.
 
 % =============================================================================
-\section{What is new}
+\section{Contributions}
 \begin{itemize}
-\item \textbf{A control experiment that identifies the cause.} Earlier phase based methods
-      replaced the numbered output without measuring why it fails. We show that the
-      failure remains when every row is trained, which rules out the simpler explanation
-      and the cheap fixes it suggests.
-\item \textbf{Phase descriptors built automatically} from the simulator. No intersection
-      needs a hand written table, unlike FRAP and MPLight, and the network's own signal
-      program is kept, unlike Braun's method.
-\item \textbf{A new reading of 41 negative results}, supported by two measured reversals.
-\item \textbf{Six evaluation pitfalls}, three of which come from common tooling.
+\item A control experiment showing that phase indexing, not untrained rows, prevents
+      transfer across topologies.
+\item A phase descriptor built automatically from the simulator, so the policy needs no per
+      intersection tables (unlike FRAP and MPLight) and keeps the network's own signal
+      program (unlike Braun).
+\item A reinterpretation of 41 earlier interventions, supported by two measured reversals.
+\item Six documented evaluation pitfalls, three of which arise from common tooling.
 \end{itemize}
-What is \emph{not} new: phase based scoring itself (FRAP, AttendLight), zero-shot transfer
-across networks (TransferLight), and federated signal control (HFRL).
+Phase based scoring as such (FRAP, AttendLight), zero-shot transfer (TransferLight) and
+federated signal control (HFRL) are prior work.
 
 % =============================================================================
-\section{Current status}
+\section{Status and next steps}
+The main question of the project is answered: the cause of the transfer failure is
+identified by a control experiment, and the fix is confirmed with six seeds on five
+configurations, at RESCO's settings, and against FRAP and Braun's method.
 \begin{itemize}
-\item A complete paper draft in IEEE format: 10 pages, 31 checked references.
-\item Confirmed with six seeds: the control experiment, transfer on five configurations,
-      the comparison with max pressure, the training budget test, the FRAP comparison,
-      both reversals, and a test showing that adding more varied training networks does
-      not help.
-\item Screens with three seeds: the comparison with Braun's method (its six seed training
-      finishes today, evaluation follows) and an ensemble of models.
-\item All code, run histories and the lab notebook are kept, and every number in the paper
-      has been re-derived from raw data.
+\item \textbf{Running:} Braun's method with six seeds; training finishes today and evaluation
+      follows.
+\item \textbf{Next comparisons:} TransferLight on the same networks; more and larger real
+      networks.
+\item \textbf{Open technical questions:} a reward that targets delay, since the policy wins on
+      waiting time and ties on delay; adaptation to real rather than synthetic traffic on a new
+      network; why FRAP is weaker on corridor networks (our data point to how many movements
+      have a downstream lane in the model, which Braun also observes).
 \end{itemize}
-
-% =============================================================================
-\section{Open questions and next steps}
-\paragraph{Is it ready to submit?} The central claim is well supported. The cause is
-isolated by a control experiment, the fix holds on five configurations with six seeds, it
-is tested at the benchmark's own settings, and it is checked against an independent method
-(FRAP) and a concurrent one (Braun). What a reviewer is most likely to ask for:
-\begin{itemize}
-\item a direct comparison with TransferLight;
-\item more than four real networks, including a real city network;
-\item longer training budgets, closer to published practice;
-\item an explanation of the tie with max pressure on delay.
-\end{itemize}
-
-\paragraph{Possible future work.}
-\begin{itemize}
-\item A reward that targets delay rather than waiting, since the policy wins on the
-      quantity it is trained on and ties on the other.
-\item Adapting to real rather than synthetic traffic on a new network.
-\item Testing why FRAP does worse on corridor networks. Our data suggest it depends on how
-      many movements have a downstream lane in the model, and Braun reports a similar
-      sensitivity.
-\item Larger and more varied networks, and eventually a real deployment study.
-\end{itemize}
-
-\paragraph{Where it could go.} The draft is written as a method and evaluation paper
-rather than a performance paper. A transportation venue would value the configuration
-free controller and the RESCO results. A machine learning venue focused on benchmarks or
-methodology would value the control experiment and the evaluation pitfalls. A conference
-version would need to be shorter, while a journal could keep all experiments.
 
 \end{document}
