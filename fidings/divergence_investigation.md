@@ -8352,6 +8352,26 @@ evaluated or aggregated. `native` seed 17 is training, with 21 and 25 queued (ET
 To complete it: `baselines/braun/run_eval_braun.sh {grid4x4,cologne3,ingolstadt7}` then
 `python3 baselines/braun/aggregate.py`. Both are skip-or-resume.
 
+## 111. CORRECTION to §99: a 2 s yellow gives one extra second of green per change, not 50% more
+
+**2026-09-27.** §99 (and the paper, twice) stated that at a 5 s action interval a 2 s
+yellow leaves 3 s of usable green per phase change against 2 s at the benchmark's 3 s,
+"50% more". **That ignored the minimum-green rule.** From
+`sumo_rl/environment/traffic_signal.py::set_next_phase`: a decision is taken every
+`delta_time` = 5 s; choosing the current phase keeps it green; a switch is honoured only if
+`time_since_last_phase_change >= yellow_time + min_green`, otherwise the request is ignored.
+No config sets `min_green`, so sumo-rl's default **5 s** applies (`sumo_rl/environment/env.py`).
+
+Consequence: with decisions on 5 s boundaries the shortest phase lasts 10 s (a switch at t,
+blocked at t+5, allowed at t+10) under both 2 s and 3 s yellow, carrying **8 s vs 7 s of
+green**. The real difference is one second of lost time per phase change, about 14% at the
+shortest phase and less for longer ones.
+
+**What stands:** 2 s-yellow results still must not be set beside published 3 s numbers; the
+direction of the effect (2 s is more permissive for every controller) is unchanged, and so
+is every within-study comparison. **What is corrected:** the magnitude. Fixed in
+`paper/main.tex` (setup section and artifact 4).
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit

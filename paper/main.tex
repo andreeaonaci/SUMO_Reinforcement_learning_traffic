@@ -473,9 +473,11 @@ Exploration & linear $\varepsilon$ & Evaluation & $5$ ep., $\arg\max$ \\
 \subsection{Signal timing and which results are externally comparable}
 The yellow interval is not uniform across this study, and the distinction governs
 which tables may be set beside published numbers. The simulator library's default
-is $2$\,s; the benchmark specifies $3$\,s. At a $5$\,s action interval a $2$\,s
-yellow leaves $3$\,s of usable green per phase change against the benchmark's
-$2$\,s, i.e.\ $50\%$ more, for \emph{every} controller. Comparing a $2$\,s-yellow
+is $2$\,s; the benchmark specifies $3$\,s. A controller selects a phase every
+$5$\,s, and a switch is honoured only once the current phase has held for the
+yellow interval plus a $5$\,s minimum green. Each phase change therefore loses one
+second more at $3$\,s than at $2$\,s, and the shortest possible phase carries
+$7$\,s of green instead of $8$\,s, for \emph{every} controller. Comparing a $2$\,s-yellow
 measurement with a published $3$\,s-yellow number is therefore invalid, and doing
 so produced a claim that had to be withdrawn earlier in this study.
 
@@ -981,8 +983,8 @@ demand---name-based holdout checks do not detect this.
 (3)~\emph{Untrained output rows}: $37.5\%$ of a holdout's action space scored by
 rows no training city exercised. (4)~\emph{Scenario configuration drift}: route
 files, evaluation windows and yellow interval all differed from the benchmark's, a
-$2$\,s rather than $3$\,s yellow granting every controller $50\%$ more usable green
-per phase change at a $5$\,s action interval. (5)~\emph{A missing signal phase}: a
+$2$\,s rather than $3$\,s yellow granting every controller one extra second of green
+per phase change ($8$\,s rather than $7$\,s in the shortest phase). (5)~\emph{A missing signal phase}: a
 vendored network omitted one green phase present in the benchmark's copy, reducing
 one intersection's action space and qualifying Table~\ref{tab:indist}.
 (6)~\emph{Survivorship in delay metrics}: delay and trip time are computed over
