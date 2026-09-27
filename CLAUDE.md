@@ -198,7 +198,12 @@ which had gone stale):
 
 ## RESUME HERE (as of 2026-09-26 — check this is still current before trusting it)
 
-### IN PROGRESS: Braun 2026 baseline comparison (started 2026-09-26)
+### IN PROGRESS: Braun 2026 baseline comparison — first results in §110 (3 seeds)
+
+Remaining queue as of 2026-09-27 17:00: `native` seeds 17/21/25 (ETA ≈ 22:00); `synthfb`
+17/21/25 trained but not yet evaluated. Finish with
+`baselines/braun/run_eval_braun.sh {grid4x4,cologne3,ingolstadt7}` then
+`python3 baselines/braun/aggregate.py` (both skip-or-resume).
 
 Run by a separate agent. Braun's code is pinned at commit `ea47985` (the snapshot his paper
 cites), downloaded as a tarball to `/home/deea/external/GNN-Traffic-Signal-Control-ea47985...`
@@ -260,15 +265,17 @@ scenario, and it is not a novel architecture — see the claim ledger.
 | 106 | ensemble **SPLITS**: majority vote ties its best member and beats the member mean (2.20 SE); SWA weight-average **collapses** to -3.87 | 1 group of 6, screen |
 | 107 | **pre-submission audit: a FABRICATED citation, rule 1 broken in the abstract, and the concurrent work above.** Numbers themselves verified sound | re-derived from raw |
 | 105b | **fine-tune reversal CONFIRMED at 6 seeds**: 1 round -0.123→-0.250 (4.44, 0/6); 2 rounds →-0.205 (3.75, 1/6, +0.02). The one improver is the WORST zero-shot seed; r(zero-shot, change) = -0.91 in the 2-round arm — deficit recovery visible inside one experiment | **6 seeds** |
-| 109 | **beats `max_pressure` at 3 s benchmark timing, 6/6 seeds, best AND final, both rosters, at matched throughput** (98.9% vs 99.2%; wait 0.26 s vs 2.83 s). References on the 3 s holdout: mp -0.380, ft -2.730. Previously UNMEASURED at this timing. Indexed completes only 16-20% (gridlock) | **6 seeds** |
+| 109 | **beats `max_pressure` on WAITING at 3 s benchmark timing, 6/6 seeds (§109b: TIED on delay, 41.4 vs 40.2 s)** (98.9% vs 99.2%; wait 0.26 s vs 2.83 s). References on the 3 s holdout: mp -0.380, ft -2.730. Previously UNMEASURED at this timing. Indexed completes only 16-20% (gridlock) | **6 seeds** |
 | 108 | **training-topology diversity does NOT help — CONFIRMED (§108b).** §104's saturation fixed on the congestion holdout; 0.58/0.20/1.60, div nominally *worse* on all three, ≤2/6 seeds favour it; detectable effect 0.049 vs a 1.082 range. "Hurts" is NOT claimable (crosses 2 only if base's worst seed is dropped) | **6 seeds** |
 
 ### The claim ledger — what can and cannot be said
 
 **CAN claim (fully supported):** the action representation is the binding constraint (§98's
 dead-rows control: indexed still gridlocks with every usable row fully trained); phase-relational
-beats `max_pressure` zero-shot, 6 seeds × 5 configurations — **including at the benchmark's 3 s
-timing, 6/6 seeds at matched throughput (§109)**; training-topology diversity does not help
+beats `max_pressure` zero-shot, 6 seeds × 5 configurations — **at the benchmark's 3 s timing on
+WAITING time, 6/6 seeds at matched throughput (§109), but TIED on average delay (41.4 vs 40.2 s,
+§109b) — always name the metric**; beats Braun 2026's released code on every RESCO scenario in
+delay (§110, 3-seed screen, not RESCO-comparable for his synthesized-phase arm); training-topology diversity does not help
 (§108b); the gap survives 2.5-4x budget (§103);
 the gap holds in-distribution too, *while arriving more traffic*, so the true gap is wider (§103b);
 phase-relational is far more stable (per-seed delay 19.7-23.0 vs indexed's 25.7-232.2); ~20 prior

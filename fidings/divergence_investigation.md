@@ -8250,6 +8250,108 @@ synthetic route variants are also in a shared directory, but were generated on 2
 before either batch, so both batches only read them. Fixed:
 `analyse/run_finetune_dose.sh` now passes a per-run `--checkpoint_dir`.
 
+## 109b. CORRECTION to §109: the max-pressure win is on WAITING, not on delay
+
+**2026-09-27.** §110's trip-level measurement of the same six `rescofull` checkpoints on the
+same 3 s holdout (every row through `eval_paper_metrics.run_episode`, re-derived by me from
+the per-episode JSON) splits §109's claim by metric:
+
+| metric (grid4x4 holdout, 3 s) | phase-relational (6 seeds) | `max_pressure` | seeds better |
+|---|---:|---:|---|
+| study reward (§109) | $-0.161$ final | $-0.380$ | 6/6 |
+| waiting time, tripinfo | 18.8 s | 22.8 s | **6/6** |
+| **average delay** | **41.4 ± 0.7 s** | **40.2 s** | **3/6** (z = 1.72, tie) |
+| trip time | 153.4 s | 152.1 s | --- |
+| completion | 98.8% | 99.2% | --- |
+
+**"Beats `max_pressure` zero-shot at benchmark timing" holds for waiting time and the
+waiting-based reward, and does NOT hold for average delay, where the two are tied.** Delay
+(SUMO `timeLoss`) also counts time lost while moving slowly; the reward counts only
+stopped vehicles, and the policy optimises what it is trained on. This matches §100b's
+in-distribution picture (tie on Cologne delay).
+
+The abstract sentence added on 2026-09-26 ("beats max pressure on every seed at matched
+throughput") was an overclaim by omission --- no metric was named. Corrected in the paper
+to "beats max pressure on waiting time on every seed at matched throughput, while tying
+it on average delay", and the Results text now gives both numbers. **Rule going forward:
+any "beats X" sentence names its metric.**
+
+## 110. Braun (arXiv:2607.21831) on the RESCO-exact roster: his PPO loses to his own max-pressure, and to us — a screen
+
+**2026-09-27.** Concurrent work cited in Related Work, run as code rather than cited as a
+claim. His repo pinned at `ea47985` (no LICENSE: run from
+`/home/deea/external/GNN-Traffic-Signal-Control-ea47985...`, nothing vendored). Adapters in
+`baselines/braun/` (committed), results in `results/braun/` (gitignored). Run by a
+delegated agent; headline numbers re-derived by me from the per-episode files.
+
+**Measurement.** Every row, his and ours, goes through `eval_paper_metrics.run_episode`
+exec'd verbatim plus SUMO tripinfo, with the same SUMO seeds (grid4x4 12345, cologne3 and
+ingolstadt7 42). A 5 s `reset()/step()` shim drives his runtime unchanged, and it
+reproduces his own `run_evaluation_episode` exactly (cologne3 synthfb s3: 106.94 / 144.43 /
+2762). **Pipeline validation from our side: it reproduces the paper's `tab:indist` ---
+phase-relational Cologne 21.4 / 58.9 s, Ingolstadt 35.3 / 79.2 s; `max_pressure` 22.36 /
+60.15 / 2817 exactly as §103b.**
+
+**Setup.**
+- Two arms. `synthfb`: his synthesized phases, which is his method as published. `native`:
+  RESCO's existing program.
+- His synthesis loads RESCO nets. Two adaptations were needed. tlLogic ids are remapped
+  from junction id to TLS id (5 TLS). Ingolstadt7/gneJ210 keeps RESCO's program, because
+  his synthesizer leaves links 6–9 green in no phase: an atomic group with internal SUMO
+  foes is dropped, and his docs say such junctions "must be inspected".
+- Phases, synthesized vs existing: grid4x4 **17 vs 8**; arterial4x4 6 vs 5; cologne3
+  4–6 vs 3–4; ingolstadt7 3–4 vs 2–3.
+- His native settings: 10 s decisions (ours 5 s), 20 s minimum green, 3 s yellow,
+  throughput reward, PPO, 10 workers.
+- Budget: iteration 85 is **85× ours in simulated seconds**; iteration 1 is budget-matched.
+- Initial occupancy and demand scaling were disabled. On RESCO route files both would have
+  been silent no-ops or discarded vehicles.
+- Inference: sampled (his protocol, 5 episodes) and greedy (1 episode).
+
+**Results, iteration 85, 3 training seeds** (delay s / completion %):
+
+| controller | grid4x4 (zero-shot) | cologne3 | ingolstadt7 |
+|---|---|---|---|
+| Braun synthfb, sampled | 293.0 ± 7.8 / 94.4 | 88.0 ± 8.9 / 96.9 | 89.0 ± 6.9 / 95.5 |
+| Braun synthfb, greedy | 137.2 ± 24.7 / 96.3 | 112.4 ± 11.3 / 91.0 | 74.1 ± 12.0 / **49.5** |
+| Braun native, sampled | 183.6 ± 14.9 / 96.3 | 47.8 ± 5.6 / 95.3 | 61.1 ± 2.1 / 96.9 |
+| his max-pressure, synthfb | 79.2 / 98.4 | 67.7 / 96.7 | 42.4 / **44.1** (gridlock) |
+| his max-pressure, native | 90.9 / 95.4 | 26.4 / 98.6 | 41.1 / 97.5 |
+| **ours, phase-relational** | **41.4 ± 0.7 / 98.8** | **21.4 ± 0.4 / 91.2** | **35.3 ± 0.8 / 95.4** |
+| our `max_pressure` | 40.2 / 99.2 | 22.4 / 98.6 | 26.6 / 88.5 |
+| RESCO published | --- | IPPO 22.13, IDQN 23.99 | IDQN 31.19 |
+
+**|Δ|/SE on delay, Braun synthfb sampled vs ours:** 32.1 (grid4x4), 7.45 (cologne3), 7.70
+(ingolstadt7). The budget-matched iteration-1 checkpoint is worse still (318 s on grid4x4).
+
+**What it establishes.**
+1. **On this benchmark his learner is below his own max-pressure** on delay, in both action
+   spaces, on every scenario, at 85× our budget. The gap to us is therefore not "a richer
+   action space beats a fixed one."
+2. **The synthesized action space is itself mixed.** It helps max-pressure on grid4x4 (79
+   vs 91 s), hurts it on cologne3 (68 vs 26 s), and gridlocks it on ingolstadt7 (44%). His
+   trained policy completes 95.5% there, so it at least learned to avoid that failure.
+3. **This does NOT refute his paper**, and must not be quoted as "Braun is weak."
+   - He reports throughput, which saturates near demand here: his policy completes 94–97%,
+     on a par with the rule-based controllers, at 2–7× their delay.
+   - His cities were built and pruned for his pipeline.
+   - His sampled policy stayed near-uniform (normalized entropy ≈ 0.9; training reward
+     0.09 → 0.13).
+   - Quote it as: *on RESCO nets, in delay, under his native settings.*
+4. **Survivorship cuts both ways (rule 1).** On cologne3, Braun synthfb completes *more*
+   traffic than ours (96.9% vs 91.2%, |Δ|/SE 1.04, n.s.), so our delay win there is not
+   free of the arrival caveat. Braun greedy often strands traffic, so low delay at low
+   completion is not good.
+5. **Not RESCO-comparable.** `synthfb` uses a different action space. The `native` rows
+   keep RESCO's phases but not its timing (10 s decisions, 20 s minimum green). Our holdout
+   rows include our standard comm dropout; his have none.
+
+**Rigor and status.** Iteration-85 rows are 3 training seeds per arm: a screen. As of
+2026-09-27 17:00, `synthfb` seeds 17, 21 and 25 have **finished (exit=0)** but are not yet
+evaluated or aggregated. `native` seed 17 is training, with 21 and 25 queued (ETA ≈ 22:00).
+To complete it: `baselines/braun/run_eval_braun.sh {grid4x4,cologne3,ingolstadt7}` then
+`python3 baselines/braun/aggregate.py`. Both are skip-or-resume.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit

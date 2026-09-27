@@ -77,7 +77,8 @@ per-intersection configuration is required, unlike the phase-pair tables prior
 phase-invariant methods depend upon. Across five configurations at six seeds each
 it exceeds the indexed head by four orders of magnitude zero-shot on an unseen
 network, where the indexed head gridlocks; at the benchmark's own signal timing it
-also beats max pressure on every seed at matched throughput. It attains $21.4$\,s average delay at $91.6\%$ trip completion on the
+also beats max pressure on waiting time on every seed at matched throughput, while
+tying it on average delay. It attains $21.4$\,s average delay at $91.6\%$ trip completion on the
 RESCO Cologne corridor against $22.13$\,s and $23.99$\,s for published IPPO and
 IDQN, whose completion rates are unreported and whose margin therefore cannot be
 adjudicated. Forty-one prior interventions
@@ -596,10 +597,13 @@ Reducing the usable green per phase change---what moving from a $2$\,s to a $3$\
 yellow does at this action interval---does not touch the separation, so the result
 is not an artifact of permissive signal timing. That had to be excluded explicitly,
 every earlier measurement here having used the simulator default. At this timing the
-proposed readout also beats max pressure on every seed of both rosters, at best and
-at final round, and does so at matched throughput: it completes $98.9\%$ of the
-$1473$ departed trips against max pressure's $99.2\%$, with mean waiting time of
-$0.26$\,s against $2.83$\,s. The indexed readout's failure, by contrast, is
+proposed readout also beats max pressure on the study's reward on every seed of both
+rosters, at best and at final round, and does so at matched throughput: it completes
+$98.9\%$ of the $1473$ departed trips against max pressure's $99.2\%$. The advantage
+is specific to waiting. Measured from trip records, waiting time is lower on all six
+seeds ($18.8$ against $22.8$\,s), but average delay, which also counts time lost
+while moving slowly, is tied ($41.4\pm0.7$ against $40.2$\,s; three of six seeds
+lower)---consistent with a policy trained on a waiting-time reward. The indexed readout's failure, by contrast, is
 gridlock rather than a poor score: it completes $16$--$20\%$ of departed traffic
 with mean waiting times near thirty minutes, which is what the four orders of
 magnitude in Table~\ref{tab:zeroshot} mean physically. Fig.~\ref{fig:zeroshot}
