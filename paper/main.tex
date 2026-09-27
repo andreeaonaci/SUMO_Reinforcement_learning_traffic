@@ -337,7 +337,7 @@ mostly left turns, with a long queue and positive pressure'' is a description th
 remains meaningful at an intersection never seen in training. This is the property
 positional indices lack.
 
-\subsection{Phase-relational $Q$-function}
+\subsection{Phase-relational \texorpdfstring{$Q$}{Q}-function}
 Let $h_\theta(o_i)\in\mathbb{R}^{d}$, $d=128$, be the state embedding from the
 shared trunk: a lane encoder, a neighbour encoder with hop embeddings, masked
 multi-head attention using the neighbour mask as key-padding mask, and a fusion
@@ -423,11 +423,11 @@ Section~\ref{sec:control} manipulates. Two of the training networks are real
 corridors and one is a synthetic arterial grid, so the roster spans both the
 regular and the irregular case.
 
-\begin{table}[h]
-\caption{Networks. \emph{Sig.} is the signal count and $A$ the green-phase count,
-given as a range where it varies within a network. \emph{Dep.} is the number of
+\begin{table}[ht]
+\caption{Networks. \textnormal{Sig.} is the signal count and $A$ the green-phase count,
+given as a range where it varies within a network. \textnormal{Dep.} is the number of
 vehicles departing inside the evaluation window, counted from the route file---the
-denominator for every completion rate reported later. \emph{Cov.} is the fraction of
+denominator for every completion rate reported later. \textnormal{Cov.} is the fraction of
 movements possessing a downstream lane inside the modelled area, used in
 Section~\ref{sec:results}-D.}
 \label{tab:networks}
@@ -450,7 +450,7 @@ $4$-phase grid & control holdout & $9$ & $4$ & $3500$ & --- \\
 Table~\ref{tab:hyper} gives the training configuration, which is held fixed across
 every arm of every comparison reported here; only the readout varies.
 
-\begin{table}[h]
+\begin{table}[ht]
 \caption{Training configuration, identical across all arms.}
 \label{tab:hyper}
 \centering\footnotesize
@@ -481,10 +481,10 @@ so produced a claim that had to be withdrawn earlier in this study.
 
 Table~\ref{tab:config} records the provenance of every result reported here.
 
-\begin{table}[h]
+\begin{table}[ht]
 \caption{Configuration provenance. Within-study comparisons hold in every row,
 because both arms of each comparison share the configuration; only the final
-column governs comparison with published numbers. \emph{Internal only} marks a
+column governs comparison with published numbers. \textnormal{Internal only} marks a
 result at the benchmark's timing that is nonetheless a within-study comparison,
 having no published counterpart.}
 \label{tab:config}
@@ -533,7 +533,7 @@ replacing the holdout with a network whose phase count does not exceed the train
 maximum, so every row the holdout can select has been trained by every training
 city. Were untrained rows the cause, performance should recover.
 
-\begin{table}[h]
+\begin{table}[ht]
 \caption{Dead-row control. Holdout reward, indexed readout, six seeds,
 \texttt{ctrl\_norows} roster at $2$\,s yellow. Both conditions share the
 configuration, so the timing cancels.}
@@ -563,7 +563,7 @@ favouring it on every measure and $|\Delta|/\mathrm{SE}$ between $23.6$ and
 $96.7$. The two run at the benchmark's own $3$\,s yellow are reported first, being
 the ones that may be set beside published work.
 
-\begin{table}[h]
+\begin{table}[ht]
 \caption{Zero-shot holdout reward. \texttt{y3} matches the benchmark's signal
 timing and \texttt{rescofull} additionally its route files and evaluation windows,
 so both may be set beside published work; the $20$-round budget block runs at
@@ -643,9 +643,9 @@ than peak quality.
 
 \subsection{In-distribution performance}
 
-\begin{table}[h]
+\begin{table}[ht]
 \caption{In-distribution performance, benchmark-exact, six seeds.
-\emph{Compl.} is the percentage of departed vehicles reaching their destination
+\textnormal{Compl.} is the percentage of departed vehicles reaching their destination
 ($2856$ and $3031$ respectively, Table~\ref{tab:networks}). Delay and trip time
 are means over completed vehicles only and must be read with that column, since a
 controller that strands traffic reports a better delay. The benchmark reports no
@@ -924,7 +924,7 @@ intervention did not change, what it was measuring must have: under the indexed
 readout it was recovering part of a representational deficit rather than
 contributing a training-procedure benefit.
 
-\begin{table}[h]
+\begin{table}[ht]
 \caption{Curriculum re-run on the corrected readout, six seeds,
 \texttt{c1\_4\_6} roster at $2$\,s yellow. Internal comparison.}
 \label{tab:curriculum}
