@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <input>
+        <net-file value="/mnt/c/users/Deea/SUMO_2/SUMO_Reinforcement_learning_traffic/SUMO_Reinforcement_learning_traffic/.claude/worktrees/rescofull-writeup/sumo_rl/nets/RESCO/cologne3/cologne3.net.xml"/>
+        <route-files value="/mnt/c/users/Deea/SUMO_2/SUMO_Reinforcement_learning_traffic/SUMO_Reinforcement_learning_traffic/.claude/worktrees/rescofull-writeup/sumo_rl/nets/RESCO/cologne3/cologne3.rou.xml"/>
+    </input>
+    <time>
+        <begin value="25200"/>
+        <end value="28800"/>
+        <step-length value="1.0"/>
+    </time>
+    <report>
+        <no-step-log value="true"/>
+    </report>
+</configuration>

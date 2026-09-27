@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <input>
+        <net-file value="/mnt/c/users/Deea/SUMO_2/SUMO_Reinforcement_learning_traffic/SUMO_Reinforcement_learning_traffic/.claude/worktrees/rescofull-writeup/sumo_rl/nets/RESCO/ingolstadt7/ingolstadt7.net.xml"/>
+        <route-files value="/mnt/c/users/Deea/SUMO_2/SUMO_Reinforcement_learning_traffic/SUMO_Reinforcement_learning_traffic/.claude/worktrees/rescofull-writeup/sumo_rl/nets/RESCO/ingolstadt7/ingolstadt7.rou.xml"/>
+        <additional-files value="/mnt/c/users/Deea/SUMO_2/SUMO_Reinforcement_learning_traffic/SUMO_Reinforcement_learning_traffic/.claude/worktrees/rescofull-writeup/baselines/braun/scenarios/ingolstadt7/synthfb.tll.xml"/>
+    </input>
+    <time>
+        <begin value="57600"/>
+        <end value="61200"/>
+        <step-length value="1.0"/>
+    </time>
+    <report>
+        <no-step-log value="true"/>
+    </report>
+</configuration>

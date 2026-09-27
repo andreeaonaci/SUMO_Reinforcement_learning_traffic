@@ -1,0 +1,75 @@
+<?xml version='1.0' encoding='utf-8'?>
+<additional>
+    <tlLogic id="32564122" type="static" programID="movement_safe" offset="0">
+        <phase duration="25" state="rrrGGGGGr" />
+        <phase duration="3" state="rrryyyyyr" />
+        <phase duration="2" state="rrrrrrrrr" />
+        <phase duration="25" state="GGGGrrrrr" />
+        <phase duration="3" state="yyyyrrrrr" />
+        <phase duration="2" state="rrrrrrrrr" />
+        <phase duration="25" state="rrrrrrGGG" />
+        <phase duration="3" state="rrrrrryyy" />
+        <phase duration="2" state="rrrrrrrrr" />
+    </tlLogic>
+    <tlLogic id="gneJ143" type="static" programID="movement_safe" offset="0">
+        <phase duration="25" state="rrrGGGrrGGGr" />
+        <phase duration="3" state="rrryyyrryyyr" />
+        <phase duration="2" state="rrrrrrrrrrrr" />
+        <phase duration="25" state="GrrrrrrrGGGG" />
+        <phase duration="3" state="yrrrrrrryyyy" />
+        <phase duration="2" state="rrrrrrrrrrrr" />
+        <phase duration="25" state="rrrGGGGGrrrr" />
+        <phase duration="3" state="rrryyyyyrrrr" />
+        <phase duration="2" state="rrrrrrrrrrrr" />
+        <phase duration="25" state="GGGrrrrrrrrr" />
+        <phase duration="3" state="yyyrrrrrrrrr" />
+        <phase duration="2" state="rrrrrrrrrrrr" />
+    </tlLogic>
+    <tlLogic id="cluster_1757124350_1757124352" type="static" programID="movement_safe" offset="0">
+        <phase duration="25" state="GGrrrGGG" />
+        <phase duration="3" state="yyrrryyy" />
+        <phase duration="2" state="rrrrrrrr" />
+        <phase duration="25" state="GGGrrrrr" />
+        <phase duration="3" state="yyyrrrrr" />
+        <phase duration="2" state="rrrrrrrr" />
+        <phase duration="25" state="rrrGGrrr" />
+        <phase duration="3" state="rrryyrrr" />
+        <phase duration="2" state="rrrrrrrr" />
+    </tlLogic>
+    <tlLogic id="gneJ207" type="static" programID="movement_safe" offset="0">
+        <phase duration="25" state="GGrrrGGG" />
+        <phase duration="3" state="yyrrryyy" />
+        <phase duration="2" state="rrrrrrrr" />
+        <phase duration="25" state="GGGGrrrr" />
+        <phase duration="3" state="yyyyrrrr" />
+        <phase duration="2" state="rrrrrrrr" />
+        <phase duration="25" state="rrrGGrrr" />
+        <phase duration="3" state="rrryyrrr" />
+        <phase duration="2" state="rrrrrrrr" />
+    </tlLogic>
+    <tlLogic id="cluster_306484187_cluster_1200363791_1200363826_1200363834_1200363898_1200363927_1200363938_1200363947_1200364074_1200364103_1507566554_1507566556_255882157_306484190" type="static" programID="movement_safe" offset="0">
+        <phase duration="25" state="GGrrGGGGGGrr" />
+        <phase duration="3" state="yyrryyyyyyrr" />
+        <phase duration="2" state="rrrrrrrrrrrr" />
+        <phase duration="25" state="GGGGGGrrrrrr" />
+        <phase duration="3" state="yyyyyyrrrrrr" />
+        <phase duration="2" state="rrrrrrrrrrrr" />
+        <phase duration="25" state="GGrrrrrrGGGG" />
+        <phase duration="3" state="yyrrrrrryyyy" />
+        <phase duration="2" state="rrrrrrrrrrrr" />
+    </tlLogic>
+    <tlLogic id="gneJ260" type="static" programID="movement_safe" offset="0">
+        <phase duration="25" state="GGGGGrrrr" />
+        <phase duration="3" state="yyyyyrrrr" />
+        <phase duration="2" state="rrrrrrrrr" />
+        <phase duration="25" state="GrrGGrGrr" />
+        <phase duration="3" state="yrryyryrr" />
+        <phase duration="2" state="rrrrrrrrr" />
+        <phase duration="25" state="GrrrrrGGG" />
+        <phase duration="3" state="yrrrrryyy" />
+        <phase duration="2" state="rrrrrrrrr" />
+        <phase duration="25" state="rrrGGGGrr" />
+        <phase duration="3" state="rrryyyyrr" />
+        <phase duration="2" state="rrrrrrrrr" />
+    </tlLogic>
+</additional>

@@ -1,0 +1,86 @@
+# Braun PPO on this project's environments_rescofull TRAINING roster
+# (arterial4x4 = city_1, cologne3 = city_4, ingolstadt7 = city_6), ARM B:
+# Braun restricted to each network's EXISTING RESCO green phases (no synthesized
+# tll file; his runtime extracts selectable phases from the net's own program).
+# grid4x4 (the zero-shot holdout) is NOT listed: no rollouts, no evaluation, no
+# checkpoint selection on it.
+#
+# Every value below is copied from Braun's
+# configs/training/city_first_pass_throughput_scratch_32_worker.yaml (@ea47985) EXCEPT
+# the lines marked ADAPTED.
+name: rescofull_native
+
+cities:
+  - name: arterial4x4
+    split: train
+    sumo_config: /mnt/c/users/Deea/SUMO_2/SUMO_Reinforcement_learning_traffic/SUMO_Reinforcement_learning_traffic/.claude/worktrees/rescofull-writeup/baselines/braun/scenarios/arterial4x4/native.sumocfg
+    rollout_jobs_per_iteration: 10
+  - name: cologne3
+    split: train
+    sumo_config: /mnt/c/users/Deea/SUMO_2/SUMO_Reinforcement_learning_traffic/SUMO_Reinforcement_learning_traffic/.claude/worktrees/rescofull-writeup/baselines/braun/scenarios/cologne3/native.sumocfg
+    rollout_jobs_per_iteration: 10
+  - name: ingolstadt7
+    split: train
+    sumo_config: /mnt/c/users/Deea/SUMO_2/SUMO_Reinforcement_learning_traffic/SUMO_Reinforcement_learning_traffic/.claude/worktrees/rescofull-writeup/baselines/braun/scenarios/ingolstadt7/native.sumocfg
+    rollout_jobs_per_iteration: 10
+
+simulation:
+  decision_interval: 10
+  time_to_teleport: -1
+  yellow_duration: 3
+  min_green_steps: 2
+  # ADAPTED (native 0.05-0.08): his initial population departs at t=0, which SUMO
+  # silently discards on the cologne3 / ingolstadt7 windows (begin 25200 / 57600), so it
+  # would randomise one training city of three.  Disabled for all three, matching the
+  # empty-start episodes our method trains on.
+  initial_occupancy_min: 0.0
+  initial_occupancy_max: 0.0
+
+demand:
+  # ADAPTED (native 0.8-1.2): his scaling rewrites <flow> elements only; RESCO route files
+  # are explicit <vehicle>s, so scaling would be a silent no-op.  Set to 1.0 explicitly.
+  train_scale_min: 1.0
+  train_scale_max: 1.0
+  eval_scales: [1.0]
+
+imitation_learning:   # unused (scratch PPO); required by his config schema
+  samples_per_city: 9600
+  samples_per_simulation: 80
+  collection_workers: 4
+  epochs: 20
+  samples_per_batch: 128
+  phase_loss_coefficient: 1.0
+
+ppo:
+  iterations: 85
+  # ADAPTED (native 350): 360 decisions x 10 s = exactly one 3600 s benchmark window
+  steps_per_rollout: 360
+  rollouts_per_update: 30
+  # ADAPTED (native 32): CPU budget on this machine
+  rollout_workers: 10
+  update_epochs: 2
+  value_warmup_iterations: 0
+  warmup_epochs: 2
+  transitions_per_batch: 2048
+  update_batch_workers: 0
+  reward_sample_interval: 5
+  reward_mode: throughput
+  global_reward_weight: 0.2
+  flow_reward_weight: 0.0
+  throughput_reward_weight: 1.0
+  progress_reward_weight: 0.25
+  gridlock_penalty_weight: 0.08
+  speed_change_weight: 0.005
+  # ADAPTED (native 5): no periodic evaluation / best-checkpoint selection; the FINAL
+  # iterate is evaluated, as for our method (global_round_005).
+  eval_every_iterations: 0
+  eval_workers: 1
+  eval_learned_device: cpu
+  eval_learned_action_mode: sample
+  eval_learned_temperature: 1.0
+  save_every_iterations: 5
+
+evaluation:
+  policies: [learned]
+  seeds: [100]
+  steps: 3600
