@@ -47,8 +47,8 @@
 \title{\textbf{Phase-Relational \texorpdfstring{$Q$}{Q}-Learning for Traffic Signal
 Control Across Heterogeneous Intersection Topologies}\\[4pt]
 \large Problem, method and results to date}
-\author{Author Name}
-\date{September 2026}
+\author{Paul Petruț-Betuel, Onaci Andreea-Maria}
+\date{\today}
 
 \begin{document}
 \maketitle
@@ -327,6 +327,28 @@ final round difference is not significant (1.71).}
 \label{tab:budget}
 \end{table}
 
+\begin{table*}[t]
+\centering\footnotesize
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{|l|r|r|r|r|r|r|}
+\hline
+ & \multicolumn{2}{c|}{grid4x4 (unseen)} & \multicolumn{2}{c|}{cologne3} & \multicolumn{2}{c|}{ingolstadt7} \\ \hline
+Controller & Delay (s) & Compl. & Delay (s) & Compl. & Delay (s) & Compl. \\ \hline
+Braun, own phases & 294.1 & 94.5\% & 86.6 & 96.9\% & 84.9 & 95.5\% \\ \hline
+Braun, RESCO phases & 188.2 & 96.3\% & 59.5 & 93.3\% & 66.8 & 96.5\% \\ \hline
+Braun's max pressure, own phases & 79.2 & 98.4\% & 67.7 & 96.7\% & 42.4 & 44.1\% \\ \hline
+Braun's max pressure, RESCO phases & 90.9 & 95.4\% & 26.4 & \textbf{98.6\%} & 41.1 & \textbf{97.5\%} \\ \hline
+\textbf{Phase-relational (ours)} & \textbf{41.4} & \textbf{98.8\%} & \textbf{21.4} & 91.2\% & \textbf{35.3} & 95.4\% \\ \hline
+\end{tabular}
+\caption{Braun's released code on our networks, measured with the same pipeline, six
+training seeds per learned arm (sampled actions, his evaluation protocol). Bold marks the
+best value in each column: lowest delay, highest completion. ``Own phases'' is his method as
+published: it replaces the signal program with its own phase sets (17 instead of 8 on
+grid4x4). On delay, ours differs from his method by $|\Delta|/\mathrm{SE}$ 46.1, 11.4 and
+12.4. His learned policy is below his own max pressure on every network.}
+\label{tab:braun}
+\end{table*}
+
 \subsection{Networks seen in training, against RESCO}
 \begin{table}[H]
 \centering\footnotesize
@@ -362,30 +384,29 @@ with lower completion. On ingolstadt7 max pressure is better on delay, although 
 completes the most trips.
 
 \subsection{Comparison with concurrent work}
-Table~\ref{tab:braun} runs the released code of the closest concurrent method on the
-same networks and measures it with the same pipeline as our policy.
+Braun (2026) proposes a related idea: a graph network scores individual movements, and
+the scores are summed into phase scores, so the model does not depend on the number of
+phases. We ran the released code, at the version cited in that work, on the same three
+training networks and measured it with the same pipeline as our policy
+(Table~\ref{tab:braun}).
 
-\begin{table*}[t]
-\centering\footnotesize
-\setlength{\tabcolsep}{6pt}
-\begin{tabular}{|l|r|r|r|r|r|r|}
-\hline
- & \multicolumn{2}{c|}{grid4x4 (unseen)} & \multicolumn{2}{c|}{cologne3} & \multicolumn{2}{c|}{ingolstadt7} \\ \hline
-Controller & Delay (s) & Compl. & Delay (s) & Compl. & Delay (s) & Compl. \\ \hline
-Braun, own phases & 294.1 & 94.5\% & 86.6 & 96.9\% & 84.9 & 95.5\% \\ \hline
-Braun, RESCO phases & 188.2 & 96.3\% & 59.5 & 93.3\% & 66.8 & 96.5\% \\ \hline
-Braun's max pressure, own phases & 79.2 & 98.4\% & 67.7 & 96.7\% & 42.4 & 44.1\% \\ \hline
-Braun's max pressure, RESCO phases & 90.9 & 95.4\% & 26.4 & \textbf{98.6\%} & 41.1 & \textbf{97.5\%} \\ \hline
-\textbf{Phase-relational (ours)} & \textbf{41.4} & \textbf{98.8\%} & \textbf{21.4} & 91.2\% & \textbf{35.3} & 95.4\% \\ \hline
-\end{tabular}
-\caption{Braun's released code on our networks, measured with the same pipeline, six
-training seeds per learned arm (sampled actions, his evaluation protocol). Bold marks the
-best value in each column: lowest delay, highest completion. ``Own phases'' is his method as
-published: it replaces the signal program with its own phase sets (17 instead of 8 on
-grid4x4). On delay, ours differs from his method by $|\Delta|/\mathrm{SE}$ 46.1, 11.4 and
-12.4. His learned policy is below his own max pressure on every network.}
-\label{tab:braun}
-\end{table*}
+The method was trained with its own settings: PPO, 85 training iterations, a throughput
+reward, a decision every 10\,s and a 20\,s minimum green. This is 85 times the simulated
+time used to train our policy. Two versions are compared. The published version builds its
+own phases from all conflict free movement combinations, which gives 17 phases on grid4x4
+instead of 8; the second version uses the network's own phases. The method's own max
+pressure controller on each phase set is included, to separate the effect of the learner
+from the effect of the phase set. Every learned version uses six training seeds.
+
+Our policy has lower delay on all three networks ($|\Delta|/\mathrm{SE}$ of 46.1, 11.4 and
+12.4 against the published version). Braun's learned policy also has higher delay than its
+own max pressure everywhere, so the difference is not caused by the larger phase set. That
+phase set helps max pressure on grid4x4, hurts it on cologne3, and leads to gridlock on
+ingolstadt7 (44.1\% of trips completed). Braun's method was designed for throughput, on
+which it is close to the rule based controllers here (94.5 to 96.9\% of trips completed),
+and on cologne3 it completes more trips than our policy.
+
+
 
 \subsection{Earlier interventions, revisited}
 Before the cause was found, 41 interventions were tested with the indexed head: other
@@ -438,9 +459,9 @@ The main question of the project is answered: the cause of the transfer failure 
 identified by a control experiment, and the fix is confirmed with six seeds on five
 configurations, at RESCO's settings, and against FRAP and Braun's method.
 \begin{itemize}
-\item \textbf{Done:} the comparison with Braun's method is complete with six seeds.
 \item \textbf{Next comparisons:} TransferLight on the same networks; more and larger real
       networks.
+\item \textbf{More unseen cities:} testing the policy on additional unseen cities to evaluate generalization. (TBD)
 \item \textbf{Open technical questions:} a reward that targets delay, since the policy wins on
       waiting time and ties on delay; adaptation to real rather than synthetic traffic on a new
       network; why FRAP is weaker on corridor networks (our data point to how many movements

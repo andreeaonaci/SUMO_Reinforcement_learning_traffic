@@ -321,13 +321,13 @@ hurts); in-distribution competitiveness with `max_pressure`; any absolute Ingols
 
 ### THE PAPER EXISTS — `paper/main.tex`, and it is the current deliverable
 
-A complete IEEEtran draft, **10 pages** since Fig. 4 was added (was 9; venue limit still
-undecided), 31 verified references, compiles clean from the repo root or `paper/`
-(`pdflatex` twice, no undefined refs). **Fig. 4 is the only results plot** — regenerate it with
-`python paper/figures/plot_zeroshot.py` (reads the raw run histories; the figure PDF is tracked
-via a `!figures/*.pdf` exception in `paper/.gitignore`). Identity colours: amber `acc` =
-phase-relational, plum `fail` (#7A2E6E) = indexed, shared by Figs. 1, 3, 4 — the old red failed
-the dataviz normal-vision floor against amber.
+A complete IEEEtran draft, **8 pages** (restructured 2026-09-30 into standard IEEE order:
+Introduction, Related Work, Problem Formulation, Method, Experimental Setup incl. Baselines and
+Metrics, Results incl. §VI-F comparison with Braun at six seeds (`tab:braun`), Analysis incl. the
+re-evaluation of the 41 interventions, Discussion and Limitations, Conclusion). The narrative
+"Experimental Programme" / "Intervention Corpus" chapters were removed; their facts live in
+Analysis. Keep new text in objective IEEE register, no story telling. 31 verified references,
+compiles clean from the repo root or `paper/` (`pdflatex` twice, no undefined refs).
 Title: *Phase-Relational Q-Learning: Configuration-Free Traffic Signal Control Across
 Heterogeneous Intersection Topologies*. It carries the full experimental programme, three TikZ
 system diagrams, the setup/provenance tables, the RESCO in-distribution comparisons, the
