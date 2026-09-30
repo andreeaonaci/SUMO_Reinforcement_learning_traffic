@@ -8544,6 +8544,29 @@ six jobs oversubscribed 12 cores (load 26).
 `tab:config` row, internal only, 3 s) and as `tab:unseen_ft` in `paper/side.tex`; one sentence
 linking it from the fine-tuning paragraph in Analysis.
 
+## 113d. Fine-tune dose-response on ingolstadt21: 3 and 10 episodes (launched 2026-09-30)
+
+**Question.** §113c: one episode moved ingolstadt21 in the right direction (delay 130.7 -> 119.2 s,
+5/6 seeds; completion 77.6 -> 82.2%) but not significantly, and it stays far below max pressure
+(86.0 s / 89.0%) and fixed time (137.1 s / 93.8%). Does more adaptation close the gap, plateau,
+or reverse as on the grid4x4 holdout (§105b)?
+
+**Protocol.** Same six phase-relational rescofull checkpoints, same synthetic route file
+(`generated_random_r4281/ingolstadt21_random_0`, 4281 veh/h, never the evaluation routes), same
+5-episode evaluation. The ONLY change from §113c is `--local_episodes E` with E in {3, 10}: one
+round, so one learning rate (5e-5) throughout; epsilon decays over 30% of the E-episode burst
+(`compute_eps_decay` scales with rounds x local_episodes). Paired by seed against §112b's
+zero-shot and §113c's E=1.
+`EPISODES=3 MAX_CONCURRENT=6 bash analyse/run_unseen_finetune.sh ingolstadt21`, then E=10;
+outputs `results/unseen_ft_e{3,10}/ingolstadt21/`; table `python analyse/unseen_ft_table.py
+--episodes E ingolstadt21`.
+
+**Prediction (deficit recovery).** Gains continue with E, since the zero-shot deficit is large.
+A reversal at E=10 would say synthetic-demand adaptation itself is the limit, not the dose.
+
+**Caveat set in advance.** One route file repeated E times: E=10 may overfit that single demand
+draw. If E=10 reverses, rerun with `--n_variants` > 1 before reading it as a dose effect.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit

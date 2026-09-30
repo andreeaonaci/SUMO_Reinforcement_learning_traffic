@@ -8,6 +8,10 @@
 # Fine-tuning uses SYNTHETIC demand (randomTrips over the network, total rate matched
 # to the real hour's departures), never the evaluation route file. Exactly one
 # training episode: --rounds 1 --local_episodes 1 --n_variants 1.
+#
+# EPISODES=E (default 1) gives the dose-response of sec 113d: one round of E episodes on the
+# same synthetic route file, one learning rate, epsilon decay scaled to the E-episode burst.
+# E=1 writes to results/unseen_ft/ (sec 113c); E>1 writes to results/unseen_ft_e<E>/.
 set -u
 cd "$(dirname "$0")/.."
 export SUMO_HOME=${SUMO_HOME:-/usr/share/sumo}
@@ -19,6 +23,8 @@ export PYTHONUNBUFFERED=1
 M=/mnt/c/users/Deea/SUMO_2/SUMO_Reinforcement_learning_traffic/SUMO_Reinforcement_learning_traffic/results
 MAX_CONCURRENT=${MAX_CONCURRENT:-6}
 NETS=${*:-"ingolstadt21 cologne8 cologne1"}
+EPISODES=${EPISODES:-1}
+if [ "$EPISODES" = 1 ]; then ROOT=results/unseen_ft; else ROOT=results/unseen_ft_e$EPISODES; fi
 declare -A CK=([3]=1483406 [7]=1483410 [11]=1483409 [17]=1491576 [21]=1491628 [25]=1491714)
 
 throttle() { while [ "$(jobs -rp | wc -l)" -ge "$MAX_CONCURRENT" ]; do sleep 15; done; }
@@ -26,7 +32,7 @@ throttle() { while [ "$(jobs -rp | wc -l)" -ge "$MAX_CONCURRENT" ]; do sleep 15;
 for net in $NETS; do
   cfg=environments_unseen/$net/config.yaml
   stem=$(basename "$(grep '^net_file:' "$cfg" | awk '{print $2}')" .net.xml)
-  out=results/unseen_ft/$net
+  out=$ROOT/$net
   mkdir -p "$out"
   for seed in 3 7 11 17 21 25; do
     ck=$(ls "$M"/run_2026_09_09-*_"${CK[$seed]}"/global_round_005.pth)
@@ -37,7 +43,7 @@ for net in $NETS; do
     (
       if [ ! -f "$ckdir/global_round_001.pth" ]; then
         python diagnostics/finetune_on_holdout.py "$ck" --holdout_config "$cfg" \
-          --rounds 1 --phase1_rounds 1 --local_episodes 1 --n_variants 1 --eval_episodes 1 \
+          --rounds 1 --phase1_rounds 1 --local_episodes "$EPISODES" --n_variants 1 --eval_episodes 1 \
           --match_real_demand --seed "$seed" --checkpoint_dir "$ckdir" > "$out/ft_s$seed.log" 2>&1
         echo "FINETUNE DONE rc=$?" >> "$out/ft_s$seed.log"
       fi

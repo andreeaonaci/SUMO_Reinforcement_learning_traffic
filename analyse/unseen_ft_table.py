@@ -2,8 +2,10 @@
 
 Pairs each seed's fine-tuned result (results/unseen_ft/<net>/) with the same seed's
 zero-shot result (results/unseen/<net>/), both from eval_ours.py (5 episodes).
-    python analyse/unseen_ft_table.py
+    python analyse/unseen_ft_table.py                  # 1 episode  (sec 113c)
+    python analyse/unseen_ft_table.py --episodes 3     # dose-response (sec 113d)
 """
+import argparse
 import glob
 import json
 import os
@@ -13,6 +15,11 @@ W = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PID = {3: "1483406", 7: "1483410", 11: "1483409", 17: "1491576", 21: "1491628", 25: "1491714"}
 NETS = ("cologne1", "cologne8", "ingolstadt21")
 KEYS = ("delay", "completion", "ti_wait")
+ap = argparse.ArgumentParser()
+ap.add_argument("--episodes", type=int, default=1)
+ap.add_argument("nets", nargs="*", default=list(NETS))
+args = ap.parse_args()
+FT = "results/unseen_ft" if args.episodes == 1 else "results/unseen_ft_e%d" % args.episodes
 
 
 def ep_mean(path):
@@ -26,16 +33,19 @@ def one(pattern):
 
 
 out = {}
-for net in NETS:
+for net in args.nets:
     zs, ft = {}, {}
     for seed, pid in PID.items():
         z = one(os.path.join(W, "results/unseen", net, "ours_*_phase_run_*_%s.json" % pid))
-        f = one(os.path.join(W, "results/unseen_ft", net, "ours_*_phase_ckpt_s%d.json" % seed))
+        f = one(os.path.join(W, FT, net, "ours_*_phase_ckpt_s%d.json" % seed))
         if z and f:
             zs[seed], ft[seed] = z, f
     mp = one(os.path.join(W, "results/unseen", net, "ours_*_max_pressure_*.json"))
     fx = one(os.path.join(W, "results/unseen", net, "ours_*_fixed_time_*.json"))
     seeds = sorted(zs)
+    if not seeds:
+        print("== %s: no finished seeds under %s" % (net, FT))
+        continue
     row = {"n": len(seeds), "max_pressure": mp, "fixed_time": fx}
     for k in KEYS:
         a = [zs[s][k] for s in seeds]
@@ -53,4 +63,5 @@ for net in NETS:
               % (label, scale * r["zero_shot"], scale * r["finetuned"], r["z"], r["seeds_improved"], len(seeds)))
     print("   max pressure: delay %.1f, completion %.1f%%, wait %.1f;  fixed time: delay %.1f, completion %.1f%%"
           % (mp["delay"], 100 * mp["completion"], mp["ti_wait"], fx["delay"], 100 * fx["completion"]))
-json.dump(out, open(os.path.join(W, "results", "unseen_ft", "summary.json"), "w"), indent=1)
+os.makedirs(os.path.join(W, FT), exist_ok=True)
+json.dump(out, open(os.path.join(W, FT, "summary.json"), "w"), indent=1)
