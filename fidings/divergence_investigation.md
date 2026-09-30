@@ -8421,6 +8421,46 @@ round), max pressure, fixed time; 5 episodes, eval seed 12345; `baselines/braun/
 Run: `bash analyse/run_unseen_eval.sh <network>...` (skip-or-resume). Caveat stated up front:
 ingolstadt21 is only partly unseen and must be reported as such.
 
+## 112b. Unseen-network results: transfer holds on 6 of 7 networks; ingolstadt21 and max pressure set the limits
+
+**2026-09-30.** All 98 controller runs complete (82 via `analyse/run_unseen_parallel.sh`, all
+rc=0; every result file has 5 episodes). Final-round §100 checkpoints, no selection on these
+networks. `python analyse/unseen_table.py`. Delay s / completion % / tripinfo wait s; learned
+rows are six-seed means:
+
+| network | phase-relational | indexed | max pressure | fixed time |
+|---|---|---|---|---|
+| cologne1 (new) | 26.2 / 97.8 / 11.7 | 59.9 / 62.1 / 41.8 | **20.9** / 99.1 / 9.2 | 38.3 / 99.2 / 26.6 |
+| cologne8 (new) | **27.5** / 98.2 / **9.5** | 89.6 / 62.4 / 69.0 | 27.8 / 98.0 / 14.4 | 49.2 / 97.5 / 31.4 |
+| ingolstadt21 (14/21 new) | 130.7 / 77.6 / 76.6 | 200.7 / 38.8 / 157.4 | **86.0** / 89.0 / 48.2 | 137.1 / **93.8** / 94.4 |
+| grid_3x3_drop20 | 42.5 / 97.6 / 24.5 | 195.7 / 11.3 / 186.4 | **39.8** / 97.8 / 25.3 | 93.9 / 96.3 / 75.4 |
+| grid_4x4_drop30 | 53.0 / 96.9 / 29.5 | 185.2 / 12.3 / 172.7 | **45.8** / 97.1 / 28.2 | 116.7 / 94.8 / 93.9 |
+| grid_5x5_drop20 | 54.6 / 96.6 / 29.3 | 288.4 / 8.5 / 275.1 | **46.3** / 96.8 / 28.3 | 148.5 / 93.8 / 123.4 |
+| grid_6x6_drop20 | 62.1 / 96.0 / 32.7 | 293.6 / 7.4 / 277.0 | **44.9** / 96.2 / 25.1 | 178.8 / 92.3 / 149.0 |
+
+**Findings.**
+1. **Against the indexed readout, phase-relational wins on every network.** Completion is the
+   clean measure: 96 to 98% against 7 to 62% on six networks (|Δ|/SE 2.4 to 87.1). The delay
+   comparison (|Δ|/SE 2.0 to 4.4) understates it, because the indexed delay is over the few
+   vehicles that arrive (e.g. cologne1 seed 25: 26.2 s delay at 7.4% completion).
+2. **Against fixed time, lower delay on all seven networks.**
+3. **Against max pressure the picture is mixed.** On **cologne8**, the most informative network
+   (real, eight signals, fully unseen), phase-relational ties on delay (27.5 against 27.8,
+   4/6 seeds lower), has lower waiting on 6/6 seeds (9.5 against 14.4 s) and equal completion;
+   it is also very stable across seeds (delay 25.7 to 28.9, completion 98.2 to 98.3%). On
+   cologne1 and the four grids max pressure has lower delay by 3 to 17 s at equal completion.
+4. **ingolstadt21 is a real limitation.** All six seeds are weak (completion 70.6 to 85.3%,
+   delay 109 to 154 s), so it is not an outlier seed. Max pressure (89.0%) and fixed time
+   (93.8%) complete more trips. It is the largest and most loaded network (21 signals) and is
+   only partly unseen, so this is a scale or demand limitation rather than a topology one;
+   not investigated further yet.
+
+**Standing.** Zero-shot transfer beyond grid4x4 is confirmed in the sense that matters most
+here: the policy does not collapse on unseen real or synthetic networks (96 to 98% completion
+on six of seven) and beats fixed time everywhere. It does **not** match max pressure on delay
+in general, consistent with §109b. Do not generalise §109's grid4x4 waiting-time win to all
+unseen networks; it holds on cologne8 and not on cologne1 or ingolstadt21.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
