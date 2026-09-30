@@ -408,6 +408,40 @@ and on cologne3 it completes more trips than our policy.
 
 
 
+\subsection{Additional unseen networks}
+We also tested the trained models, without any further training, on three RESCO networks
+outside the training set. \texttt{cologne1} and \texttt{cologne8} share no signal with
+cologne3 (the nearest training signal is 685\,m and more than 4\,km away). In
+\texttt{ingolstadt21}, 14 of the 21 signals are new and 7 are also in ingolstadt7. We
+checked overlap by signal name and by position. All three contain intersections with six
+phases, more than any training city.
+
+\begin{table*}[t]
+\centering\footnotesize
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{|l|r|r|r|r|r|r|}
+\hline
+ & \multicolumn{2}{c|}{cologne1} & \multicolumn{2}{c|}{cologne8} & \multicolumn{2}{c|}{ingolstadt21$^\dagger$} \\ \hline
+Controller & Delay (s) & Compl. & Delay (s) & Compl. & Delay (s) & Compl. \\ \hline
+\textbf{Phase-relational (ours)} & 26.2 & 97.8\% & \textbf{27.5} & \textbf{98.2\%} & 130.7 & 77.6\% \\ \hline
+Indexed head & 59.9 & 62.1\% & 89.6 & 62.4\% & 200.7 & 38.8\% \\ \hline
+Max pressure & \textbf{20.9} & 99.1\% & 27.8 & 98.0\% & \textbf{86.0} & 89.0\% \\ \hline
+Fixed time & 38.3 & \textbf{99.2\%} & 49.2 & 97.5\% & 137.1 & \textbf{93.8\%} \\ \hline
+\end{tabular}
+\caption{Unseen RESCO networks, no further training. Bold marks the best value in each
+column. Learned rows: mean of six seeds. $^\dagger$ingolstadt21 has 21 signals, more than any
+training network (at most 16), and 7 of them are also in ingolstadt7.}
+\label{tab:unseen_nets}
+\end{table*}
+
+On both Cologne networks our policy completes about 98\% of trips, against about 62\% for the
+indexed head, and it has lower delay than fixed time on all three networks. On cologne8, the
+largest fully new network, it ties max pressure on delay and has lower waiting time on all six
+seeds (9.5\,s against 14.4\,s). Max pressure is better on cologne1. ingolstadt21 is the weak
+case: every seed completes between 70.6\% and 85.3\% of trips, below max pressure and fixed
+time. On four synthetic irregular grids the pattern matches cologne1: 96 to 98\% completion for
+our policy, below 13\% for the indexed head, and slightly lower delay for max pressure.
+
 \subsection{Earlier interventions, revisited}
 Before the cause was found, 41 interventions were tested with the indexed head: other
 aggregation rules and clustering, larger architectures, other algorithms (PPO, QR-DQN, CQL,

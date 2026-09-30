@@ -118,8 +118,8 @@ This paper makes the following contributions.
 \item A phase-relational readout (Section~\ref{sec:method}) whose phase descriptor is
       derived from the simulator's connection table. It needs no per-intersection
       configuration and keeps the network's signal program.
-\item An evaluation (Section~\ref{sec:results}) on five zero-shot configurations, at the
-      RESCO benchmark's settings, against max pressure, fixed time, a ported FRAP, the
+\item An evaluation (Section~\ref{sec:results}) on five zero-shot configurations and three
+      further unseen RESCO networks, at the RESCO benchmark's settings, against max pressure, fixed time, a ported FRAP, the
       published RESCO baselines and the released code of the concurrent method.
 \item A re-evaluation of 41 interventions previously tested with the indexed readout
       (Section~\ref{sec:inventory}), in which the two strongest reverse, and a record of
@@ -471,6 +471,7 @@ Table~\ref{tab:zeroshot}, lower block & \texttt{c1\_4\_6} & $2$\,s & no \\
 Fig.~\ref{fig:zeroshot} (per round) & \texttt{rescofull} & $3$\,s & \textbf{yes} \\
 Table~\ref{tab:indist} (in-distribution) & \texttt{rescofull} & $3$\,s & \textbf{yes} \\
 Table~\ref{tab:braun} (concurrent method) & \texttt{rescofull} & $3$\,s & internal only \\
+Table~\ref{tab:unseen} (unseen networks) & \texttt{unseen} & $3$\,s & internal only \\
 Table~\ref{tab:curriculum} (curriculum) & \texttt{c1\_4\_6} & $2$\,s & no \\
 Adaptation (\S\ref{sec:inventory}) & \texttt{rescofull} & $3$\,s & internal only \\
 Triple demand (\S\ref{sec:scenarios}) & \texttt{dense} & $2$\,s & no \\
@@ -687,6 +688,52 @@ method optimises throughput, on which it is close to the rule-based controllers 
 its published arm uses a different action space and is therefore not comparable with
 RESCO results. On \texttt{cologne3} it completes more trips than the proposed readout
 (96.9\% against 91.2\%).
+
+\subsection{Additional unseen networks}\label{sec:unseen}
+To test transfer beyond the holdout, the trained checkpoints were evaluated without any
+further training on three RESCO networks that are not part of the training roster:
+\texttt{cologne1} and \texttt{cologne8}, which share no signal with \texttt{cologne3}
+(the nearest training signal is 685\,m and more than 4\,km away, respectively), and
+\texttt{ingolstadt21}, of whose 21 signals 14 are new and 7 coincide with
+\texttt{ingolstadt7}. \texttt{ingolstadt1} was excluded because its only signal is a
+training signal. Overlap was determined by signal identifier and by position. Each network
+is evaluated in its RESCO window at 3\,s yellow, and \texttt{cologne1}, \texttt{cologne8}
+and \texttt{ingolstadt21} contain intersections with six phases, more than any training
+city. Table~\ref{tab:unseen} reports the results.
+
+\begin{table*}[t]
+\caption{Zero-shot evaluation on RESCO networks outside the training roster, final-round
+checkpoints without further training. Average delay (s, lower is better) and completion
+(\%, higher is better); bold marks the best value in each column. Learned readouts: mean of
+six seeds; rule-based controllers are deterministic. $^\dagger$\texttt{ingolstadt21} has 21
+signals, more than any training network (at most 16), and 7 of them also occur in
+\texttt{ingolstadt7}.}
+\label{tab:unseen}
+\centering\footnotesize
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+ & \multicolumn{2}{c}{\texttt{cologne1}} & \multicolumn{2}{c}{\texttt{cologne8}} & \multicolumn{2}{c}{\texttt{ingolstadt21}$^\dagger$} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(l){6-7}
+Controller & Delay & Compl. & Delay & Compl. & Delay & Compl. \\
+\midrule
+\textbf{B. Phase-relational} & 26.2 & 97.8 & \textbf{27.5} & \textbf{98.2} & 130.7 & 77.6 \\
+A. Indexed & 59.9 & 62.1 & 89.6 & 62.4 & 200.7 & 38.8 \\
+Max pressure & \textbf{20.9} & 99.1 & 27.8 & 98.0 & \textbf{86.0} & 89.0 \\
+Fixed time & 38.3 & \textbf{99.2} & 49.2 & 97.5 & 137.1 & \textbf{93.8} \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+The phase-relational readout completes 97.8\% and 98.2\% of trips on the two Cologne networks,
+against 62.1\% and 62.4\% for the indexed readout, and has lower delay than fixed time on all
+three networks. On \texttt{cologne8}, the largest fully unseen network, it matches max pressure
+on delay (27.5 against 27.8\,s, four of six seeds lower) and has lower waiting time on all six
+seeds (9.5 against 14.4\,s); its six seeds span 25.7 to 28.9\,s. Max pressure has lower delay on
+\texttt{cologne1}. \texttt{ingolstadt21} is the main limitation: all six seeds complete between
+70.6\% and 85.3\% of trips, below max pressure (89.0\%) and fixed time (93.8\%). Four synthetic
+irregular grids, also unseen, give the same pattern as \texttt{cologne1}: 96.0 to 97.6\%
+completion for the phase-relational readout and 7.4 to 12.3\% for the indexed one, with max
+pressure 3 to 17\,s lower in delay.
 
 % =============================================================================
 \section{Analysis}\label{sec:analysis}
