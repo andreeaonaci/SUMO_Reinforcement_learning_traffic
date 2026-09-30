@@ -138,6 +138,21 @@ def infer_arch_from_checkpoint(state: dict) -> dict:
                 frap_phase_pairs=frap_pairs)
 
 
+def real_departures_per_hour(cfg, num_seconds):
+    """Vehicles departing inside the config's evaluation window, scaled to per hour."""
+    import xml.etree.ElementTree as ET
+    begin = float(cfg.get("begin_time", 0) or 0)
+    end = begin + float(num_seconds)
+    n = 0
+    for _, el in ET.iterparse(cfg["route_file"]):
+        if el.tag in ("vehicle", "trip"):
+            d = el.get("depart")
+            if d is not None and d.replace(".", "", 1).isdigit() and begin <= float(d) < end:
+                n += 1
+        el.clear()
+    return n * 3600.0 / float(num_seconds)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("checkpoint", help="Path to a global_round_NNN.pth to fine-tune from.")
@@ -173,6 +188,10 @@ def main():
                          "under: use environments_rescofull/city_5_holdout/config.yaml "
                          "for a 3 s-yellow checkpoint.")
     ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--match_real_demand", action="store_true",
+                    help="Set the synthetic insertion rate to the number of vehicles departing "
+                         "in the real evaluation window (vehicles/hour for a 3600 s window) "
+                         "instead of the fixed 1470/h tuned for grid4x4.")
     ap.add_argument("--eval_episodes", type=int, default=5,
                      help="Matches this project's standard per-round eval_episodes. Use a "
                           "larger value (e.g. 30) for a final confirmatory check, matching "
@@ -300,18 +319,30 @@ def main():
           f"mean_waiting_time={zero_shot['mean_waiting_time']:.2f}")
 
     # --- 3. Generate/reuse randomized route variants, build finetune roster --
+    rate_kw, out_name = {}, "generated_random"
+    if args.match_real_demand:
+        rate = real_departures_per_hour(real_cfg, num_seconds)
+        rate_kw = {"insertion_rate": rate}
+        out_name = f"generated_random_r{int(round(rate))}"   # cache keyed by rate
+        print(f"[match_real_demand] synthetic insertion rate {rate:.0f} veh/h "
+              f"(real departures in the evaluation window)")
     route_paths = generate_variants(
         net_file=real_cfg["net_file"],
-        out_dir=os.path.join(os.path.dirname(real_cfg["net_file"]), "generated_random"),
+        out_dir=os.path.join(os.path.dirname(real_cfg["net_file"]), out_name),
         n_variants=args.n_variants,
         duration=num_seconds,
         force=args.regenerate_routes,
+        **rate_kw,
     )
 
     city_configs = []
     for i, route_path in enumerate(route_paths):
         variant_cfg = dict(real_cfg)
         variant_cfg["route_file"] = route_path
+        # Synthetic trips depart in [0, duration). A real config that starts at its
+        # evaluation hour (cologne 25200 s, ingolstadt 57600 s) would drop every one
+        # of them and train on an empty network, so variants always start at 0.
+        variant_cfg["begin_time"] = 0
         city_configs.append((f"holdout_random_{i}", variant_cfg))
 
     steps_per_ep = num_seconds // int(real_cfg.get("delta_time", 5))

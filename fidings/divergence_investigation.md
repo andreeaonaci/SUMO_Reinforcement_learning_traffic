@@ -8461,6 +8461,26 @@ on six of seven) and beats fixed time everywhere. It does **not** match max pres
 in general, consistent with §109b. Do not generalise §109's grid4x4 waiting-time win to all
 unseen networks; it holds on cologne8 and not on cologne1 or ingolstadt21.
 
+## 113. One-episode fine-tune on the unseen real networks (launched 2026-09-30)
+
+**Question.** §112b: on ingolstadt21 the zero-shot policy completes only 77.6% of trips. §105b
+found fine-tuning *hurts* when the zero-shot policy is already near-optimal (grid4x4) and
+hurts least where the deficit is largest ($r=-0.91$). ingolstadt21 has a real deficit, so the
+deficit-recovery account predicts adaptation should help there and not on cologne8.
+
+**Protocol.** Six §100 phase-relational checkpoints; exactly one training episode per network
+(`--rounds 1 --local_episodes 1 --n_variants 1`) on SYNTHETIC randomTrips demand, never the
+evaluation route file; then the 5-episode trip evaluation of §112. `analyse/run_unseen_finetune.sh`.
+
+**Two fixes to `diagnostics/finetune_on_holdout.py` found while setting this up.**
+1. *Empty training episodes on late-starting networks.* Synthetic trips depart in [0, 3600) but
+   variant configs inherited the real `begin_time` (cologne 25200 s, ingolstadt 57600 s), so SUMO
+   would have dropped every synthetic vehicle. Variants now start at 0. §105/§105b ran on
+   grid4x4, which starts at 0, and are unaffected.
+2. *Demand level.* The synthetic rate was a fixed 1470 veh/h tuned for grid4x4. New
+   `--match_real_demand` sets it to the real window's departures: cologne1 2015, cologne8 2046,
+   ingolstadt21 4281 veh/h. Default behaviour unchanged.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
