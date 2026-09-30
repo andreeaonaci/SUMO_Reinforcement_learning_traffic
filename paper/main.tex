@@ -458,7 +458,8 @@ $|\Delta|/\mathrm{SE}$, unpaired with population standard deviation, with a thre
 \caption{Configuration provenance. Within-study comparisons hold in every row, because
 both arms of each comparison share the configuration. Only rows marked \textnormal{yes}
 may be set beside published numbers; \textnormal{internal only} marks a result at the
-benchmark's timing without a published counterpart.}
+benchmark's timing without a published counterpart. $^{*}$Fine-tuned at 3\,s, evaluated
+at 2\,s (Section~\ref{sec:inventory}).}
 \label{tab:config}
 \centering\scriptsize\setlength{\tabcolsep}{4pt}
 \begin{tabular}{@{}llcc@{}}
@@ -473,7 +474,7 @@ Table~\ref{tab:indist} (in-distribution) & \texttt{rescofull} & $3$\,s & \textbf
 Table~\ref{tab:braun} (concurrent method) & \texttt{rescofull} & $3$\,s & internal only \\
 Table~\ref{tab:unseen} (unseen networks) & \texttt{unseen} & $3$\,s & internal only \\
 Table~\ref{tab:curriculum} (curriculum) & \texttt{c1\_4\_6} & $2$\,s & no \\
-Adaptation (\S\ref{sec:inventory}) & \texttt{rescofull} & $3$\,s & internal only \\
+Adaptation (\S\ref{sec:inventory}) & \texttt{rescofull} & $3$/$2$\,s$^{*}$ & no \\
 Triple demand (\S\ref{sec:scenarios}) & \texttt{dense} & $2$\,s & no \\
 Diversity (\S\ref{sec:diversity}) & \texttt{divwide} & $2$\,s & no \\
 Table~\ref{tab:inventory} (corpus) & various & $2$\,s & no \\
@@ -821,7 +822,9 @@ the indexed readout: from a zero-shot reward of $-8664.73$ to $-1092.10$
 ($|\Delta|/\mathrm{SE}$ 72.78, four seeds). A randomly initialised network given the same
 procedure reached $-406.85$ against $-693.84$ for the pretrained one, so the gain
 reflected training on the target rather than transfer. With the phase-relational
-readout, fine-tuning degrades the policy: from $-0.123$ to $-0.250$ after one round
+readout (checkpoints trained at 3\,s yellow and fine-tuned at 3\,s; the zero-shot and
+fine-tuned policies were both evaluated on the same holdout at 2\,s yellow, so the
+comparison is internal), fine-tuning degrades the policy: from $-0.123$ to $-0.250$ after one round
 (4.44) and $-0.205$ after two (3.75), with one of twelve runs improving by 0.02 and mean
 waiting time rising from 0.29 to 0.67\,s. Across the six two-round runs, the correlation
 between zero-shot reward and the change produced by adaptation is $r=-0.91$: adaptation

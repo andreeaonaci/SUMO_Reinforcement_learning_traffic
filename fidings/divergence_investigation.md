@@ -8481,6 +8481,29 @@ evaluation route file; then the 5-episode trip evaluation of §112. `analyse/run
    `--match_real_demand` sets it to the real window's departures: cologne1 2015, cologne8 2046,
    ingolstadt21 4281 veh/h. Default behaviour unchanged.
 
+## 113b. BUG: finetune_on_holdout.py never evaluated on --holdout_config (affects §105/§105b provenance)
+
+**2026-09-30.** Launching §113 printed "HOLDOUT TOPOLOGY LEAK ... Using 'city_2' as evaluation
+city (compatibility fallback)". The script built its evaluator with
+`make_holdout_evaluator("environments", ...)`, which ignores `--holdout_config`:
+
+- when the checkpoint's action width fits the default roster's holdout (§105: width 8), it
+  evaluated on `environments/city_5_holdout`: grid4x4, `grid4x4_1.rou.xml`, **2 s yellow**;
+- otherwise (§113: ingolstadt21's width) it fell back to a *training* city of that roster.
+
+**Consequence for §105/§105b.** Fine-tuning itself ran on the intended network at 3 s (training
+variants are built from `--holdout_config`), but every reported zero-shot and adapted number was
+evaluated on grid4x4 at **2 s** yellow, not on the rescofull 3 s holdout. Zero-shot and adapted
+were measured identically, so the reversal is a valid internal comparison and stands; what was
+wrong is the stated provenance ("evaluated at 3 s"). Paper corrected (Analysis text and
+`tab:config` row now "3/2 s, no"). The §105 checkpoints cannot be re-evaluated: both batches
+wrote into one shared directory (§105b). A clean re-run is possible with the fixed script.
+
+**Fix.** The evaluator is now a `HoldoutEvaluator` built from `--holdout_config` (same
+construction as `eval_ours.py --config`). §113 was stopped after about 20 minutes, before any
+training, cleaned and relaunched with the fix; its table is evaluated separately with
+`eval_ours.py` anyway.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit

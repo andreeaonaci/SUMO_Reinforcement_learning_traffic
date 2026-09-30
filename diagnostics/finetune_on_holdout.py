@@ -306,9 +306,20 @@ def main():
                 start_state[k] = args.shrink_alpha * v + noise
 
     # --- 2. Zero-shot baseline on the REAL holdout traffic -------------
-    real_evaluator = make_holdout_evaluator(
-        "environments", (arch["own_dim"], arch["neighbor_dim"], k_max), arch["action_dim"],
-        episodes=args.eval_episodes,
+    # Evaluate on the network given by --holdout_config. This used to call
+    # make_holdout_evaluator("environments", ...), which ignores --holdout_config:
+    # it evaluated on environments/city_5_holdout (grid4x4 at the simulator's 2 s
+    # yellow) whenever the action width fit, and otherwise fell back to a training
+    # city of that roster (fidings sec 113b).
+    from environments.federated_env import ActionMaskPadder
+    from federated.evaluator import HoldoutEvaluator
+
+    def _real_builder(cfg=real_cfg, width=arch["action_dim"]):
+        return ActionMaskPadder(build_federated_env(cfg), width)
+
+    real_evaluator = HoldoutEvaluator(
+        env_builder=_real_builder, episodes=args.eval_episodes, eval_seed_base=12345,
+        eval_city_name=os.path.basename(os.path.dirname(os.path.abspath(args.holdout_config))),
     )
     if real_evaluator is None:
         raise RuntimeError("Could not construct the real-holdout evaluator.")
