@@ -12,6 +12,10 @@ set -u
 cd "$(dirname "$0")/.."
 export SUMO_HOME=${SUMO_HOME:-/usr/share/sumo}
 export PYTHONPATH="$SUMO_HOME/tools:${PYTHONPATH:-}"
+# One compute thread per process: PyTorch otherwise starts several per process, and six
+# concurrent jobs oversubscribed 12 cores (load 26), slowing every job down.
+export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
+export PYTHONUNBUFFERED=1
 M=/mnt/c/users/Deea/SUMO_2/SUMO_Reinforcement_learning_traffic/SUMO_Reinforcement_learning_traffic/results
 MAX_CONCURRENT=${MAX_CONCURRENT:-6}
 NETS=${*:-"ingolstadt21 cologne8 cologne1"}
