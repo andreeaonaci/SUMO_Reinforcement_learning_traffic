@@ -8594,6 +8594,41 @@ completion and above max pressure on delay: **adaptation on synthetic demand doe
 ingolstadt21 gap.** Caveat as set in advance: one route file repeated E times; `--n_variants` > 1
 not tried. Paper and side: one sentence each after `tab:unseen_ft`, no new table.
 
+## 114. TransferLight code check (2026-09-30): feasible as a baseline, but only the thesis version exists
+
+Fine-tuning on ingolstadt21 closed by the user after §113e. Next target (user's call): the
+TransferLight comparison the paper's Limitations admits is missing. Checked the code, no compute.
+
+- **Paper** (arXiv:2412.09719, Schmidt, Dreyer, Hashimi, Stober; AAAI workshop MALTA): says "our
+  open-sourced code" but gives no URL. **Official repo `johSchm/TransferLight` is EMPTY** — a
+  106-byte README, created 2024-12-23, nothing else.
+- **`franky3er/TransferLight`** (Frank Dreyer, the paper's 2nd author) = his MASTER'S THESIS code,
+  last commit 2024-06-24 (`8833665482`). Complete: training, testing, domain-randomization
+  generator, **released checkpoints** (`results/TransferLight-{DQN,A2C}-random/checkpoints/`,
+  every 100 steps to 2100, plus `best.pt`; one training run each, so no seed variance), and CSV
+  test results on arterial/cologne3/cologne8/ingolstadt7/random scenarios. **NO LICENSE** — same
+  rule as Braun: download to `/home/deea/external/`, import through adapters, never copy into repo.
+- **It is NOT the workshop paper's method.** The paper adds a log-distance reward, a hierarchical
+  heterogeneous directed GNN and state-transition priors; the thesis has message passing on an
+  intersection graph + domain randomization. Any comparison must be labelled "TransferLight, thesis
+  implementation [Dreyer 2023]", and the thesis needs its own verified citation.
+- **Action space is comparable to ours**: it keeps the network's own program — green phases =
+  non-yellow, non-all-red phases of the tlLogic (`src/rl/environments.py` l.138-147,
+  `src/sumo/net.py::get_phases`). Unlike Braun, no synthesized phase sets.
+- **Timing differs**: 10 s action, 3 s yellow + 2 s all-red (`src/params.py`). Evaluate at its
+  native timing and say so, as for Braun.
+- **Environment**: py3.10, torch 1.13, pyg 2.1 (+scatter/sparse/cluster), SUMO/libsumo/traci
+  1.15. Local: SUMO 1.27, torch 2.12, py3.13, no pyg — needs its own venv (like `bpy.sh`).
+- **Overlap**: it trains only on random synthetic networks, so ALL RESCO scenarios are zero-shot
+  for it — including cologne3/ingolstadt7, which are training cities for us. Clean zero-shot
+  comparison points for both: grid4x4 holdout, cologne1, cologne8, ingolstadt21.
+
+**Plan if approved:** (1) pin commit `8833665482` as a tarball in `/home/deea/external/`; (2) venv
+with its pinned deps (CPU torch); (3) adapter that runs `best.pt` (DQN and A2C) on our scenario
+configs and writes tripinfo -> `baselines/braun/trip_metrics.py` metrics; (4) optional: retrain
+6 seeds with its own code for variance (2000 training steps each); (5) ask the authors for the
+workshop-paper code (user action).
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
