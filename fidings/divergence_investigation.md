@@ -8395,6 +8395,32 @@ method on delay everywhere, and his learned policy stays below his own max press
 §110 unchanged (throughput is his metric; his own-phase arm is not RESCO-comparable; on cologne3
 he completes more traffic than ours).
 
+## 112. Unseen-network test of the trained checkpoints (launched 2026-09-30)
+
+**Question.** Do the already trained `environments_rescofull` checkpoints transfer beyond the
+one holdout (`grid4x4`) they were selected against? Evaluation only, no training.
+
+**Networks** (`environments_unseen/`, RESCO evaluation window, 3 s yellow, otherwise the
+rescofull holdout config). Overlap with the training networks was checked by traffic-light
+ID and by position in the shared projection, since our vendored cologne3 had junctions renamed:
+
+| network | signals | green phases | overlap with training |
+|---|---:|---|---|
+| `cologne1` | 1 | 6 | none, nearest cologne3 signal 685 m |
+| `cologne8` | 8 | 2 to 6 | none, about 4.4 to 5.7 km from cologne3 |
+| `ingolstadt21` | 21 | 2 to 6 | 7 coincide with ingolstadt7 signals, 14 new |
+| `grid_{3x3,5x5,6x6}_drop20`, `grid_4x4_drop30` | varies | 2 to 4 | synthetic, never in rescofull training |
+| `ingolstadt1` | 1 | 4 | **excluded**: its only signal is an ingolstadt7 training signal |
+
+6-phase intersections exceed the training maximum (5), so the indexed head has untrained
+rows there as well as the collision.
+
+**Controllers.** The six §100 phase-relational checkpoints and the six indexed ones (final
+round), max pressure, fixed time; 5 episodes, eval seed 12345; `baselines/braun/eval_ours.py`
+(new `--config` option, otherwise unchanged) so every row uses the paper's trip pipeline.
+Run: `bash analyse/run_unseen_eval.sh <network>...` (skip-or-resume). Caveat stated up front:
+ingolstadt21 is only partly unseen and must be reported as such.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit
