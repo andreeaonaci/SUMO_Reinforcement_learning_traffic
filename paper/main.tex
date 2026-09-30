@@ -747,7 +747,12 @@ delay falls from 130.7 to 119.2\,s on five of six seeds and completion rises fro
 82.2\%, still below max pressure and fixed time. On \texttt{cologne8} nothing moves. On
 \texttt{cologne1}, where the zero-shot policy is already close to max pressure, one episode
 makes it worse: four of six seeds lose delay, and one seed collapses to 108.5\,s and 63.0\%
-completion, which accounts for most of the drop in the mean.
+completion, which accounts for most of the drop in the mean. Longer adaptation on
+\texttt{ingolstadt21}, three and ten episodes on the same synthetic demand, gives no further
+gain: delay 135.8 and 118.6\,s, completion 83.4 and 83.9\%, and no difference from one episode
+exceeds $|\Delta|/\mathrm{SE}=1.05$ on any measure. Completion after ten episodes exceeds the
+zero-shot value by 2.11 standard errors (five of six seeds), one of nine such tests, and every
+dose remains below max pressure and fixed time in completion.
 
 \begin{table*}[t]
 \caption{Zero-shot against one-episode fine-tuning on the unseen RESCO networks of

@@ -8567,6 +8567,33 @@ A reversal at E=10 would say synthetic-demand adaptation itself is the limit, no
 **Caveat set in advance.** One route file repeated E times: E=10 may overfit that single demand
 draw. If E=10 reverses, rerun with `--n_variants` > 1 before reading it as a dose effect.
 
+## 113e. Dose-response result: more episodes do NOT help on ingolstadt21 — gain saturates after one
+
+**2026-09-30.** All 12 runs exit 0, no evaluation fallback, eps_decay 140.7 (E=3) and 469.0
+(E=10), exactly 3x and 10x §113c's 46.9. Six seeds, paired by seed against §112b's zero-shot.
+
+| E (episodes) | delay s | completion | wait s | vs zero-shot, \|diff\|/SE (seeds improved) |
+|---|---|---|---|---|
+| 0 (zero-shot) | 130.7 | 77.6% | 76.6 | — |
+| 1 (§113c) | 119.2 | 82.2% | 67.7 | delay 1.37 (5/6), compl 1.05 (4/6), wait 1.19 (4/6) |
+| 3 | 135.8 | 83.4% | 81.6 | delay 0.31 (3/6), compl 1.46 (4/6), wait 0.39 (3/6) |
+| 10 | 118.6 | 83.9% | 65.6 | delay 1.20 (5/6), **compl 2.11 (5/6)**, wait 1.42 (4/6) |
+| max pressure | 86.0 | 89.0% | 48.2 | |
+| fixed time | 137.1 | 93.8% | | |
+
+**Between doses nothing differs:** E=10 vs E=1 is 0.06 (delay) / 0.41 (completion) / 0.26 (wait);
+E=3 vs E=1 is 1.01 / 0.24 / 1.05. **Reading: fine-tuning buys about +5 points of completion and
+up to ~12 s of delay once, and more episodes on the same demand add nothing.** E=3 is the noisiest
+arm (delay sd 37.4 vs 15.1 and 20.5): two seeds reach max-pressure-level delay (seed 7: 84.1 s at
+88.7% completion; seed 3: 90.6 s but 66.0%), three get worse than zero-shot. Variance, not a dose.
+
+**The one |diff|/SE above 2** (E=10 completion vs zero-shot, 2.11) is one of nine
+dose x metric tests and does not differ from E=1 — do not cite it alone as "ten episodes
+significantly improves completion". Every arm stays below max pressure and fixed time on
+completion and above max pressure on delay: **adaptation on synthetic demand does not close the
+ingolstadt21 gap.** Caveat as set in advance: one route file repeated E times; `--n_variants` > 1
+not tried. Paper and side: one sentence each after `tab:unseen_ft`, no new table.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit

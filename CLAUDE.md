@@ -270,6 +270,7 @@ scenario, and it is not a novel architecture — see the claim ledger.
 | 109 | **beats `max_pressure` on WAITING at 3 s benchmark timing, 6/6 seeds (§109b: TIED on delay, 41.4 vs 40.2 s)** (98.9% vs 99.2%; wait 0.26 s vs 2.83 s). References on the 3 s holdout: mp -0.380, ft -2.730. Previously UNMEASURED at this timing. Indexed completes only 16-20% (gridlock) | **6 seeds** |
 | 112b | **unseen RESCO networks, zero-shot**: phase-relational ~98% completion on cologne1/cologne8 vs indexed ~62%; ties `max_pressure` delay on cologne8 (waiting lower 6/6); ingolstadt21 (21 signals) is the limit, 77.6% vs mp 89.0% | **6 seeds** |
 | 113c | **one-episode fine-tune on those networks: nothing significant**; helps ingolstadt21 (delay 5/6), neutral cologne8, hurts cologne1 (one collapsed seed) — same deficit-recovery ordering as §105b | 6 seeds, screen |
+| 113e | **fine-tune dose on ingolstadt21 (1/3/10 episodes): no dose-response** — gain saturates after 1 episode (~+5 pts completion); doses indistinguishable (≤1.05 SE); all stay below mp/fixed time on completion | 6 seeds |
 | 108 | **training-topology diversity does NOT help — CONFIRMED (§108b).** §104's saturation fixed on the congestion holdout; 0.58/0.20/1.60, div nominally *worse* on all three, ≤2/6 seeds favour it; detectable effect 0.049 vs a 1.082 range. "Hurts" is NOT claimable (crosses 2 only if base's worst seed is dropped) | **6 seeds** |
 
 ### The claim ledger — what can and cannot be said
