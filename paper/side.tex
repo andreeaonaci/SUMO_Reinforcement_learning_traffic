@@ -442,6 +442,39 @@ case: every seed completes between 70.6\% and 85.3\% of trips, below max pressur
 time. On four synthetic irregular grids the pattern matches cologne1: 96 to 98\% completion for
 our policy, below 13\% for the indexed head, and slightly lower delay for max pressure.
 
+We then fine-tuned each of the six models for one training episode on each real
+network and evaluated them again in the same way. The training traffic is synthetic, with
+the same number of departures per hour as the evaluation hour; the evaluation routes are
+never used for training. Table~\ref{tab:unseen_ft} shows the result.
+
+\begin{table*}[t]
+\centering\footnotesize
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{|l|r|r|r|r|r|r|}
+\hline
+ & \multicolumn{2}{c|}{cologne1} & \multicolumn{2}{c|}{cologne8} & \multicolumn{2}{c|}{ingolstadt21$^\dagger$} \\ \hline
+Controller & Delay (s) & Compl. & Delay (s) & Compl. & Delay (s) & Compl. \\ \hline
+Ours, zero-shot & 26.2 & 97.8\% & \textbf{27.5} & \textbf{98.2\%} & 130.7 & 77.6\% \\ \hline
+Ours, fine-tuned (1 episode) & 43.3 & 93.2\% & 28.2 & \textbf{98.2\%} & 119.2 & 82.2\% \\ \hline
+Max pressure & \textbf{20.9} & 99.1\% & 27.8 & 98.0\% & \textbf{86.0} & 89.0\% \\ \hline
+Fixed time & 38.3 & \textbf{99.2\%} & 49.2 & 97.5\% & 137.1 & \textbf{93.8\%} \\ \hline
+$|\Delta|/$SE (seeds improved) & 1.40 (2/6) & 0.82 (3/6) & 0.71 (3/6) & 0.35 (3/6) & 1.37 (5/6) & 1.05 (4/6) \\ \hline
+\end{tabular}
+\caption{Zero-shot against one episode of fine-tuning on the unseen RESCO networks. Bold marks
+the best value in each column. Learned rows: mean of six seeds, paired by seed. The last row
+compares the two learned rows. $^\dagger$21 signals, more than any training network (at most
+16), and 7 of them are also in ingolstadt7.}
+\label{tab:unseen_ft}
+\end{table*}
+
+None of the changes is significant, but the direction is clear. On ingolstadt21, where the
+model is weakest, one episode lowers delay on five of six seeds (130.7 to 119.2\,s) and raises
+completion from 77.6\% to 82.2\%, still below max pressure. On cologne8 nothing changes. On
+cologne1, where the model is already close to max pressure, fine-tuning makes it worse; one
+seed drops to 63\% completion, which explains most of the change in the mean. This matches
+what we saw on the holdout: fine-tuning helps where the starting policy is poor and can harm
+a policy that is already good.
+
 \subsection{Earlier interventions, revisited}
 Before the cause was found, 41 interventions were tested with the indexed head: other
 aggregation rules and clustering, larger architectures, other algorithms (PPO, QR-DQN, CQL,

@@ -8504,6 +8504,46 @@ construction as `eval_ours.py --config`). §113 was stopped after about 20 minut
 training, cleaned and relaunched with the fix; its table is evaluated separately with
 `eval_ours.py` anyway.
 
+## 113c. One-episode fine-tune on unseen real networks: helps where weak, hurts where strong — nothing significant
+
+**2026-09-30.** All 18 runs (3 networks x 6 seeds) exit 0. `python analyse/unseen_ft_table.py`
+-> `results/unseen_ft/summary.json`. Paired by seed against §112b's zero-shot result, same
+`eval_ours.py` 5-episode protocol, 3 s yellow.
+
+| network | metric | zero-shot | fine-tuned | \|diff\|/SE | seeds improved |
+|---|---|---|---|---|---|
+| cologne1 | delay s | 26.2 | 43.3 | 1.40 | 2/6 |
+| cologne1 | completion | 97.8% | 93.2% | 0.82 | 3/6 |
+| cologne1 | wait s | 11.7 | 25.6 | 1.40 | 2/6 |
+| cologne8 | delay s | 27.5 | 28.2 | 0.71 | 3/6 |
+| cologne8 | completion | 98.2% | 98.2% | 0.35 | 3/6 |
+| cologne8 | wait s | 9.5 | 9.9 | 0.69 | 2/6 |
+| ingolstadt21 | delay s | 130.7 | 119.2 | 1.37 | 5/6 |
+| ingolstadt21 | completion | 77.6% | 82.2% | 1.05 | 4/6 |
+| ingolstadt21 | wait s | 76.6 | 67.7 | 1.19 | 4/6 |
+
+References (deterministic): max pressure 20.9/99.1%, 27.8/98.0%, 86.0/89.0%; fixed time
+38.3/99.2%, 49.2/97.5%, 137.1/93.8%.
+
+**Reading.** None reaches 2. Direction matches §105b's deficit-recovery ordering: helps on
+ingolstadt21 (weakest zero-shot; delay down on 5/6 seeds), still well below max pressure and
+fixed time on completion; neutral on cologne8; hurts on cologne1 (already near max pressure).
+**cologne1's mean is dominated by one seed**: seed 7 collapses to 108.5 s / 63.0% completion;
+the other five move -5 to +14 s with completion unchanged (~99.2%). ingolstadt21 seed 11 is the
+reverse outlier (completion 71.8 -> 64.1%). One episode is a screen of adaptation, not a
+dose-response.
+
+**Run notes.** (1) cologne8 seeds 11 and 21 first failed with FileNotFoundError on the temporary
+route file: concurrent seeds raced on generating the shared `generated_random_r2046` routes.
+Rerun after the file existed; all generated route files verified intact. (2) Synthetic cologne8
+realised 1902 veh/h after randomTrips' route validation dropped unroutable trips (target 2046);
+cologne1 2015 and ingolstadt21 4281 as targeted. (3) `OMP_NUM_THREADS=1` etc. in the runner: without it
+six jobs oversubscribed 12 cores (load 26).
+
+**Paper.** `tab:unseen_ft` added after `tab:unseen` in `paper/main.tex` §VI-G (with a
+`tab:config` row, internal only, 3 s) and as `tab:unseen_ft` in `paper/side.tex`; one sentence
+linking it from the fine-tuning paragraph in Analysis.
+
 ## Open questions / next steps
 
 **RESTORED 2026-09-05: this section's own header was accidentally deleted by an earlier edit

@@ -268,6 +268,8 @@ scenario, and it is not a novel architecture — see the claim ledger.
 | 107 | **pre-submission audit: a FABRICATED citation, rule 1 broken in the abstract, and the concurrent work above.** Numbers themselves verified sound | re-derived from raw |
 | 105b | **fine-tune reversal CONFIRMED at 6 seeds**: 1 round -0.123→-0.250 (4.44, 0/6); 2 rounds →-0.205 (3.75, 1/6, +0.02). The one improver is the WORST zero-shot seed; r(zero-shot, change) = -0.91 in the 2-round arm — deficit recovery visible inside one experiment | **6 seeds** |
 | 109 | **beats `max_pressure` on WAITING at 3 s benchmark timing, 6/6 seeds (§109b: TIED on delay, 41.4 vs 40.2 s)** (98.9% vs 99.2%; wait 0.26 s vs 2.83 s). References on the 3 s holdout: mp -0.380, ft -2.730. Previously UNMEASURED at this timing. Indexed completes only 16-20% (gridlock) | **6 seeds** |
+| 112b | **unseen RESCO networks, zero-shot**: phase-relational ~98% completion on cologne1/cologne8 vs indexed ~62%; ties `max_pressure` delay on cologne8 (waiting lower 6/6); ingolstadt21 (21 signals) is the limit, 77.6% vs mp 89.0% | **6 seeds** |
+| 113c | **one-episode fine-tune on those networks: nothing significant**; helps ingolstadt21 (delay 5/6), neutral cologne8, hurts cologne1 (one collapsed seed) — same deficit-recovery ordering as §105b | 6 seeds, screen |
 | 108 | **training-topology diversity does NOT help — CONFIRMED (§108b).** §104's saturation fixed on the congestion holdout; 0.58/0.20/1.60, div nominally *worse* on all three, ≤2/6 seeds favour it; detectable effect 0.049 vs a 1.082 range. "Hurts" is NOT claimable (crosses 2 only if base's worst seed is dropped) | **6 seeds** |
 
 ### The claim ledger — what can and cannot be said
@@ -321,9 +323,11 @@ hurts); in-distribution competitiveness with `max_pressure`; any absolute Ingols
 
 ### THE PAPER EXISTS — `paper/main.tex`, and it is the current deliverable
 
-A complete IEEEtran draft, **8 pages** (restructured 2026-09-30 into standard IEEE order:
+A complete IEEEtran draft, **9 pages** (restructured 2026-09-30 into standard IEEE order:
 Introduction, Related Work, Problem Formulation, Method, Experimental Setup incl. Baselines and
-Metrics, Results incl. §VI-F comparison with Braun at six seeds (`tab:braun`), Analysis incl. the
+Metrics, Results incl. §VI-F comparison with Braun at six seeds (`tab:braun`), §VI-G unseen RESCO networks
+cologne1/cologne8/ingolstadt21 zero-shot (`tab:unseen`, §112b) and one-episode fine-tune
+(`tab:unseen_ft`, §113c), Analysis incl. the
 re-evaluation of the 41 interventions, Discussion and Limitations, Conclusion). The narrative
 "Experimental Programme" / "Intervention Corpus" chapters were removed; their facts live in
 Analysis. Keep new text in objective IEEE register, no story telling. 31 verified references,
