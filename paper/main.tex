@@ -57,26 +57,24 @@ Traffic Signal Control Across Heterogeneous\\Intersection Topologies}
 \maketitle
 
 \begin{abstract}
-A single reinforcement learning policy that controls intersections of different
-geometry must output an action vector of fixed width. The common construction binds
-each output row to a fixed phase index and masks the rows an intersection does not
-have. We show that this positional indexing is the main obstacle to zero-shot transfer
-across intersection topologies: each network defines its own phase ordering, so one
-output row is trained on unrelated traffic movements. A control experiment in which
-every selectable row is fully trained confirms that the indexed policy still fails. We
-propose a phase-relational readout that scores each candidate phase from a
-ten-dimensional descriptor derived automatically from the simulator's connection
-table, requiring no per-intersection configuration and preserving each network's
-native signal program. We train with federated learning on three networks from the
-RESCO traffic signal control benchmark and test on an unseen network. In all five test
-configurations (six seeds each) the readout beats the indexed one on every seed: where
-the indexed policy gridlocks, completing 16--20\% of trips, the readout completes
-98.9\%. At the benchmark's signal timing it reduces mean waiting time relative to max
-pressure by 18\% (18.8 vs.\ 22.8\,s) on every seed, at comparable throughput and
-average delay, and it achieves lower average delay than the released code of a
-concurrent graph-based method on all three evaluated networks. Re-evaluating the two
-most effective of 41 modifications we had tested with the indexed readout reverses
-both, indicating that those earlier results largely reflected the readout's limitation.
+We want one reinforcement learning policy that can control any intersection, even unseen
+ones. The usual approach gives each policy output a fixed phase number and hides unused
+outputs. This breaks across networks, because each network numbers its phases in its own
+order: output 3 can mean one movement in one network and a different movement in
+another, so the policy learns a mix of unrelated actions. We replace the phase numbers
+with a readout that scores each phase by what it does. Each phase is described by ten
+features of the lanes it turns green, such as their queues, waiting times and turn
+directions, read automatically from the simulator. No manual setup is needed per
+intersection, and every network keeps its own signal plan. We train with federated
+learning on three networks from the RESCO benchmark and test on a network not used in
+training. There, the numbered policy gridlocks and completes only 16--20\% of trips,
+while ours completes 98.9\%; ours wins on every seed in five test setups. It also cuts
+waiting time by 18\% compared with max pressure, with similar delay and throughput, and
+has lower delay than a recent graph-based method on three networks. Two results show
+that the phase numbering was the real problem. First, the numbered policy still fails
+when every output it can use is fully trained. Second, the two best of 41 earlier
+improvements tested with the numbered policy make results worse with ours, which
+suggests they were only working around it.
 \end{abstract}
 
 \begin{IEEEkeywords}
