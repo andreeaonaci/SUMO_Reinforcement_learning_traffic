@@ -60,21 +60,21 @@ Traffic Signal Control Across Heterogeneous\\Intersection Topologies}
 We want one reinforcement learning policy that controls any intersection, even unseen
 ones. The usual approach gives each policy output a fixed phase number and hides unused
 outputs. This breaks across networks because each network orders its phases differently:
-output 3 can mean different movements in different networks, so the policy learns a mix
-of unrelated actions. We replace the phase numbers with a readout that scores each phase
-by what it does. Ten features of the lanes a phase turns green, such as queues, waiting
-times and turn directions, are read automatically from the simulator. No manual setup is
+output 3 can mean different movements in different networks, so one output learns
+unrelated actions. We replace the phase numbers with a readout that scores each phase by
+what it does, using ten features of the lanes it turns green, such as queues, waiting
+times and turn directions, read automatically from the simulator. No manual setup is
 needed per intersection, and every network keeps its own signal plan. We train with
-federated learning on three networks from the RESCO benchmark and test on a fourth,
-unseen network. There, the numbered policy gridlocks, completing only 16--20\% of trips,
-while ours completes 98.9\%, winning on every seed in five test setups. It also cuts
-waiting time by 18\% compared with max pressure, with similar delay and throughput, and
-has 2.4 to 7.1 times lower average delay than a recent graph-based method on three
-networks. Two results show the numbering was the cause. First, fully training every
-output the numbered policy can use improves its reward by only 3\%, and it still
-gridlocks. Second, the two best of 41 earlier improvements tested with the numbered
-policy hurt ours: a training curriculum makes the reward 25 times worse, and fine-tuning
-on the test network raises waiting time from 0.29 to 0.67\,s.
+federated learning on three networks from the RESCO benchmark and test on unseen
+networks without retraining. On the main test network, the policy cuts waiting time by
+18\% compared with max pressure, at similar delay and throughput. Against a recent
+graph-based transfer method, it has 2.4 to 7.1 times lower average delay on three
+networks. On three further unseen RESCO networks, it has 5--44\% lower delay than fixed-
+time control and matches max pressure on the largest Cologne network with 34\% lower
+waiting time, but trails max pressure on a 21-intersection network. On a training
+network, it matches the published delay of RESCO's IPPO and IDQN with a tenth of their
+training budget. A control experiment shows that the numbering itself, not undertrained
+outputs, causes the old approach to fail.
 \end{abstract}
 
 \begin{IEEEkeywords}
