@@ -58,29 +58,30 @@ Traffic Signal Control Across Heterogeneous\\Intersection Topologies}
 
 \begin{abstract}
 A single reinforcement learning policy that controls intersections of different
-geometry must produce an action vector of fixed width. The common construction binds
-output row $k$ to phase index $k$ and masks rows that do not exist at a given
-intersection. This paper shows that this positional indexing is the main obstacle to
-zero-shot transfer across intersection topologies: phase orderings are defined
-independently for each network, so one output row is trained on unrelated movements.
-A control experiment in which every selectable row is fully trained shows that the
-indexed policy still fails ($-9028.88$ against $-9296.84$ with untrained rows present).
-A phase-relational readout is proposed that scores each candidate phase from a
-ten-dimensional descriptor derived automatically from the simulator's connection table,
-so that no per-intersection configuration is required and the network's own signal
-program is kept. Trained with federated learning on three RESCO networks and evaluated
-on an unseen network, the readout outperforms the indexed one by four orders of
-magnitude on five configurations (six seeds each). At the benchmark's signal timing it
-achieves lower waiting time than max pressure on every seed at equal throughput, with
-equal average delay, and it outperforms the released implementation of a concurrent
-method on all three evaluated networks. Re-running the two strongest of 41 earlier
-interventions with the new readout reverses both, which indicates that results obtained
-with the indexed readout mainly reflected its limitation.
+geometry must output an action vector of fixed width. The common construction binds
+each output row to a fixed phase index and masks the rows an intersection does not
+have. We show that this positional indexing is the main obstacle to zero-shot transfer
+across intersection topologies: each network defines its own phase ordering, so one
+output row is trained on unrelated traffic movements. A control experiment in which
+every selectable row is fully trained confirms that the indexed policy still fails. We
+propose a phase-relational readout that scores each candidate phase from a
+ten-dimensional descriptor derived automatically from the simulator's connection
+table, requiring no per-intersection configuration and preserving each network's
+native signal program. We train with federated learning on three networks from the
+RESCO traffic signal control benchmark and test on an unseen network. In all five test
+configurations (six seeds each) the readout beats the indexed one on every seed: where
+the indexed policy gridlocks, completing 16--20\% of trips, the readout completes
+98.9\%. At the benchmark's signal timing it reduces mean waiting time relative to max
+pressure by 18\% (18.8 vs.\ 22.8\,s) on every seed, at comparable throughput and
+average delay, and it achieves lower average delay than the released code of a
+concurrent graph-based method on all three evaluated networks. Re-evaluating the two
+most effective of 41 modifications we had tested with the indexed readout reverses
+both, indicating that those earlier results largely reflected the readout's limitation.
 \end{abstract}
 
 \begin{IEEEkeywords}
-traffic signal control, federated reinforcement learning, generalisation,
-action representation, evaluation methodology
+traffic signal control, federated reinforcement learning, zero-shot transfer,
+generalization, intersection topology, action representation, evaluation methodology
 \end{IEEEkeywords}
 
 % =============================================================================
@@ -125,7 +126,7 @@ This paper makes the following contributions.
       (Section~\ref{sec:inventory}), in which the two strongest reverse, and a record of
       six evaluation artifacts (Section~\ref{sec:artifacts}).
 \end{enumerate}
-Section~\ref{sec:related} reviews related work, Section~\ref{sec:problem} formalises the
+Section~\ref{sec:related} reviews related work, Section~\ref{sec:problem} formalizes the
 problem, Section~\ref{sec:method} describes the method, Section~\ref{sec:setup} the
 experimental setup, Section~\ref{sec:results} the results and
 Section~\ref{sec:analysis} further analysis. Section~\ref{sec:discussion} discusses
@@ -148,7 +149,7 @@ FRAP~\cite{frap} represents a phase as a pair of competing movements and scores 
 ordered pairs through a competition mask, which gives invariance to flip and rotation.
 MPLight~\cite{mplight} uses FRAP as backbone with pressure as state and reward, and
 scales to thousands of signals. AttendLight~\cite{attendlight} applies attention over
-lanes and phases and generalises when similar configurations are present in training.
+lanes and phases and generalizes when similar configurations are present in training.
 FRAP and MPLight require, for every scenario and signal, a table mapping local phase
 indices to a global movement vocabulary; RESCO's documentation states that movements
 ``must be remapped to correspond to the same action in each agent'', and its
@@ -156,12 +157,12 @@ indices to a global movement vocabulary; RESCO's documentation states that movem
 descriptor of Section~\ref{sec:descriptors} is derived at run time instead. This is a
 difference in capability, not a performance claim.
 
-\subsection{Transfer and generalisation}
+\subsection{Transfer and generalization}
 MetaLight~\cite{metalight} adapts to new intersections by meta-learning and therefore
 assumes gradient steps on the target. X-Light~\cite{xlight} learns across cities with a
 hierarchical transformer. Inductive graph formulations~\cite{igrl} and
 TransferLight~\cite{transferlight} target deployment on unseen networks, the latter
-through domain randomisation over generated road networks. Concurrently, Braun~\cite{graphiface}
+through domain randomization over generated road networks. Concurrently, Braun~\cite{graphiface}
 scores individual movements with a shared graph network and maps the scores to each
 junction's phase set through an incidence matrix, so parameter shapes are independent
 of the number of phases. That method is trained with a policy-gradient algorithm and
@@ -176,14 +177,14 @@ meta-aggregation~\cite{reptile} are among the re-evaluated interventions. Federa
 formulations of signal control~\cite{hfrl} address privacy and scale, including
 variants that cluster intersections before averaging. Ordered client curricula were
 studied by Vahidian \emph{et al.}~\cite{curricula}; the curriculum arms of
-Table~\ref{tab:curriculum} follow that construction, and only their behaviour under the
+Table~\ref{tab:curriculum} follow that construction, and only their behavior under the
 corrected readout is reported here.
 
 % =============================================================================
 \section{Problem Formulation}\label{sec:problem}
 
 Let $\mathcal{C}$ be a set of road networks. Network $c\in\mathcal{C}$ contains
-signalised intersections $i\in\mathcal{I}_c$. Each intersection is observed every
+signalized intersections $i\in\mathcal{I}_c$. Each intersection is observed every
 $\Delta t=5$\,s with local observation $o_i$, action set $\mathcal{A}_i$ of size $A_i$
 equal to its number of green phases, and reward $r_i$ given by the negative change in
 cumulative waiting time over its incoming lanes.
@@ -258,7 +259,7 @@ receives no city identifier.
    congestion so lane identity cannot leak};
 \node[blk, anchor=north west, text width=39mm] at (45,0)
   {\textbf{NeighborGraphBuilder}\\[2pt]
-   $K$-hop neighbours from the network graph, $K_{\max}=8$; three summary scalars
+   $K$-hop neighbors from the network graph, $K_{\max}=8$; three summary scalars
    and a hop distance each};
 \node[blkacc, anchor=north west, text width=84mm] at (0,-30)
   {\textcolor{acc}{\textbf{PhaseFeatureExtractor}}\\[2pt]
@@ -286,16 +287,16 @@ $a$ gives right of way, obtained by intersecting the phase's state string with t
 controlled-links table, and $L^{\mathrm{out}}_i(a)$ the downstream lanes of those
 movements. The descriptor $\phi_i(a)\in\mathbb{R}^{10}$ contains, in order: phase
 pressure $\mathrm{clip}\big((q_{\mathrm{in}}-q_{\mathrm{out}})/10,\,\pm5\big)$;
-normalised queue; normalised accumulated waiting time; mean occupancy; lane count; an
+normalized queue; normalized accumulated waiting time; mean occupancy; lane count; an
 indicator that $a$ is currently displayed; the time elapsed in that phase if so; and the
 fractions of green lanes whose movement is straight, left and right. Every entry is
-computable at any signalised intersection from the simulator alone, and the last three
+computable at any signalized intersection from the simulator alone, and the last three
 entries describe what a phase does in terms that recur across networks.
 
 \subsection{Phase-relational \texorpdfstring{$Q$}{Q}-function}
 Let $h_\theta(o_i)\in\mathbb{R}^{d}$, $d=128$, be the state embedding of the shared
-trunk: a lane encoder, a neighbour encoder with hop embeddings, masked multi-head
-attention with the neighbour mask as key-padding mask, and a fusion MLP. The proposed
+trunk: a lane encoder, a neighbor encoder with hop embeddings, masked multi-head
+attention with the neighbor mask as key-padding mask, and a fusion MLP. The proposed
 readout replaces \eqref{eq:indexed} with
 \begin{equation}
 Q_\theta(o_i)[a] \;=\; f_\psi\!\big([\,h_\theta(o_i)\,\|\,\phi_i(a)\,]\big),
@@ -319,7 +320,7 @@ pressure and cannot represent it. Fig.~\ref{fig:readouts} compares the readouts.
 \begin{tikzpicture}[x=0.92mm,y=0.92mm]
 \node[sft, anchor=north west, text width=84mm] at (0,0)
   {\textbf{Shared trunk}\; $h_\theta(o_i)\in\mathbb{R}^{128}$\\[2pt]
-   lane encoder, neighbour encoder $+$ hop embedding, masked attention, fusion
+   lane encoder, neighbor encoder $+$ hop embedding, masked attention, fusion
    MLP. \emph{Identical in all three arms.}};
 \draw[arfail]    (14,-15) -- (14,-22);
 \draw[aracc]     (42,-15) -- (42,-22);
@@ -354,7 +355,7 @@ is supplied here as an oracle for every network including the holdout.}
 
 \subsection{Federated training}
 Cities train in parallel worker processes, each keeping its simulator, replay buffer and
-optimiser state across rounds; only parameters are exchanged. Each round broadcasts
+optimizer state across rounds; only parameters are exchanged. Each round broadcasts
 $\theta$, trains each city for $E$ local episodes, and aggregates by sample-count
 weighting. For the indexed readout, row $k$ is averaged only over cities that use it;
 readouts without per-action rows reduce to plain averaging. The aggregate is evaluated
@@ -379,7 +380,7 @@ relative to nominal demand and max pressure doubles its waiting time.
 given as a range where it varies within a network. \textnormal{Dep.} is the number of
 vehicles departing inside the evaluation window, counted from the route file---the
 denominator for every completion rate reported later. \textnormal{Cov.} is the fraction of
-movements possessing a downstream lane inside the modelled area, used in
+movements possessing a downstream lane inside the modeled area, used in
 Section~\ref{sec:frapcov}.}
 \label{tab:networks}
 \centering\scriptsize\setlength{\tabcolsep}{4pt}
@@ -420,7 +421,7 @@ six seeds (3, 7, 11, 17, 21, 25).
 \toprule
 Quantity & Value & Quantity & Value \\
 \midrule
-$\Delta t$ & $5$\,s & Optimiser & Adam \\
+$\Delta t$ & $5$\,s & Optimizer & Adam \\
 Yellow & Table~\ref{tab:config} & Learning rate & $3\!\times\!10^{-4}$ \\
 Episode & $3600$\,s & LR decay / floor & $0.97$ / $10^{-5}$ \\
 Embedding $d$ & $128$ & Loss & Huber \\
@@ -452,7 +453,7 @@ and lower is better. Because a controller that strands traffic improves them,
 \emph{completion}, the fraction of vehicles departing in the evaluation window that
 arrive, is reported alongside every delay value. Significance is
 $|\Delta|/\mathrm{SE}$, unpaired with population standard deviation, with a threshold of
-2. Drop-one influence is checked, and three-seed results are labelled screens.
+2. Drop-one influence is checked, and three-seed results are labeled screens.
 
 \begin{table}[ht]
 \caption{Configuration provenance. Within-study comparisons hold in every row, because
@@ -514,7 +515,7 @@ $4$-phase network & $-9028.88$ & none \\
 \subsection{Zero-shot transfer}\label{sec:zeroshot}
 The phase-relational readout was evaluated on five configurations: nominal demand,
 three times demand, the four-phase holdout, benchmark signal timing, and the fully
-benchmark-exact roster. In all five, all six seeds favour it on every measure, with
+benchmark-exact roster. In all five, all six seeds favor it on every measure, with
 $|\Delta|/\mathrm{SE}$ between 23.6 and 96.7. Table~\ref{tab:zeroshot} reports the two
 configurations at the benchmark's 3\,s yellow, together with the rule-based controllers
 on the same holdout, and Fig.~\ref{fig:zeroshot} shows the per-round trajectories. The
@@ -685,7 +686,7 @@ controller on every network and phase set, so the difference is not explained by
 action space. The synthesized phase sets help max pressure on \texttt{grid4x4} (79.2
 against 90.9\,s), hurt it on \texttt{cologne3} (67.7 against 26.4\,s), and lead to
 gridlock on \texttt{ingolstadt7} (44.1\% completion). Three qualifications apply. The
-method optimises throughput, on which it is close to the rule-based controllers here
+method optimizes throughput, on which it is close to the rule-based controllers here
 (94.5 to 96.9\% completion); its original networks were built for its own pipeline; and
 its published arm uses a different action space and is therefore not comparable with
 RESCO results. On \texttt{cologne3} it completes more trips than the proposed readout
@@ -788,7 +789,7 @@ Before the readout was identified as the cause, 41 interventions were evaluated 
 indexed readout on the same rosters and criterion (Table~\ref{tab:inventory}). Thirty-two
 were null or negative, four inconclusive and five significant. Of the five, three are
 test-time procedures that do not change the learned policy, and one, fine-tuning on the
-target topology, was matched by a randomly initialised control. No change to
+target topology, was matched by a randomly initialized control. No change to
 architecture, learning algorithm, aggregation rule or loss produced a durable
 improvement. The interventions span largely independent mechanisms: ten aggregation
 variants including the removal of federation (indistinguishable from federated training,
@@ -818,13 +819,13 @@ EMA gradient-alignment weights & null & floor & Distributional QR-DQN~\cite{qrdq
 Learning-velocity novelty & null & floor & Evolution strategies & inconclusive & floor \\
 Gradient-survival weighting & null & floor & Second-order MAML~\cite{maml} & negative & floor \\
 Clustered FedAvg by action width & null & floor & \multicolumn{3}{@{}l}{\emph{Loss shaping and state}} \\
-Server momentum & negative w/ duelling & floor & $Q$-entropy regularisation & split, unresolved & floor \\
+Server momentum & negative w/ dueling & floor & $Q$-entropy regularization & split, unresolved & floor \\
 FedProx proximal term~\cite{fedprox} & no measurable effect & floor & Conservative $Q$-learning~\cite{cql} & $2.35\rightarrow1.05$ at six & floor \\
 Reptile meta-aggregation~\cite{reptile} & null ($0.82$) & floor & Ad hoc reward shaping & inconclusive & floor \\
-No federation & null ($1.78$) & floor & Pressure-normalised reward & null & floor \\
+No federation & null ($1.78$) & floor & Pressure-normalized reward & null & floor \\
 \multicolumn{3}{@{}l}{\emph{Architecture}} & Potential-based shaping~\cite{potential} & \textbf{confirmed} ($2.5$) & floor; ordering unchanged \\
-Duelling~\cite{dueling} $+$ $n$-step & not retained, true holdout & floor & Per-phase pressure in state & negative (1 seed) & superseded by $\phi_i(a)$ \\
-Neighbour attention vs.\ pooling & indistinguishable & floor & \multicolumn{3}{@{}l}{\emph{Training procedure and data}} \\
+Dueling~\cite{dueling} $+$ $n$-step & not retained, true holdout & floor & Per-phase pressure in state & negative (1 seed) & superseded by $\phi_i(a)$ \\
+Neighbor attention vs.\ pooling & indistinguishable & floor & \multicolumn{3}{@{}l}{\emph{Training procedure and data}} \\
 Masked-head aggregation & vanishes with roster size & floor & Periodic $\varepsilon$ reset & null ($0.1$--$0.2$) & floor \\
 Encoder depth, attention layers & null & floor & Replay-buffer reset on lock-in & null ($0.30$) & floor \\
 Width, BatchNorm, activation & null & floor & Self-anchoring weight reversion & inconclusive ($1.53$) & floor \\
@@ -863,7 +864,7 @@ Curriculum, as proposed & $-2.239$ & $-2.894$ & $6/6$ \\
 
 Fine-tuning on synthetic demand over the holdout topology was the largest effect with
 the indexed readout: from a zero-shot reward of $-8664.73$ to $-1092.10$
-($|\Delta|/\mathrm{SE}$ 72.78, four seeds). A randomly initialised network given the same
+($|\Delta|/\mathrm{SE}$ 72.78, four seeds). A randomly initialized network given the same
 procedure reached $-406.85$ against $-693.84$ for the pretrained one, so the gain
 reflected training on the target rather than transfer. With the phase-relational
 readout (checkpoints trained at 3\,s yellow and fine-tuned at 3\,s; the zero-shot and
@@ -880,11 +881,11 @@ ordering at 3\,s yellow: it helps where the zero-shot policy is weak and hurts w
 already strong, though no change there is significant.
 
 \subsection{Training-topology diversity}\label{sec:diversity}
-Four synthetic irregular grids, generated by removing interior signalised junctions from
+Four synthetic irregular grids, generated by removing interior signalized junctions from
 a lattice, were added to the three training networks, and evaluation used the
-triple-demand holdout. Over six seeds, no measure favours the larger roster: best round
+triple-demand holdout. Over six seeds, no measure favors the larger roster: best round
 $-0.283$ against $-0.297$ (0.58), final $-0.402$ against $-0.411$ (0.20), mean $-0.417$
-against $-0.470$ (1.60), with at most two of six seeds favouring it. The smallest
+against $-0.470$ (1.60), with at most two of six seeds favoring it. The smallest
 detectable difference was 0.049 on a range of 1.082. The larger roster is nominally worse
 on all three measures, but this does not reach significance.
 
@@ -899,7 +900,7 @@ each round from a common point. These results are based on a single group of six
 \subsection{Downstream coverage and FRAP}\label{sec:frapcov}
 FRAP transfers well but performs poorly on the training networks. Its state is
 per-movement pressure, which reduces to queue length where a movement has no downstream
-lane in the modelled area. The fraction of movements with a downstream lane follows its
+lane in the modeled area. The fraction of movements with a downstream lane follows its
 results across the four networks: 75\% on \texttt{grid4x4} and \texttt{arterial4x4},
 where it performs well, against 39\% on \texttt{ingolstadt7} and 33\% on
 \texttt{cologne3}, where it performs worst. Braun~\cite{graphiface} reports a similar
@@ -931,7 +932,7 @@ Evaluation uses one simulator and four real networks, with training budgets shor
 published practice. The policy improves waiting time, not average delay, relative to max
 pressure, and in-distribution it does not outperform max pressure on every network. The
 diversity result concerns topological diversity only. The FRAP arm is evaluated at a
-five-round checkpoint and does not characterise MPLight as published.
+five-round checkpoint and does not characterize MPLight as published.
 
 % =============================================================================
 \section{Conclusion}\label{sec:conclusion}
