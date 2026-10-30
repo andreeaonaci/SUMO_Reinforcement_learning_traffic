@@ -57,29 +57,31 @@ Traffic Signal Control Across Heterogeneous\\Intersection Topologies}
 \maketitle
 
 \begin{abstract}
-We want one reinforcement learning policy that controls any intersection, even unseen
-ones. The usual approach gives each policy output a fixed phase number and hides unused
-outputs. This breaks across networks because each network orders its phases differently:
-output 3 can mean different movements in different networks, so one output learns
-unrelated actions. We replace the phase numbers with a readout that scores each phase by
-what it does, using ten features of the lanes it turns green, such as queues, waiting
-times and turn directions, read automatically from the simulator. No manual setup is
-needed per intersection, and every network keeps its own signal plan. We train with
-federated learning on three networks from the RESCO benchmark and test on unseen
-networks without retraining. On the main test network, the policy cuts waiting time by
-18\% compared with max pressure, at similar delay and throughput. Against a recent
-graph-based transfer method, it has 2.4 to 7.1 times lower average delay on three
-networks. On three further unseen RESCO networks, it has 5--44\% lower delay than fixed-
-time control and matches max pressure on the largest Cologne network with 34\% lower
-waiting time, but trails max pressure on a 21-intersection network. On a training
-network, it matches the published delay of RESCO's IPPO and IDQN with a tenth of their
-training budget. A control experiment shows that the numbering itself, not undertrained
-outputs, causes the old approach to fail.
+Controlling unseen intersections with a single reinforcement learning policy requires an
+action representation that transfers across networks. The common approach assigns each
+policy output a fixed phase number and masks unused outputs, but each network orders its
+phases differently, so one output learns unrelated movements. A control experiment shows
+that this numbering, not undertrained outputs, causes the failure. We replace phase
+numbers with a readout that scores each phase by its effect, using ten features of the
+lanes it serves, such as queues, waiting times and turn directions, extracted
+automatically from the simulator. No per-intersection configuration is needed, and each
+network keeps its own signal plan. Trained with federated learning on three RESCO
+benchmark networks and tested without retraining on four unseen networks, the readout
+completes 98.9\% of trips on the main test network, where phase numbering gridlocks at
+16--20\%. There, it reduces waiting time by 18\% relative to max pressure at similar
+delay and throughput, and achieves 7.1 times lower average delay than a recent graph-
+based transfer method (2.4--7.1 times across three networks). On two further Cologne
+networks, it reduces delay by 32--44\% relative to fixed-time control at similar
+completion and matches max pressure on the eight-intersection one, but trails both on a
+21-intersection network. On a training network, it matches the published delay of
+RESCO's IPPO and IDQN baselines with one tenth of their training budget. These results
+indicate that phase representation, rather than undertraining, is the main barrier to
+zero-shot transfer in traffic signal control.
 \end{abstract}
 
 \begin{IEEEkeywords}
 traffic signal control, federated reinforcement learning, zero-shot transfer,
-generalization, intersection topology, action representation, evaluation methodology
+generalization, intersection topology, action representation
 \end{IEEEkeywords}
 
 % =============================================================================
@@ -458,7 +460,7 @@ $|\Delta|/\mathrm{SE}$, unpaired with population standard deviation, with a thre
 both arms of each comparison share the configuration. Only rows marked \textnormal{yes}
 may be set beside published numbers; \textnormal{internal only} marks a result at the
 benchmark's timing without a published counterpart. $^{*}$Fine-tuned at 3\,s, evaluated
-at 2\,s (Section~\ref{sec:inventory}).}
+at 2\,s (Section~\ref{sec:inventory}). $^{\dagger}$Collects rows of the tables above; each row keeps its source table's status.}
 \label{tab:config}
 \centering\scriptsize\setlength{\tabcolsep}{4pt}
 \begin{tabular}{@{}llcc@{}}
@@ -478,12 +480,72 @@ Adaptation (\S\ref{sec:inventory}) & \texttt{rescofull} & $3$/$2$\,s$^{*}$ & no 
 Triple demand (\S\ref{sec:scenarios}) & \texttt{dense} & $2$\,s & no \\
 Diversity (\S\ref{sec:diversity}) & \texttt{divwide} & $2$\,s & no \\
 Table~\ref{tab:inventory} (corpus) & various & $2$\,s & no \\
+Table~\ref{tab:summary} (summary) & various & $2$/$3$\,s & no$^{\dagger}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 % =============================================================================
 \section{Results}\label{sec:results}
+
+Table~\ref{tab:summary} collects the main comparisons, grouped by the three questions the
+results address. \emph{Problem}: positional indexing, not undertraining, causes the
+indexed policy to fail on an unseen topology; it gridlocks even when every selectable row
+is fully trained. \emph{Solution}: replacing the indexed readout with the
+phase-relational one restores transfer, and the resulting policy is compared with
+rule-based control, a phase-invariant baseline and a concurrent method on networks
+not seen in training. It exceeds max pressure on waiting time where both complete
+the same traffic, has lower delay than fixed time on the Cologne networks at similar
+completion and lower delay than the concurrent method on all three networks compared,
+and trails max pressure on delay on most unseen networks and on the 21-signal network in both delay
+and completion. \emph{Efficiency}: one policy serves every network with no
+per-intersection configuration, using about one tenth of RESCO's per-network training
+budget and $1/85$ of the simulated time of the concurrent method. The subsections that
+follow give the full tables, seed counts and significance tests.
+
+\begin{table*}[t]
+\caption{Summary of results. Proposed: phase-relational readout, mean of six seeds;
+references are deterministic rule-based controllers, six-seed means of learned
+methods, or published values. Delay and waiting time are means over arrived vehicles,
+so completion (\%) is given beside them. Rows at $2$\,s yellow are internal
+comparisons; Table~\ref{tab:config} gives the provenance of each source table.}
+\label{tab:summary}
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lllrrl@{}}
+\toprule
+Comparison & Network & Metric & Proposed & Reference & Outcome \\
+\midrule
+\multicolumn{6}{@{}l}{\emph{Problem: does positional indexing cause the failure? (indexed readout only)}}\\
+All rows trained vs.\ untrained rows & holdout ($2$\,s) & reward & $-9028.88$ & $-9296.84$ & both gridlock \\
+\midrule
+\multicolumn{6}{@{}l}{\emph{Solution: zero-shot on the unseen holdout (\texttt{grid4x4}, $3$\,s)}}\\
+vs.\ indexed readout & \texttt{grid4x4} & completion & $98.9\%$ & $19.5\%$ & $5.1\times$ more trips \\
+vs.\ max pressure & \texttt{grid4x4} & waiting time & $18.8$\,s & $22.8$\,s & $18\%$ lower, 6/6 seeds \\
+vs.\ max pressure & \texttt{grid4x4} & delay / compl. & $41.4$\,s / $98.8\%$ & $40.2$\,s / $99.2\%$ & tie \\
+vs.\ concurrent method~\cite{graphiface} & \texttt{grid4x4} & delay / compl. & $41.4$\,s / $98.8\%$ & $294.1$\,s / $94.5\%$ & $7.1\times$ lower delay \\
+vs.\ FRAP ($2$\,s) & \texttt{c1\_4\_6} holdout & reward, best / final & $-0.082$ / $-0.175$ & $-0.253$ / $-1.115$ & better best (6/6); final n.s. \\
+\midrule
+\multicolumn{6}{@{}l}{\emph{Solution: zero-shot on further unseen RESCO networks ($3$\,s)}}\\
+vs.\ fixed time & \texttt{cologne1} & delay / compl. & $26.2$\,s / $97.8\%$ & $38.3$\,s / $99.2\%$ & $32\%$ lower delay \\
+vs.\ fixed time & \texttt{cologne8} & delay / compl. & $27.5$\,s / $98.2\%$ & $49.2$\,s / $97.5\%$ & $44\%$ lower delay \\
+vs.\ max pressure & \texttt{cologne8} & waiting time & $9.5$\,s & $14.4$\,s & $34\%$ lower, 6/6 seeds \\
+vs.\ max pressure & \texttt{cologne8} & delay / compl. & $27.5$\,s / $98.2\%$ & $27.8$\,s / $98.0\%$ & tie \\
+vs.\ max pressure & \texttt{cologne1} & delay / compl. & $26.2$\,s / $97.8\%$ & $20.9$\,s / $99.1\%$ & worse \\
+vs.\ max pressure & \texttt{ingolstadt21} & delay / compl. & $130.7$\,s / $77.6\%$ & $86.0$\,s / $89.0\%$ & worse \\
+\midrule
+\multicolumn{6}{@{}l}{\emph{Solution: training networks ($3$\,s)}}\\
+vs.\ concurrent method~\cite{graphiface} & \texttt{cologne3} & delay / compl. & $21.4$\,s / $91.2\%$ & $86.6$\,s / $96.9\%$ & $4.0\times$ lower delay, fewer trips \\
+vs.\ concurrent method~\cite{graphiface} & \texttt{ingolstadt7} & delay / compl. & $35.3$\,s / $95.4\%$ & $84.9$\,s / $95.5\%$ & $2.4\times$ lower delay \\
+vs.\ IPPO / IDQN, published~\cite{resco} & \texttt{cologne3} & delay & $21.4$\,s & $22.13$ / $23.99$\,s & comparable; compl.\ not published \\
+vs.\ max pressure & \texttt{cologne3} & delay / compl. & $21.4$\,s / $91.6\%$ & $22.4$\,s / $98.6\%$ & not better (fewer trips) \\
+\midrule
+\multicolumn{6}{@{}l}{\emph{Efficiency}}\\
+Training budget vs.\ RESCO~\cite{resco} & per network & episodes & $10$ & $\approx 100$ & $\approx 1/10$ \\
+Training budget vs.\ concurrent method & per network & simulated time & $1\times$ & $85\times$ & $1/85$ \\
+Configuration vs.\ FRAP & per intersection & phase tables & none & hand-written & configuration-free \\
+\bottomrule
+\end{tabular}
+\end{table*}
 
 \subsection{Untrained rows versus positional indexing}\label{sec:control}
 The two failure modes of Section~\ref{sec:problem} are separated by replacing the
