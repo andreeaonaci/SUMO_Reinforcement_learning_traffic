@@ -64,7 +64,7 @@ phases differently, so one output learns unrelated movements. A control experime
 that this numbering, not undertrained outputs, causes the failure. We replace phase
 numbers with a readout that scores each phase by its effect, using ten features of the
 lanes it serves, such as queues, waiting times and turn directions, extracted
-automatically from the simulator. No per-intersection configuration is needed, and each
+automatically from the simulator. No per-intersection configuration is needed; each
 network keeps its own signal plan. Trained with federated learning on three RESCO
 benchmark networks and tested without retraining on four unseen networks, the readout
 completes 98.9\% of trips on the main test network, where phase numbering gridlocks at
@@ -74,9 +74,9 @@ based transfer method (2.4--7.1 times across three networks). On two further Col
 networks, it reduces delay by 32--44\% relative to fixed-time control at similar
 completion and matches max pressure on the eight-intersection one, but trails both on a
 21-intersection network. On a training network, it matches the published delay of
-RESCO's IPPO and IDQN baselines with one tenth of their training budget. These results
-indicate that phase representation, rather than undertraining, is the main barrier to
-zero-shot transfer in traffic signal control.
+RESCO's IPPO and IDQN at 91.6\% completion with one tenth of their training budget.
+These results indicate that phase representation, rather than undertraining, is the main
+barrier to zero-shot transfer in traffic signal control.
 \end{abstract}
 
 \begin{IEEEkeywords}
