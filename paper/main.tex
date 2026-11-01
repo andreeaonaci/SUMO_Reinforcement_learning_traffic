@@ -13,7 +13,7 @@
 \usepackage{multirow}
 \usepackage{xcolor}
 \usepackage{tikz}
-\usetikzlibrary{arrows.meta,positioning,calc,shapes.geometric}
+\usetikzlibrary{arrows.meta,positioning,calc,shapes.geometric,decorations.pathreplacing}
 \usepackage[hidelinks]{hyperref}
 
 \definecolor{acc}{HTML}{A85A0A}
@@ -263,40 +263,20 @@ Fig.~\ref{fig:arch} shows the architecture and Fig.~\ref{fig:train} the training
 
 \subsection{Shared observation}
 Every intersection in every network emits a tuple of identical shape
-(Fig.~\ref{fig:obs}). Topology enters only through the numerical content of these
+(Fig.~\ref{fig:arch}, \emph{Observe}):
+\begin{equation*}
+\begin{aligned}
+o_i=\big(&\texttt{own}_{117},\,\texttt{nbr}_{8\times3},\,\texttt{nbrmask}_{8},\\
+&\texttt{hop}_{8},\,m_{i,A_{\max}},\,\Phi_{i,A_{\max}\times10}\big).
+\end{aligned}
+\end{equation*}
+The own features are per-lane queue, waiting
+time, occupancy, speed and turn direction for up to 16 lanes sorted by congestion, so
+that lane identity cannot leak, plus five intersection-level scalars; each neighbor
+contributes its mean queue, mean waiting time and current phase. Topology enters only through the numerical content of these
 tensors; no part of the model branches on city or intersection type, and the policy
 receives no city identifier.
 
-\begin{figure}[t]
-\centering
-\begin{tikzpicture}[x=0.92mm,y=0.92mm]
-\node[blk, anchor=north west, text width=39mm] at (0,0)
-  {\textbf{LaneExtractor} $\rightarrow$ \textbf{LaneSorter}\\[2pt]
-   per-lane queue, density, waiting time, occupancy and turn direction, sorted by
-   congestion so lane identity cannot leak};
-\node[blk, anchor=north west, text width=39mm] at (45,0)
-  {\textbf{NeighborGraphBuilder}\\[2pt]
-   $K$-hop neighbors from the network graph, $K_{\max}=8$; three summary scalars
-   and a hop distance each};
-\node[blkacc, anchor=north west, text width=84mm] at (0,-30)
-  {\textcolor{acc}{\textbf{PhaseFeatureExtractor}}\\[2pt]
-   one descriptor $\phi_i(a)\in\mathbb{R}^{10}$ per \emph{candidate phase},
-   resolved from \texttt{getControlledLinks} --- no hand-authored table};
-\node[sft, anchor=north west, text width=84mm] at (0,-48)
-  {\textbf{Observation}\\[2pt]
-   $o_i=\big(\texttt{own}_{117},\;\texttt{nbr}_{8\times3},\;
-   \texttt{nbrmask}_{8},$\\[1pt]
-   $\hspace{6mm}\texttt{hop}_{8},\;m_{i,A_{\max}},\;
-   \textcolor{acc}{\Phi_{i,\,A_{\max}\times10}}\big)$};
-\draw[ar] (19,-17) -- (19,-30);
-\draw[ar] (64,-17) -- (64,-30);
-\draw[aracc] (42,-41) -- (42,-48);
-\end{tikzpicture}
-\caption{Construction of the shared observation. Every topology-dependent quantity
-is a numerical entry of a fixed-shape tuple. $\Phi_i$, the per-phase descriptor
-matrix, is what this work adds.}
-\label{fig:obs}
-\end{figure}
 
 \subsection{Phase descriptors}\label{sec:descriptors}
 For candidate phase $a$ at intersection $i$, let $L_i(a)$ be the incoming lanes that
@@ -380,13 +360,15 @@ after every round on a network excluded from training.
 
 \begin{figure*}[t]
 \centering
-\resizebox{0.92\textwidth}{!}{\input{figures/fig_train.tex}}
-\caption{Federated training. Each round $r$, the server broadcasts $\theta^{(r)}$ to one
-persistent worker per training network. A worker acts $\varepsilon$-greedily in its own
-simulator for $E$ episodes, stores transitions in its replay buffer, and updates its
-copy $\theta_c$ with Double DQN targets from a target network. The server averages the
-returned parameters weighted by sample count $n_c$ and evaluates the result greedily on
-the unseen network after every round.}
+\resizebox{\textwidth}{!}{\input{figures/fig_train.tex}}
+\caption{One round of federated training. (1)~The server sends the current
+parameters $\theta^{(r)}$ to one worker per training network. (2)~Each worker trains its
+copy $\theta_c$ for $E$ episodes in its own simulator: it acts $\varepsilon$-greedily,
+stores transitions in its replay buffer and applies Double DQN updates. (3)~Each worker
+returns $\theta_c$ and its number of samples $n_c$. (4)~The server averages the copies,
+weighted by $n_c$. (5)~The average is tested greedily on the unseen network, which is
+never trained on, and the next round starts. Workers keep their simulator, replay buffer
+and optimizer across rounds; only parameters leave a worker.}
 \label{fig:train}
 \end{figure*}
 

@@ -1,78 +1,84 @@
-% Federated training loop, read off the code:
-%   server   federated/parallel_server.py ParallelFederatedServer.run: broadcast,
-%            collect (state_dict, n_samples), aggregate_round (sample-weighted),
-%            HoldoutEvaluator.evaluate on the unseen network, checkpoint each round
-%   worker   _client_worker: one persistent process per city keeping its SUMO env,
-%            replay buffer and optimizer across rounds; agent.start_round(global) then
-%            agent.train(env, episodes=E) -- epsilon-greedy acting, replay,
-%            Double DQN targets from a target network, Huber loss, Adam
+% Federated training, one round, read off the code:
+%   (1) broadcast   ParallelFederatedServer.run -> in_queues[c].put(("train", global_state, r))
+%   (2) local train _client_worker: agent.start_round(global_state); agent.train(env, E episodes)
+%                   -- epsilon-greedy acting in the city's own SUMO, replay buffer, Double DQN
+%                   targets from a target network, Huber loss, Adam. Env, replay and optimizer
+%                   persist in the worker process across rounds.
+%   (3) upload      out_queue.put((state_dict, n_samples, ...))
+%   (4) aggregate   aggregate_round: sample-count-weighted average
+%   (5) evaluate    HoldoutEvaluator.evaluate(global_model) on the unseen network, checkpoint
 % Input from main.tex inside a figure*; uses its colours and arrow styles.
 \begin{tikzpicture}[x=1mm,y=1mm, font=\footnotesize,
   box/.style  ={draw, rounded corners=1.5pt, fill=white, inner sep=2pt, font=\scriptsize,
-                align=center, minimum height=6mm},
+                align=center, minimum height=5.5mm},
   pol/.style  ={draw=acc, line width=0.8pt, fill=accbg, rounded corners=1.5pt,
-                inner sep=2pt, font=\scriptsize, align=center, minimum height=7mm, minimum width=13mm},
-  card/.style ={draw=black!50, rounded corners=2pt, fill=white},
-  cell/.style ={draw=black!45, line width=0.3pt},
+                inner sep=1.5pt, font=\scriptsize, align=center, minimum height=5.5mm},
+  card/.style ={draw=black!55, rounded corners=2pt, fill=white},
+  cell/.style ={draw=black!45, line width=0.3pt, fill=soft},
   road/.style ={line width=0.6pt, black!55},
-  sm/.style   ={-{Stealth[length=3.5pt]}, line width=0.5pt},
+  sm/.style   ={-{Stealth[length=3.2pt]}, line width=0.5pt},
   lbl/.style  ={font=\scriptsize},
+  stepn/.style ={circle, fill=acc, text=white, font=\scriptsize\bfseries, inner sep=0pt,
+                minimum size=3.6mm},
 ]
 \newcommand{\gridicon}[3]{%
   \begin{scope}[shift={#1}]
-    \foreach \t in {1,...,#2}{\pgfmathsetmacro{\p}{-5+10*\t/(#2+1)}\draw[road] (\p,-5) -- (\p,5);}
-    \foreach \u in {1,...,#3}{\pgfmathsetmacro{\q}{-5+10*\u/(#3+1)}\draw[road] (-5,\q) -- (5,\q);}
+    \foreach \t in {1,...,#2}{\pgfmathsetmacro{\p}{-4.5+9*\t/(#2+1)}\draw[road] (\p,-4.5) -- (\p,4.5);}
+    \foreach \u in {1,...,#3}{\pgfmathsetmacro{\q}{-4.5+9*\u/(#3+1)}\draw[road] (-4.5,\q) -- (4.5,\q);}
     \foreach \t in {1,...,#2}{\foreach \u in {1,...,#3}{
-      \pgfmathsetmacro{\p}{-5+10*\t/(#2+1)}\pgfmathsetmacro{\q}{-5+10*\u/(#3+1)}
-      \fill[black!80] (\p,\q) circle (0.5);}}
+      \pgfmathsetmacro{\p}{-4.5+9*\t/(#2+1)}\pgfmathsetmacro{\q}{-4.5+9*\u/(#3+1)}
+      \fill[black!80] (\p,\q) circle (0.45);}}
   \end{scope}}
+% \citycard{x-centre}{icon cols}{icon rows}{name}
+\newcommand{\citycard}[4]{%
+  \draw[card] ({#1-17},-20) rectangle ({#1+17},-46);
+  \fill[soft] ({#1-15},-24) rectangle ({#1-3},-36);
+  \gridicon{({#1-9},-30)}{#2}{#3}
+  \node[font=\tiny\ttfamily] at ({#1-9},-38.8) {#4};
+  \node[pol] (p#4) at ({#1+8},-27) {$\theta_c$};
+  \draw[sm] ({#1-2.6},-26.5) -- ([yshift=0.5mm]p#4.west);
+  \draw[sm] ([yshift=-1mm]p#4.west) -- ({#1-2.6},-28.6);
+  \foreach \k in {0,...,3}{\draw[cell] ({#1+3},{-33-1.3*\k}) rectangle ({#1+13},{-34-1.3*\k});}
+  \node[lbl, black!60] at ({#1+8},-39.9) {replay};
+  \draw[sm] (p#4.south) -- ({#1+8},-32.6);
+  \draw[sm] ({#1+13.4},-35) to[out=0, in=0, looseness=1.6] (p#4.east);
+  \node[lbl, black!60] at (#1,-43.6) {$E$ episodes of DQN};
+  \node[stepn] at ({#1-17},-20) {2};}
 
-% ================================================================ server
-\node[font=\small\bfseries, anchor=west] at (0,2) {Server};
-\node[box, minimum width=30mm, minimum height=8mm] (srv) at (62,2)
-  {$\theta^{(r+1)}=\sum_c \frac{n_c}{n}\,\theta_c$};
+% ================================================================ server (top)
+\node[box, minimum width=46mm, minimum height=9mm, line width=0.7pt] (srv) at (60,3)
+  {\textbf{Server}\\[1pt]$\theta^{(r+1)}=\sum_c \frac{n_c}{n}\,\theta_c$};
+\node[stepn] at ([xshift=-3mm]srv.west) {4};
+\node[lbl, anchor=east] at (31,-1) {weighted average};
 
-% ================================================================ workers
-% stacked cards: one persistent worker process per training network
-\draw[card, fill=soft] (17,-10) rectangle (117,-52);
-\draw[card, fill=soft!60] (13.5,-13.5) rectangle (113.5,-55.5);
-\draw[card] (10,-17) rectangle (110,-59);
-\node[lbl, black!60, anchor=north east, inner sep=0.6pt] at (116.6,-10.3) {\texttt{ingolstadt7}};
-\node[lbl, black!60, anchor=north east, inner sep=0.6pt] at (113.1,-13.8) {\texttt{cologne3}};
-\node[lbl, anchor=north west] at (11,-17.6) {\texttt{arterial4x4} worker};
-\node[lbl, black!60, anchor=south east] at (109.4,-58.4) {$E$ episodes per round, state kept across rounds};
+% ================================================================ cities
+\citycard{20}{4}{4}{arterial4x4}
+\citycard{60}{3}{1}{cologne3}
+\citycard{100}{2}{3}{ingolstadt7}
 
-% broadcast down, updates up
-\draw[aracc] ([xshift=-6mm]srv.south) -- node[left, pos=0.35, lbl, text=acc] {$\theta^{(r)}$} (56,-16.6);
-\draw[sm] (68,-9.6) -- node[right, lbl] {$\theta_c,\; n_c$} ([xshift=6mm]srv.south);
+% broadcast (down, orange) and upload (up, black) for every city
+\foreach \cx in {20,60,100}{
+  \draw[aracc] ({60+(\cx-60)*0.45-2.5},-1.6) -- ({\cx-2.5},-19.6);
+  \draw[sm, line width=0.6pt] ({\cx+2.5},-19.6) -- ({60+(\cx-60)*0.45+2.5},-1.6);}
+\node[stepn] at (31,-10) {1};
+\node[lbl, text=acc, anchor=east] at (29,-10) {send $\theta^{(r)}$};
+\node[stepn] at (89,-10) {3};
+\node[lbl, anchor=west] at (91,-10) {return $\theta_c$, $n_c$};
 
-% SUMO environment
-\fill[soft] (16,-25) rectangle (30,-39);
-\gridicon{(23,-32)}{3}{3}
-\node[lbl] at (23,-42) {SUMO};
+% what stays in the city
+\draw[decorate, decoration={brace, amplitude=3pt, mirror}, black!60] (3,-48) -- (117,-48);
+\node[lbl, black!70] at (60,-52) {traffic, replay buffers and optimizers never leave a city; only parameters travel};
 
-% online policy
-\node[pol] (pol) at (54,-31) {policy $\theta_c$\\[-1pt]$\varepsilon$-greedy};
-\draw[sm] (30.5,-28) -- node[above, lbl] {$o,\ r$} ([yshift=3mm]pol.west);
-\draw[sm] ([yshift=-3mm]pol.west) -- node[below, lbl] {$a$} (30.5,-34);
+% ================================================================ evaluate (right)
+\draw[dashed, acc, line width=0.6pt, rounded corners=2pt] (128,-20) rectangle (172,-46);
+\gridicon{(150,-29)}{4}{4}
+\node[lbl, text=acc] at (150,-37.5) {unseen network};
+\node[lbl, align=center] at (150,-42.5) {no training, greedy};
+\draw[aracc] (srv.east) -| (150,-19.6);
+\node[stepn] at (150,-11) {5};
+\node[lbl, anchor=west] at (153,-11) {test};
 
-% replay buffer
-\foreach \k in {0,...,4}{\draw[cell, fill=soft] (47,{-44-1.5*\k}) rectangle (61,{-45.1-1.5*\k});}
-\node[lbl, anchor=east] at (46.5,-47.5) {replay};
-\draw[sm] (pol.south) -- node[right, lbl] {$(o,a,r,o')$} (54,-43.5);
-
-% target network and update
-\node[box, minimum width=14mm] (tgt) at (88,-26) {target $\theta_c^{-}$};
-\node[box, minimum width=18mm] (upd) at (88,-48) {Double DQN\\Huber, Adam};
-\draw[sm] (61.5,-48) -- node[below, lbl] {batch} (upd.west);
-\draw[sm] (tgt.south) -- (upd.north);
-\draw[sm, dashed, black!60] ([yshift=2mm]pol.east) -- node[above, lbl, black!60] {copy} (tgt.west);
-\draw[sm] ([xshift=1mm, yshift=-1mm]upd.north west) -- node[below left, lbl, pos=0.45] {update} ([yshift=-2.5mm]pol.east);
-
-% ================================================================ evaluation
-\draw[dashed, acc, line width=0.6pt, rounded corners=2pt] (122,-17) rectangle (172,-46);
-\gridicon{(147,-27)}{4}{4}
-\node[lbl, text=acc] at (147,-35.5) {unseen network};
-\node[lbl, align=center] at (147,-41) {greedy, 5 episodes,\\checkpoint};
-\draw[aracc] (srv.east) -| node[pos=0.25, above, lbl, text=acc] {$\theta^{(r+1)}$, every round} (147,-16.6);
+% next round
+\draw[sm, black!60, rounded corners=3pt] (150,-46.4) -- (150,-57) -| (-6,3) -- ([xshift=-6.5mm]srv.west);
+\node[lbl, black!60, fill=white, inner sep=1pt] at (150,-57) {next round $r{+}1$};
 \end{tikzpicture}
