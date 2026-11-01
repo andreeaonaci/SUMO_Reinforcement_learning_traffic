@@ -13,7 +13,7 @@
 \usepackage{multirow}
 \usepackage{xcolor}
 \usepackage{tikz}
-\usetikzlibrary{arrows.meta,positioning,calc}
+\usetikzlibrary{arrows.meta,positioning,calc,shapes.geometric}
 \usepackage[hidelinks]{hyperref}
 
 \definecolor{acc}{HTML}{A85A0A}
@@ -243,6 +243,21 @@ Section~\ref{sec:control} verifies directly.}
 
 % =============================================================================
 \section{Method}\label{sec:method}
+
+\begin{figure*}[t]
+\centering
+\resizebox{\textwidth}{!}{\input{figures/fig_arch.tex}}
+\caption{Overview. (a)~Federated training: each training network updates the shared
+parameters $\theta$ locally, and the server averages them weighted by sample count;
+the result is applied to an unseen network without retraining. (b)~Phase-relational
+readout at intersection $i$: the trunk embeds the observation once, each candidate
+phase is described by $\phi_i(a)$ read from the simulator's connection table, and one
+shared scorer $f_\psi$ maps $[h\,\|\,\phi_i(a)]$ to $Q(a)$. The number of phases $A_i$
+is free; no output row is tied to a phase index.}
+\label{fig:arch}
+\end{figure*}
+
+Fig.~\ref{fig:arch} summarizes the approach: one policy trained federated across networks, with a readout that scores each candidate phase from its descriptor rather than its index.
 
 \subsection{Shared observation}
 Every intersection in every network emits a tuple of identical shape
@@ -510,7 +525,7 @@ methods, or published values. Delay and waiting time are means over arrived vehi
 so completion (\%) is given beside them. Rows at $2$\,s yellow are internal
 comparisons; Table~\ref{tab:config} gives the provenance of each source table.}
 \label{tab:summary}
-\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\centering\footnotesize\setlength{\tabcolsep}{3.5pt}
 \begin{tabular}{@{}lllrrl@{}}
 \toprule
 Comparison & Network & Metric & Proposed & Reference & Outcome \\
