@@ -1,128 +1,172 @@
-% Main architecture figure: (a) federated training across networks,
-% (b) phase-relational readout at one intersection. Input from main.tex
-% inside a figure*; uses the colours and arrow styles of its preamble.
+% System pipeline, read off the code:
+%   Discover  environments/federated_env.py  NeighborGraphBuilder, PhaseFeatureExtractor._resolve,
+%                                            ActionSpaceInspector
+%   Observe   SumoLaneExtractor -> LaneNormalizer/LaneSorter -> TopKEncoder (own, 117),
+%             NeighborSummaryExtractor (K_max x 3, mask, hop), PhaseFeatureExtractor (A x 10),
+%             federated/comm_dropout.py CommDropoutWrapper
+%   Decide    agents/networks.py NeighborAttentionQNetwork.forward_phase
+%   Learn     agents/dqn.py DQNAgent (replay, Double DQN, Huber) in one worker per city,
+%             federated/parallel_server.py + aggregation.py (sample-weighted FedAvg),
+%             federated/evaluator.py HoldoutEvaluator
+% Input from main.tex inside a figure*; uses its colours and arrow styles.
 \begin{tikzpicture}[x=1mm,y=1mm, font=\footnotesize,
-  srv/.style  ={draw, rounded corners=2pt, fill=white, minimum height=7mm, inner sep=3pt},
-  op/.style   ={draw, rounded corners=1.5pt, fill=white, minimum height=6mm, inner sep=2pt},
-  phi/.style  ={draw=acc, fill=accbg, minimum width=13mm, minimum height=4.6mm, inner sep=0pt},
+  hdr/.style  ={font=\small\bfseries, anchor=west},
+  tag/.style  ={font=\scriptsize, align=left, anchor=west},
+  cell/.style ={draw=black!45, line width=0.3pt},
+  mlp/.style  ={draw, fill=soft, trapezium, trapezium angle=72, shape border rotate=270,
+                minimum height=7mm, minimum width=5mm, inner sep=0.5pt, font=\scriptsize},
+  box/.style  ={draw, rounded corners=1.5pt, fill=white, inner sep=2pt, font=\scriptsize,
+                align=center, minimum height=5.5mm},
   fpsi/.style ={draw=acc, line width=0.8pt, fill=white, rounded corners=1.5pt,
-                minimum width=9mm, minimum height=5mm, inner sep=0pt},
-  cat/.style  ={draw, circle, fill=white, inner sep=0pt, minimum size=3.2mm, font=\scriptsize},
-  lab/.style  ={font=\scriptsize\ttfamily},
-  panel/.style={font=\small\bfseries, anchor=north west},
+                minimum width=8mm, minimum height=4.6mm, inner sep=0pt, font=\scriptsize},
+  cat/.style  ={draw, circle, fill=white, inner sep=0pt, minimum size=3mm, font=\scriptsize},
   road/.style ={line width=0.6pt, black!55},
-  sig/.style  ={fill=black!80},
-  mv/.style   ={-{Stealth[length=2.2pt]}, line width=0.7pt},
+  mv/.style   ={-{Stealth[length=2pt]}, line width=0.65pt},
+  sm/.style   ={-{Stealth[length=3.5pt]}, line width=0.5pt},
 ]
 
 % ---------------------------------------------------------------- helpers
-% \gridicon{centre}{cols}{rows}: road lattice with a signal at every crossing
-\newcommand{\gridicon}[3]{%
+\newcommand{\gridicon}[3]{% centre, cols, rows (half-size 5)
   \begin{scope}[shift={#1}]
-    \foreach \t in {1,...,#2}{
-      \pgfmathsetmacro{\p}{-5.5+11*\t/(#2+1)}
-      \draw[road] (\p,-5.5) -- (\p,5.5);}
-    \foreach \u in {1,...,#3}{
-      \pgfmathsetmacro{\q}{-5.5+11*\u/(#3+1)}
-      \draw[road] (-5.5,\q) -- (5.5,\q);}
+    \foreach \t in {1,...,#2}{\pgfmathsetmacro{\p}{-5+10*\t/(#2+1)}\draw[road] (\p,-5) -- (\p,5);}
+    \foreach \u in {1,...,#3}{\pgfmathsetmacro{\q}{-5+10*\u/(#3+1)}\draw[road] (-5,\q) -- (5,\q);}
     \foreach \t in {1,...,#2}{\foreach \u in {1,...,#3}{
-      \pgfmathsetmacro{\p}{-5.5+11*\t/(#2+1)}
-      \pgfmathsetmacro{\q}{-5.5+11*\u/(#3+1)}
-      \fill[sig] (\p,\q) circle (0.55);}}
+      \pgfmathsetmacro{\p}{-5+10*\t/(#2+1)}\pgfmathsetmacro{\q}{-5+10*\u/(#3+1)}
+      \fill[black!80] (\p,\q) circle (0.5);}}
   \end{scope}}
-% phase pictograms at a four-arm junction
-\newcommand{\pjunc}{\draw[black!30, line width=0.4pt] (-2.4,0) -- (2.4,0) (0,-2.4) -- (0,2.4);}
+\newcommand{\pjunc}{\draw[black!30, line width=0.4pt] (-2.2,0) -- (2.2,0) (0,-2.2) -- (0,2.2);}
 \newcommand{\phaseNS}[1]{\begin{scope}[shift={#1}]\pjunc
-  \draw[mv] (0.5,-2.4) -- (0.5,2.4); \draw[mv] (-0.5,2.4) -- (-0.5,-2.4);\end{scope}}
+  \draw[mv] (0.45,-2.2) -- (0.45,2.2); \draw[mv] (-0.45,2.2) -- (-0.45,-2.2);\end{scope}}
 \newcommand{\phaseEW}[1]{\begin{scope}[shift={#1}]\pjunc
-  \draw[mv] (-2.4,-0.5) -- (2.4,-0.5); \draw[mv] (2.4,0.5) -- (-2.4,0.5);\end{scope}}
+  \draw[mv] (-2.2,-0.45) -- (2.2,-0.45); \draw[mv] (2.2,0.45) -- (-2.2,0.45);\end{scope}}
 \newcommand{\phaseLT}[1]{\begin{scope}[shift={#1}]\pjunc
-  \draw[mv] (0.5,-2.4) -- (0.5,-0.3) -- (-2.4,-0.3);
-  \draw[mv] (-0.5,2.4) -- (-0.5,0.3) -- (2.4,0.3);\end{scope}}
+  \draw[mv] (0.45,-2.2) -- (0.45,-0.3) -- (-2.2,-0.3);
+  \draw[mv] (-0.45,2.2) -- (-0.45,0.3) -- (2.2,0.3);\end{scope}}
 
-% ================================================================ (a)
-\node[panel] at (-2,8) {(a)};
-\node[srv] (srv) at (26,1) {$\theta=\sum_c \tfrac{n_c}{n}\,\theta_c$};
+% ================================================================ stage headers
+\foreach \x/\t in {0/Discover, 34/Observe, 66/Decide}{\node[hdr] at (\x,7) {\t};}
+\node[font=\scriptsize, black!55, anchor=west] at (14.5,7) {once};
+\node[font=\scriptsize, black!55, anchor=west] at (48.5,7) {every 5\,s};
+\node[hdr] at (22,-51.5) {Learn};
 
-\gridicon{(6,-24)}{4}{4}
-\node[lab] at (6,-32.5) {arterial4x4};
-\gridicon{(26,-24)}{3}{1}
-\node[lab] at (26,-32.5) {cologne3};
-\begin{scope}[shift={(46,-24)}]          % ingolstadt7: corridor with side streets
-  \draw[road] (-5.5,-1) -- (5.5,1.2);
-  \foreach \x/\y in {-3.5/-0.6,0/0.1,3.5/0.8}{\draw[road] (\x,\y-4.5) -- (\x,\y+4.5);}
-  \foreach \x/\y in {-4.6/-0.8,-1.8/-0.25,0/0.1,1.8/0.45,3.5/0.8,-3.5/3.2,0/-3.6}{
-    \fill[sig] (\x,\y) circle (0.55);}
+% ================================================================ 1. Discover
+\fill[soft] (0,-6) rectangle (14,2);
+\gridicon{(7,-2)}{4}{2}
+\node[tag] at (15,-1) {SUMO\\network};
+% neighbour graph
+\begin{scope}[shift={(7,-17)}]
+  \coordinate (n0) at (0,0);
+  \foreach \i/\a/\r in {1/20/4, 2/140/4, 3/260/4, 4/70/7.0}{\coordinate (n\i) at (\a:\r);}
+  \draw[black!55] (n0)--(n1) (n0)--(n2) (n0)--(n3) (n1)--(n4);
+  \foreach \i in {1,2,3,4}{\fill[black!70] (n\i) circle (0.7);}
+  \fill[acc] (n0) circle (0.9);
 \end{scope}
-\node[lab] at (46,-32.5) {ingolstadt7};
+\node[tag] at (15,-17) {neighbor\\graph};
+% phase -> lanes
+\phaseNS{(4.3,-29)} \phaseLT{(10,-29)}
+\node[tag] at (15,-29) {phase\\$\to$ lanes};
+% action mask
+\foreach \k/\f in {0/black!70,1/black!70,2/black!70,3/black!70,4/white,5/white}{\draw[cell, fill=\f] ({1+2*\k},-41) rectangle ({2.8+2*\k},-39.2);}
+\node[tag] at (15,-40) {legal\\phases};
+\draw[sm] (7,-6.5) -- (7,-12);
 
-\foreach \x in {6,26,46}{
-  \draw[ar] ({\x-1.5},-18.5) -- ({\x-1.5+(26-\x)*0.55},-2.5);
-  \draw[ar] ({26+(\x-26)*0.45+1.5},-2.5) -- ({\x+1.5},-18.5);}
-\node[font=\scriptsize] at (5.5,-8.5)  {$\theta_c$};
-\node[font=\scriptsize] at (46.5,-8.5) {$\theta$};
+% ================================================================ 2. Observe
+% own lanes, sorted by congestion (darker = more queued)
+\foreach \r in {0,...,6}{\foreach \c in {0,...,6}{
+  \pgfmathtruncatemacro{\sh}{70-9*\r}
+  \draw[cell, fill=black!\sh] ({35+1.6*\c},{1-1.2*\r}) rectangle ({36.6+1.6*\c},{-0.2-1.2*\r});}}
+\node[tag] at (47,-2.5) {lanes};
+% neighbours: 3 features | mask | hop
+\foreach \r/\on/\mf in {0/1/acc,1/1/acc,2/0/white,3/1/acc,4/0/white,5/0/white}{
+  \foreach \c in {0,1,2}{
+    \pgfmathtruncatemacro{\sh}{\on*35}
+    \draw[cell, fill=black!\sh] ({35+1.6*\c},{-13-1.2*\r}) rectangle ({36.6+1.6*\c},{-14.2-1.2*\r});}
+  \draw[cell, fill=\mf] (40.4,{-13-1.2*\r}) rectangle (41.6,{-14.2-1.2*\r});
+}
+\draw[fail, line width=0.8pt] (34.4,-15.8) -- (42.2,-15.8);   % comm dropout of one link
+\node[tag] at (47,-16.5) {nbrs};
+\node[font=\tiny, text=fail, anchor=east] at (34.2,-15.8) {drop};
+% phase descriptors, one row per candidate phase
+\foreach \r/\y in {1/-24.5, 2/-28.5, 3/-32.5}{
+  \foreach \c in {0,...,9}{
+    \pgfmathtruncatemacro{\sh}{mod(7*\c+11*\r,40)+15}
+    \draw[draw=acc!70, line width=0.3pt, fill=acc!\sh] ({35+1.05*\c},{\y+1.1}) rectangle ({36.05+1.05*\c},{\y-1.1});}
+  \node[font=\scriptsize, anchor=west] at (46,\y) {$\phi(a_\r)$};}
+% discovery -> observation
+\draw[sm] (25,-1) -- (34.3,-1);
+\draw[sm] (25,-17) -- (34.3,-17);
+\draw[sm] (25,-29) -- (34.3,-29);
 
-% unseen network, never trained on
-\draw[dashed, acc, line width=0.6pt] (13,-38) rectangle (39,-50);
-\gridicon{(20,-44)}{4}{4}
-\node[lab, anchor=west, text=acc] at (26.5,-42) {grid4x4};
-\node[font=\scriptsize, anchor=west, text=acc] at (26.5,-46.5) {zero-shot};
-\draw[aracc, dashed] (srv.east) -- (57,1) |- (39,-44);
+% ================================================================ 3. Decide
+% trunk: own encoder (query) + neighbour encoder with hop embedding (keys/values)
+\node[mlp] (eo) at (61,-2) {};
+\node[mlp] (en) at (61,-16.5) {};
+\node[cat, font=\tiny] (hop) at (66.5,-16.5) {$+$};
+\node[font=\tiny, black!60] at (66.5,-20.2) {hop};
+\draw[sm] (54,-2) -- (eo.west);
+\draw[sm] (54,-16.5) -- (en.west);
+\draw[sm] (en.east) -- (hop.west);
+\node[box, minimum width=10mm] (att) at (75,-9) {masked\\attention};
+\draw[sm] (eo.east) -| node[pos=0.25, above, font=\tiny] {query} (att.north);
+\draw[sm] (hop.east) -| node[pos=0.25, below, font=\tiny] {keys} (att.south);
+\node[mlp] (fu) at (86,-2) {};
+\draw[sm] (att.east) -| (fu.south);
+\draw[sm] (eo.east) ++(0,0) -- (fu.west);
+% state embedding h
+\foreach \k in {0,...,4}{\draw[cell, fill=white] (91,{0.4-1.2*\k}) rectangle (93.2,{-0.8-1.2*\k});}
+\node[font=\scriptsize] at (92.1,2.3) {$h$};
+\draw[sm] (fu.east) -- (90.7,-2);
+% broadcast h and score every phase with one shared MLP
+\draw[line width=0.6pt] (93.2,-2) -- (98,-2) -- (98,-31);
+\draw[dashed, acc, rounded corners=2pt] (101.5,-21.5) rectangle (112.5,-35.5);
+\node[font=\scriptsize, text=acc] at (107,-38) {shared $\psi$};
+\foreach \r/\y/\w/\qf in {1/-24.5/8/acc, 2/-28.5/3.5/black!25, 3/-32.5/5.5/black!25}{
+  \node[cat] (c\r) at (98,\y) {$\|$};
+  \draw[aracc] (56.5,\y) -- (c\r.west);
+  \node[fpsi] (f\r) at (107,\y) {$f_\psi$};
+  \draw[sm] (c\r.east) -- (f\r.west);
+  \draw[sm] (f\r.east) -- (114.5,\y);
+  \fill[\qf] (115,{\y-1.2}) rectangle ({115+\w},{\y+1.2});
+  \node[font=\scriptsize, anchor=west] at (124,\y) {$Q(a_\r)$};}
+% everything trained is one parameter set theta
+\draw[acc, dashed, rounded corners=3pt, line width=0.5pt] (57.4,3.9) rectangle (113.2,-40.5);
+\node[font=\scriptsize, text=acc, anchor=north east] at (113,3.6) {policy $\theta$};
+% masked argmax -> chosen phase
+\node[box] (am) at (139,-28.5) {$\arg\max$\\legal};
+\draw[sm] (133,-24.5) -| ([xshift=-2mm]am.north);
+\draw[sm] (133,-28.5) -- (am.west);
+\draw[sm] (133,-32.5) -| ([xshift=-2mm]am.south);
+\draw[sm, black!55] (12,-42) |- (139,-44) -- (am.south);
+\phaseNS{(154,-28.5)}
+\draw[acc, line width=0.7pt] (150.6,-31.9) rectangle (157.4,-25.1);
+\draw[aracc] (am.east) -- (150.4,-28.5);
+% act on the simulator
+\draw[ar] (157.6,-28.5) -- (163,-28.5) |- (-3,-48) |- (0,-2);
+\node[font=\scriptsize, fill=white, inner sep=1pt] at (120,-48) {set phase, observe reward};
 
-% ================================================================ (b)
-\begin{scope}[xshift=4mm]
-\node[panel] at (60,8) {(b)};
-
-% intersection i
-\begin{scope}[shift={(68,-4)}]
-  \fill[soft] (-6,-6) rectangle (6,6);
-  \fill[black!70] (-6,-1.3) rectangle (6,1.3);
-  \fill[black!70] (-1.3,-6) rectangle (1.3,6);
+% ================================================================ 4. Learn
+% per-city worker: replay buffer + Double DQN update
+\begin{scope}[shift={(0,-58)}]
+  \draw[rounded corners=2pt, black!50, dashed] (0,4) rectangle (64,-12);
+  \node[font=\scriptsize, black!60, anchor=south east] at (63.5,-11.6) {one worker per city};
+  % replay
+  \foreach \k in {0,...,4}{\draw[cell, fill=soft] (4,{1-1.6*\k}) rectangle (16,{-0.2-1.6*\k});}
+  \node[font=\scriptsize] at (10,-9.6) {replay};
+  \node[box, minimum width=17mm] (dq) at (32,-3.4) {Double DQN\\Huber, target net};
+  \draw[sm] (16.5,-3.4) -- (dq.west);
+  \node[font=\scriptsize] (thc) at (52,-3.4) {$\theta_c$};
+  \draw[sm] (dq.east) -- (thc.west);
+  
 \end{scope}
-\node[font=\scriptsize] at (68,-12.5) {intersection $i$};
-
-% shared trunk -> state embedding h
-\node[op, minimum width=8mm] (obs) at (84,-4) {$o_i$};
-\node[draw, fill=soft, trapezium, trapezium angle=70, shape border rotate=270,
-      minimum height=10mm, minimum width=8mm, inner sep=1pt] (trunk) at (99,-4) {$h_\theta$};
-\draw[ar] (74.5,-4) -- (obs.west);
-\draw[ar] (obs.east) -- (trunk.west);
-\foreach \k in {0,...,5}{\draw[fill=white] (109,{-0.4-1.2*\k}) rectangle (111.4,{-1.6-1.2*\k});}
-\node[font=\scriptsize] at (110.2,1.6) {$h$};
-\draw[ar] (trunk.east) -- (108.6,-4);
-
-% simulator connection table -> one descriptor per candidate phase
-\node[op, align=center, font=\scriptsize] (tab) at (82,-29) {SUMO\\links};
-\draw[ar] (68,-14.5) -- (68,-29) -- (tab.west);
-\phaseNS{(96,-18)} \phaseEW{(96,-29)} \phaseLT{(96,-40)}
-\draw[ar, black!55] (tab.north east) -- (92.8,-17);
-\draw[ar, black!55] (tab.east) -- (92.8,-29);
-\draw[ar, black!55] (tab.south east) -- (92.8,-41);
-\node[font=\scriptsize, black!60] at (96,-46.5) {$a_1,\dots,a_{A_i}$};
-
-% concatenate with h, score with one shared MLP
-\draw[line width=0.6pt] (111.4,-4) -- (120,-4) -- (120,-36.8);
-\draw[dashed, acc, rounded corners=2pt] (126,-14) rectangle (138,-44);
-\node[font=\scriptsize, text=acc] at (132,-47) {shared $\psi$};
-\foreach \k/\y in {1/-18, 2/-29, 3/-40}{
-  \node[phi] (phi\k) at (108.5,\y) {$\phi_i(a_\k)$};
-  \draw[ar] (99,\y) -- (phi\k.west);
-  \node[cat] (c\k) at (120,\y) {$\|$};
-  \draw[aracc] (phi\k.east) -- (c\k.west);
-  \node[fpsi] (f\k) at (132,\y) {$f_\psi$};
-  \draw[aracc] (c\k.east) -- (f\k.west);}
-
-% one Q value per phase, then argmax
-\foreach \k/\y/\w in {1/-18/9, 2/-29/4, 3/-40/6}{
-  \draw[ar] (f\k.east) -- (140.5,\y);
-  \fill[black!25] (141,{\y-1.6}) rectangle ({141+\w},{\y+1.6});
-  \node[font=\scriptsize, anchor=west] at (151,\y) {$Q(a_\k)$};}
-\fill[acc] (141,-19.6) rectangle (150,-16.4);
-
-\draw[aracc] (162,-18) -- (169,-18);
-\node[font=\scriptsize, anchor=south] at (165.5,-17.6) {$\arg\max$};
-\phaseNS{(173,-18)}
-\draw[acc, line width=0.7pt] (169.5,-21.5) rectangle (176.5,-14.5);
-\node[font=\scriptsize] at (173,-24.5) {$a_i^\ast$};
-\end{scope}
+\draw[sm] (10,-48) -- (10,-56.5);
+% server
+\node[box, minimum width=22mm, minimum height=7mm] (srv) at (88,-61.4)
+  {$\theta=\sum_c \frac{n_c}{n}\,\theta_c$};
+\draw[sm] (54.5,-61.4) -- node[above, font=\scriptsize] {$\times 3$} (srv.west);
+\draw[aracc] (srv.north) -- node[pos=0.55, right, font=\scriptsize, text=acc] {$\theta$} (88,-40.5);
+% unseen network
+\draw[dashed, acc, line width=0.6pt] (118,-55) rectangle (158,-68);
+\gridicon{(125,-61.5)}{4}{4}
+\node[tag, text=acc] at (132,-61.5) {unseen network\\no retraining};
+\draw[aracc, dashed] (srv.east) -- (117.6,-61.5);
 \end{tikzpicture}

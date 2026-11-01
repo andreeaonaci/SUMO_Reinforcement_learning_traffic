@@ -247,17 +247,21 @@ Section~\ref{sec:control} verifies directly.}
 \begin{figure*}[t]
 \centering
 \resizebox{\textwidth}{!}{\input{figures/fig_arch.tex}}
-\caption{Overview. (a)~Federated training: each training network updates the shared
-parameters $\theta$ locally, and the server averages them weighted by sample count;
-the result is applied to an unseen network without retraining. (b)~Phase-relational
-readout at intersection $i$: the trunk embeds the observation once, each candidate
-phase is described by $\phi_i(a)$ read from the simulator's connection table, and one
-shared scorer $f_\psi$ maps $[h\,\|\,\phi_i(a)]$ to $Q(a)$. The number of phases $A_i$
-is free; no output row is tied to a phase index.}
+\caption{System pipeline. \emph{Discover}, once per network, from the SUMO net
+and signal program: the $K$-hop graph of signalized intersections, the lanes each phase
+gives green, and the number of legal phases. \emph{Observe}, every 5\,s per
+intersection: lane features sorted by queue, a summary per neighbor with its validity
+mask (links dropped at random to model unreliable communication), and one descriptor $\phi(a)$ per
+candidate phase. \emph{Decide}: the own encoding queries the neighbor encodings through
+masked attention; the fused state $h$ is joined with each $\phi(a)$ and scored by one
+shared $f_\psi$, and the best legal phase is applied. \emph{Learn}: each training
+network runs its own worker with a replay buffer and Double DQN updates; the server
+averages the parameters by sample count and the result is applied to an unseen network
+without retraining.}
 \label{fig:arch}
 \end{figure*}
 
-Fig.~\ref{fig:arch} summarizes the approach: one policy trained federated across networks, with a readout that scores each candidate phase from its descriptor rather than its index.
+Fig.~\ref{fig:arch} shows the full pipeline; the subsections below follow its stages.
 
 \subsection{Shared observation}
 Every intersection in every network emits a tuple of identical shape
