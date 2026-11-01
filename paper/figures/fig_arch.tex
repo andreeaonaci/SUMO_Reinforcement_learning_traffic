@@ -5,16 +5,14 @@
 %             NeighborSummaryExtractor (K_max x 3, mask, hop), PhaseFeatureExtractor (A x 10),
 %             federated/comm_dropout.py CommDropoutWrapper
 %   Decide    agents/networks.py NeighborAttentionQNetwork.forward_phase
-%   Learn     agents/dqn.py DQNAgent (replay, Double DQN, Huber) in one worker per city,
-%             federated/parallel_server.py + aggregation.py (sample-weighted FedAvg),
-%             federated/evaluator.py HoldoutEvaluator
+% Training is drawn separately in fig_train.tex.
 % Input from main.tex inside a figure*; uses its colours and arrow styles.
 \begin{tikzpicture}[x=1mm,y=1mm, font=\footnotesize,
   hdr/.style  ={font=\small\bfseries, anchor=west},
   tag/.style  ={font=\scriptsize, align=left, anchor=west},
   cell/.style ={draw=black!45, line width=0.3pt},
-  mlp/.style  ={draw, fill=soft, trapezium, trapezium angle=72, shape border rotate=270,
-                minimum height=7mm, minimum width=5mm, inner sep=0.5pt, font=\scriptsize},
+  mlp/.style  ={draw, fill=soft, rounded corners=1.5pt, minimum height=5.5mm,
+                minimum width=7.5mm, inner sep=1pt, font=\scriptsize},
   box/.style  ={draw, rounded corners=1.5pt, fill=white, inner sep=2pt, font=\scriptsize,
                 align=center, minimum height=5.5mm},
   fpsi/.style ={draw=acc, line width=0.8pt, fill=white, rounded corners=1.5pt,
@@ -47,7 +45,7 @@
 \foreach \x/\t in {0/Discover, 34/Observe, 66/Decide}{\node[hdr] at (\x,7) {\t};}
 \node[font=\scriptsize, black!55, anchor=west] at (14.5,7) {once};
 \node[font=\scriptsize, black!55, anchor=west] at (48.5,7) {every 5\,s};
-\node[hdr] at (22,-51.5) {Learn};
+
 
 % ================================================================ 1. Discover
 \fill[soft] (0,-6) rectangle (14,2);
@@ -61,7 +59,7 @@
   \foreach \i in {1,2,3,4}{\fill[black!70] (n\i) circle (0.7);}
   \fill[acc] (n0) circle (0.9);
 \end{scope}
-\node[tag] at (15,-17) {neighbor\\graph};
+\node[tag] at (15,-17) {road graph\\$\to K$-hop};
 % phase -> lanes
 \phaseNS{(4.3,-29)} \phaseLT{(10,-29)}
 \node[tag] at (15,-29) {phase\\$\to$ lanes};
@@ -99,17 +97,17 @@
 
 % ================================================================ 3. Decide
 % trunk: own encoder (query) + neighbour encoder with hop embedding (keys/values)
-\node[mlp] (eo) at (61,-2) {};
-\node[mlp] (en) at (61,-16.5) {};
-\node[cat, font=\tiny] (hop) at (66.5,-16.5) {$+$};
-\node[font=\tiny, black!60] at (66.5,-20.2) {hop};
+\node[mlp] (eo) at (62,-2) {MLP};
+\node[mlp] (en) at (62,-16.5) {MLP};
+\node[cat, font=\tiny] (hop) at (68.5,-16.5) {$+$};
+\node[font=\tiny, black!60] at (68.5,-20.2) {hop};
 \draw[sm] (54,-2) -- (eo.west);
 \draw[sm] (54,-16.5) -- (en.west);
 \draw[sm] (en.east) -- (hop.west);
 \node[box, minimum width=10mm] (att) at (75,-9) {masked\\attention};
 \draw[sm] (eo.east) -| node[pos=0.25, above, font=\tiny] {query} (att.north);
 \draw[sm] (hop.east) -| node[pos=0.25, below, font=\tiny] {keys} (att.south);
-\node[mlp] (fu) at (86,-2) {};
+\node[mlp] (fu) at (85.5,-2) {MLP};
 \draw[sm] (att.east) -| (fu.south);
 \draw[sm] (eo.east) ++(0,0) -- (fu.west);
 % state embedding h
@@ -140,33 +138,5 @@
 \phaseNS{(154,-28.5)}
 \draw[acc, line width=0.7pt] (150.6,-31.9) rectangle (157.4,-25.1);
 \draw[aracc] (am.east) -- (150.4,-28.5);
-% act on the simulator
-\draw[ar] (157.6,-28.5) -- (163,-28.5) |- (-3,-48) |- (0,-2);
-\node[font=\scriptsize, fill=white, inner sep=1pt] at (120,-48) {set phase, observe reward};
-
-% ================================================================ 4. Learn
-% per-city worker: replay buffer + Double DQN update
-\begin{scope}[shift={(0,-58)}]
-  \draw[rounded corners=2pt, black!50, dashed] (0,4) rectangle (64,-12);
-  \node[font=\scriptsize, black!60, anchor=south east] at (63.5,-11.6) {one worker per city};
-  % replay
-  \foreach \k in {0,...,4}{\draw[cell, fill=soft] (4,{1-1.6*\k}) rectangle (16,{-0.2-1.6*\k});}
-  \node[font=\scriptsize] at (10,-9.6) {replay};
-  \node[box, minimum width=17mm] (dq) at (32,-3.4) {Double DQN\\Huber, target net};
-  \draw[sm] (16.5,-3.4) -- (dq.west);
-  \node[font=\scriptsize] (thc) at (52,-3.4) {$\theta_c$};
-  \draw[sm] (dq.east) -- (thc.west);
-  
-\end{scope}
-\draw[sm] (10,-48) -- (10,-56.5);
-% server
-\node[box, minimum width=22mm, minimum height=7mm] (srv) at (88,-61.4)
-  {$\theta=\sum_c \frac{n_c}{n}\,\theta_c$};
-\draw[sm] (54.5,-61.4) -- node[above, font=\scriptsize] {$\times 3$} (srv.west);
-\draw[aracc] (srv.north) -- node[pos=0.55, right, font=\scriptsize, text=acc] {$\theta$} (88,-40.5);
-% unseen network
-\draw[dashed, acc, line width=0.6pt] (118,-55) rectangle (158,-68);
-\gridicon{(125,-61.5)}{4}{4}
-\node[tag, text=acc] at (132,-61.5) {unseen network\\no retraining};
-\draw[aracc, dashed] (srv.east) -- (117.6,-61.5);
+\node[font=\scriptsize] at (154,-34.5) {to signal};
 \end{tikzpicture}

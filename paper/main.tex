@@ -247,21 +247,19 @@ Section~\ref{sec:control} verifies directly.}
 \begin{figure*}[t]
 \centering
 \resizebox{\textwidth}{!}{\input{figures/fig_arch.tex}}
-\caption{System pipeline. \emph{Discover}, once per network, from the SUMO net
-and signal program: the $K$-hop graph of signalized intersections, the lanes each phase
-gives green, and the number of legal phases. \emph{Observe}, every 5\,s per
-intersection: lane features sorted by queue, a summary per neighbor with its validity
-mask (links dropped at random to model unreliable communication), and one descriptor $\phi(a)$ per
-candidate phase. \emph{Decide}: the own encoding queries the neighbor encodings through
+\caption{Architecture. \emph{Discover}, once per network, from the SUMO net and
+signal program: the $K$-hop neighbors of each signal on the road graph, the lanes each
+phase gives green, and the legal phases. \emph{Observe}, every 5\,s per intersection:
+lane features sorted by queue, a summary per neighbor with a validity mask (links
+dropped at random to model unreliable communication), and one descriptor $\phi(a)$ per
+candidate phase. \emph{Decide}: the encoded own lanes query the encoded neighbors through
 masked attention; the fused state $h$ is joined with each $\phi(a)$ and scored by one
-shared $f_\psi$, and the best legal phase is applied. \emph{Learn}: each training
-network runs its own worker with a replay buffer and Double DQN updates; the server
-averages the parameters by sample count and the result is applied to an unseen network
-without retraining.}
+shared $f_\psi$, and the best legal phase is applied to the signal. All learned
+parameters form $\theta$.}
 \label{fig:arch}
 \end{figure*}
 
-Fig.~\ref{fig:arch} shows the full pipeline; the subsections below follow its stages.
+Fig.~\ref{fig:arch} shows the architecture and Fig.~\ref{fig:train} the training loop.
 
 \subsection{Shared observation}
 Every intersection in every network emits a tuple of identical shape
@@ -379,6 +377,18 @@ $\theta$, trains each city for $E$ local episodes, and aggregates by sample-coun
 weighting. For the indexed readout, row $k$ is averaged only over cities that use it;
 readouts without per-action rows reduce to plain averaging. The aggregate is evaluated
 after every round on a network excluded from training.
+
+\begin{figure*}[t]
+\centering
+\resizebox{0.92\textwidth}{!}{\input{figures/fig_train.tex}}
+\caption{Federated training. Each round $r$, the server broadcasts $\theta^{(r)}$ to one
+persistent worker per training network. A worker acts $\varepsilon$-greedily in its own
+simulator for $E$ episodes, stores transitions in its replay buffer, and updates its
+copy $\theta_c$ with Double DQN targets from a target network. The server averages the
+returned parameters weighted by sample count $n_c$ and evaluates the result greedily on
+the unseen network after every round.}
+\label{fig:train}
+\end{figure*}
 
 % =============================================================================
 \section{Experimental Setup}\label{sec:setup}

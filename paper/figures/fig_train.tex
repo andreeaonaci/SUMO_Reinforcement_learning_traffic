@@ -1,0 +1,78 @@
+% Federated training loop, read off the code:
+%   server   federated/parallel_server.py ParallelFederatedServer.run: broadcast,
+%            collect (state_dict, n_samples), aggregate_round (sample-weighted),
+%            HoldoutEvaluator.evaluate on the unseen network, checkpoint each round
+%   worker   _client_worker: one persistent process per city keeping its SUMO env,
+%            replay buffer and optimizer across rounds; agent.start_round(global) then
+%            agent.train(env, episodes=E) -- epsilon-greedy acting, replay,
+%            Double DQN targets from a target network, Huber loss, Adam
+% Input from main.tex inside a figure*; uses its colours and arrow styles.
+\begin{tikzpicture}[x=1mm,y=1mm, font=\footnotesize,
+  box/.style  ={draw, rounded corners=1.5pt, fill=white, inner sep=2pt, font=\scriptsize,
+                align=center, minimum height=6mm},
+  pol/.style  ={draw=acc, line width=0.8pt, fill=accbg, rounded corners=1.5pt,
+                inner sep=2pt, font=\scriptsize, align=center, minimum height=7mm, minimum width=13mm},
+  card/.style ={draw=black!50, rounded corners=2pt, fill=white},
+  cell/.style ={draw=black!45, line width=0.3pt},
+  road/.style ={line width=0.6pt, black!55},
+  sm/.style   ={-{Stealth[length=3.5pt]}, line width=0.5pt},
+  lbl/.style  ={font=\scriptsize},
+]
+\newcommand{\gridicon}[3]{%
+  \begin{scope}[shift={#1}]
+    \foreach \t in {1,...,#2}{\pgfmathsetmacro{\p}{-5+10*\t/(#2+1)}\draw[road] (\p,-5) -- (\p,5);}
+    \foreach \u in {1,...,#3}{\pgfmathsetmacro{\q}{-5+10*\u/(#3+1)}\draw[road] (-5,\q) -- (5,\q);}
+    \foreach \t in {1,...,#2}{\foreach \u in {1,...,#3}{
+      \pgfmathsetmacro{\p}{-5+10*\t/(#2+1)}\pgfmathsetmacro{\q}{-5+10*\u/(#3+1)}
+      \fill[black!80] (\p,\q) circle (0.5);}}
+  \end{scope}}
+
+% ================================================================ server
+\node[font=\small\bfseries, anchor=west] at (0,2) {Server};
+\node[box, minimum width=30mm, minimum height=8mm] (srv) at (62,2)
+  {$\theta^{(r+1)}=\sum_c \frac{n_c}{n}\,\theta_c$};
+
+% ================================================================ workers
+% stacked cards: one persistent worker process per training network
+\draw[card, fill=soft] (17,-10) rectangle (117,-52);
+\draw[card, fill=soft!60] (13.5,-13.5) rectangle (113.5,-55.5);
+\draw[card] (10,-17) rectangle (110,-59);
+\node[lbl, black!60, anchor=north east, inner sep=0.6pt] at (116.6,-10.3) {\texttt{ingolstadt7}};
+\node[lbl, black!60, anchor=north east, inner sep=0.6pt] at (113.1,-13.8) {\texttt{cologne3}};
+\node[lbl, anchor=north west] at (11,-17.6) {\texttt{arterial4x4} worker};
+\node[lbl, black!60, anchor=south east] at (109.4,-58.4) {$E$ episodes per round, state kept across rounds};
+
+% broadcast down, updates up
+\draw[aracc] ([xshift=-6mm]srv.south) -- node[left, pos=0.35, lbl, text=acc] {$\theta^{(r)}$} (56,-16.6);
+\draw[sm] (68,-9.6) -- node[right, lbl] {$\theta_c,\; n_c$} ([xshift=6mm]srv.south);
+
+% SUMO environment
+\fill[soft] (16,-25) rectangle (30,-39);
+\gridicon{(23,-32)}{3}{3}
+\node[lbl] at (23,-42) {SUMO};
+
+% online policy
+\node[pol] (pol) at (54,-31) {policy $\theta_c$\\[-1pt]$\varepsilon$-greedy};
+\draw[sm] (30.5,-28) -- node[above, lbl] {$o,\ r$} ([yshift=3mm]pol.west);
+\draw[sm] ([yshift=-3mm]pol.west) -- node[below, lbl] {$a$} (30.5,-34);
+
+% replay buffer
+\foreach \k in {0,...,4}{\draw[cell, fill=soft] (47,{-44-1.5*\k}) rectangle (61,{-45.1-1.5*\k});}
+\node[lbl, anchor=east] at (46.5,-47.5) {replay};
+\draw[sm] (pol.south) -- node[right, lbl] {$(o,a,r,o')$} (54,-43.5);
+
+% target network and update
+\node[box, minimum width=14mm] (tgt) at (88,-26) {target $\theta_c^{-}$};
+\node[box, minimum width=18mm] (upd) at (88,-48) {Double DQN\\Huber, Adam};
+\draw[sm] (61.5,-48) -- node[below, lbl] {batch} (upd.west);
+\draw[sm] (tgt.south) -- (upd.north);
+\draw[sm, dashed, black!60] ([yshift=2mm]pol.east) -- node[above, lbl, black!60] {copy} (tgt.west);
+\draw[sm] ([xshift=1mm, yshift=-1mm]upd.north west) -- node[below left, lbl, pos=0.45] {update} ([yshift=-2.5mm]pol.east);
+
+% ================================================================ evaluation
+\draw[dashed, acc, line width=0.6pt, rounded corners=2pt] (122,-17) rectangle (172,-46);
+\gridicon{(147,-27)}{4}{4}
+\node[lbl, text=acc] at (147,-35.5) {unseen network};
+\node[lbl, align=center] at (147,-41) {greedy, 5 episodes,\\checkpoint};
+\draw[aracc] (srv.east) -| node[pos=0.25, above, lbl, text=acc] {$\theta^{(r+1)}$, every round} (147,-16.6);
+\end{tikzpicture}
