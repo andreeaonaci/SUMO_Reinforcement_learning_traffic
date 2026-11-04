@@ -324,20 +324,20 @@ hurts); in-distribution competitiveness with `max_pressure`; any absolute Ingols
 
 ### THE PAPER EXISTS — `paper/main.tex`, and it is the current deliverable
 
-A complete IEEEtran draft, **9 pages** (restructured 2026-09-30 into standard IEEE order:
-Introduction, Related Work, Problem Formulation, Method, Experimental Setup incl. Baselines and
-Metrics, Results incl. §VI-F comparison with Braun at six seeds (`tab:braun`), §VI-G unseen RESCO networks
-cologne1/cologne8/ingolstadt21 zero-shot (`tab:unseen`, §112b) and one-episode fine-tune
-(`tab:unseen_ft`, §113c), Analysis incl. the
-re-evaluation of the 41 interventions, Discussion and Limitations, Conclusion). The narrative
-"Experimental Programme" / "Intervention Corpus" chapters were removed; their facts live in
-Analysis. Keep new text in objective IEEE register, no story telling. 31 verified references,
-compiles clean from the repo root or `paper/` (`pdflatex` twice, no undefined refs).
+A complete IEEEtran draft, **10 pages**, rewritten 2026-11-04 at the user's request: **plain,
+explicit, short sentences** (easy to review) and **ONE system figure** (`fig:arch`, which now
+includes the federated training round) plus the per-round results plot — do not add diagrams.
+Order: Introduction, Related Work, Problem Formulation, Method, Experimental Setup, Results,
+Analysis, Discussion and Limitations, Conclusion. Results = six questions, each written as
+Test / Result / Answer: §VI-A cause of failure (`tab:control`), §VI-B unseen test network
+(`tab:zeroshot`, 3 s only), §VI-C other unseen RESCO networks incl. one-episode fine-tune (one
+merged `tab:unseen`, §112b/§113c), §VI-D training networks (`tab:indist`), §VI-E longer training
++ FRAP (`tab:budget`, 2 s), §VI-F Braun (`tab:braun`). Method arms are named Indexed /
+Phase-relational / FRAP (no A/B/C letters). 31 verified references, compiles clean from the repo
+root or `paper/` (`pdflatex` twice, no undefined refs).
 Title: *Phase-Relational Q-Learning: Configuration-Free Traffic Signal Control Across
-Heterogeneous Intersection Topologies*. It carries the full experimental programme, three TikZ
-system diagrams, the setup/provenance tables, the RESCO in-distribution comparisons, the
-41-intervention inventory (the prose once said "thirty"; §107 addendum), the
-evaluation-artifact section and the limitations. **Do not start a
+Heterogeneous Intersection Topologies*. It also carries the setup/provenance tables, the
+41-intervention inventory, the evaluation-errors section and the limitations. **Do not start a
 new paper file** — extend this one.
 
 Structural rules it already follows, which must be preserved:
