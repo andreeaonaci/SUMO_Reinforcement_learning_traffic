@@ -16,15 +16,15 @@
 \usetikzlibrary{arrows.meta,positioning,calc,shapes.geometric,decorations.pathreplacing}
 \usepackage[hidelinks]{hyperref}
 
-\definecolor{acc}{HTML}{A85A0A}
-\definecolor{accbg}{HTML}{F6E9D6}
-\definecolor{fail}{HTML}{7A2E6E}
-\definecolor{soft}{HTML}{EDEFF1}
+\usepackage[scaled=0.92]{helvet}  % sans-serif used only inside the system figure
 
-\tikzset{
-  ar/.style    ={-{Stealth[length=5pt]}, line width=0.5pt},
-  aracc/.style ={ar, draw=acc, line width=0.9pt},
-}
+% Figure palette (Okabe-Ito, colour-blind safe). One colour per role:
+% simulator, observation, learned parameters, the phase-feature path, federation.
+\definecolor{cSim}{HTML}{0072B2}  \definecolor{cSimbg}{HTML}{E6F0F8}
+\definecolor{cObs}{HTML}{009E73}  \definecolor{cObsbg}{HTML}{E6F5F0}
+\definecolor{cLrn}{HTML}{E69F00}  \definecolor{cLrnbg}{HTML}{FDF3DC}
+\definecolor{cKey}{HTML}{D55E00}
+\definecolor{cFed}{HTML}{8E4A86}  \definecolor{cFedbg}{HTML}{F3EAF2}
 
 % Let LaTeX pack floats with text more aggressively. This paper is float-heavy
 % (10 tables, 2 figures, a full-width inventory) and the defaults reserve more of
@@ -207,16 +207,16 @@ The second does not. Section~\ref{sec:control} tests which one causes the failur
 
 \begin{figure*}[t]
 \centering
-\resizebox{\textwidth}{!}{\input{figures/fig_arch.tex}}
-\caption{The complete system. \emph{Discover} (once per network, from the SUMO network
-and signal program): the $K$-hop neighbors of each signal, the lanes each phase gives
-green, and the legal phases. \emph{Observe} (every 5\,s at each intersection): lane
-features sorted by queue; a summary of each neighbor with a validity mask (links are
-dropped at random to model unreliable communication); and one feature vector $\phi(a)$
-per candidate phase. \emph{Decide}: the encoded own lanes attend to the encoded
-neighbors; the resulting state $h$ is joined with each $\phi(a)$ and scored by one shared
-network $f_\psi$; the best legal phase is sent to the signal. \emph{Train}: one round of
-federated training of the shared parameters $\theta$.}
+\input{figures/fig_arch.tex}
+\caption{The complete system. (a)~At every intersection and every 5\,s, the
+observation is read from SUMO: lane features sorted by queue, a summary of each neighbor
+(with a validity mask; links are dropped at random to model unreliable communication),
+ten features per candidate phase, and the mask of legal phases. The shared encoder turns
+the lane and neighbor features into a state vector $h$. One shared scorer $f_\psi$ rates
+every phase from $[h\,\|\,\phi(a)]$, and the best legal phase is applied. The encoder and
+$f_\psi$ together form $\theta$; no parameter depends on the number of phases. (b)~In each
+federated round, every worker keeps its own simulator, replay buffer and optimizer; only
+$\theta$ and the sample count $n_c$ are exchanged.}
 \label{fig:arch}
 \end{figure*}
 

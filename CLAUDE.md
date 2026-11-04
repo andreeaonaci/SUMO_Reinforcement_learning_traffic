@@ -327,6 +327,8 @@ hurts); in-distribution competitiveness with `max_pressure`; any absolute Ingols
 A complete IEEEtran draft, **10 pages**, rewritten 2026-11-04 at the user's request: **plain,
 explicit, short sentences** (easy to review) and **ONE system figure** (`fig:arch`, which now
 includes the federated training round) plus the per-round results plot — do not add diagrams.
+`fig:arch` is drawn at TRUE print size (8/7 pt sans, Okabe-Ito colour per role, palette in
+the `main.tex` preamble) — never wrap it in `\resizebox`, that is what made it unreadable before.
 Order: Introduction, Related Work, Problem Formulation, Method, Experimental Setup, Results,
 Analysis, Discussion and Limitations, Conclusion. Results = six questions, each written as
 Test / Result / Answer: §VI-A cause of failure (`tab:control`), §VI-B unseen test network
