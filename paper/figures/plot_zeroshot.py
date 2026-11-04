@@ -75,8 +75,8 @@ def main():
     })
 
     fig, ax = plt.subplots(figsize=(3.45, 2.15))
-    for key, colour, marker, label in (("indexed", INDEX_C, "s", "A. Indexed"),
-                                       ("phase", PHASE_C, "o", "B. Phase-relational")):
+    for key, colour, marker, label in (("indexed", INDEX_C, "s", "Indexed"),
+                                       ("phase", PHASE_C, "o", "Phase-relational (ours)")):
         mean, lo, hi = costs(args.results, RUNS[key])
         x = list(range(1, len(mean) + 1))
         ax.fill_between(x, lo, hi, color=colour, alpha=0.16, linewidth=0)

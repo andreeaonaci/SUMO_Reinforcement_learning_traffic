@@ -5,7 +5,7 @@
 %             NeighborSummaryExtractor (K_max x 3, mask, hop), PhaseFeatureExtractor (A x 10),
 %             federated/comm_dropout.py CommDropoutWrapper
 %   Decide    agents/networks.py NeighborAttentionQNetwork.forward_phase
-% Training is drawn separately in fig_train.tex.
+%   Train     federated/parallel_server.py ParallelFederatedServer (one round)
 % Input from main.tex inside a figure*; uses its colours and arrow styles.
 \begin{tikzpicture}[x=1mm,y=1mm, font=\footnotesize,
   hdr/.style  ={font=\small\bfseries, anchor=west},
@@ -139,4 +139,15 @@
 \draw[acc, line width=0.7pt] (150.6,-31.9) rectangle (157.4,-25.1);
 \draw[aracc] (am.east) -- (150.4,-28.5);
 \node[font=\scriptsize] at (154,-34.5) {to signal};
+% ================================================================ 4. Train (one federated round)
+\node[hdr] at (0,-52) {Train};
+\node[font=\scriptsize, black!55, anchor=west] at (14.5,-52) {each round};
+\begin{scope}[every node/.append style={minimum height=9mm}]
+\node[box, text width=27mm] (t1) at (47,-52) {server sends $\theta$ to one\\worker per training city};
+\node[box, text width=33mm] (t2) at (84,-52) {each worker trains its copy $\theta_c$\\for $E$ episodes (Double DQN)};
+\node[box, text width=29mm] (t3) at (121,-52) {server averages the copies:\\$\theta\leftarrow\textstyle\sum_c n_c\theta_c\,/\sum_c n_c$};
+\node[box, text width=21mm] (t4) at (152,-52) {test $\theta$ on an\\unseen network};
+\end{scope}
+\draw[sm] (t1) -- (t2); \draw[sm] (t2) -- (t3); \draw[sm] (t3) -- (t4);
+\draw[sm] (t4.south) -- ++(0,-3) -| node[pos=0.25, below, font=\tiny] {next round} (t1.south);
 \end{tikzpicture}
